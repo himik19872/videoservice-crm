@@ -4,6 +4,7 @@ services:
   db:
     image: postgres:15-alpine
     container_name: crm_db
+    restart: always
     environment:
       POSTGRES_DB: crm
       POSTGRES_USER: crm_user
@@ -16,6 +17,7 @@ services:
   web:
     build: ./backend
     container_name: crm_web
+    restart: always
     command: >
       sh -c "python manage.py migrate &&
              python manage.py loaddata regions.json &&
