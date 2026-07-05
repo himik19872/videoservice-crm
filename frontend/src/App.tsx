@@ -28,6 +28,8 @@ import AdminSettingsPage from './pages/settings/AdminSettingsPage';
 import MaxSettingsPage from './pages/settings/MaxSettingsPage';
 import SystemSettingsPage from './pages/settings/SystemSettingsPage';
 import ReportsPage from './pages/reports/ReportsPage';
+import FinancePage from './pages/reports/FinancePage';
+import InventoryPage from './pages/equipment/InventoryPage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
@@ -113,6 +115,8 @@ function AppContent() {
         <Route path="/settings/admin" element={<AdminSettingsPage />} />
         <Route path="/dispatchers" element={<DispatchersPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/finance" element={<FinancePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>

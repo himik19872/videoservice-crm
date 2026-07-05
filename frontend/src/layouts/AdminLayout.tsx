@@ -12,6 +12,8 @@ import {
   HomeOutlined,
   SettingOutlined,
   CheckCircleOutlined,
+  ShopOutlined,
+  DollarOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -84,6 +86,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/buildings',
       icon: <HomeOutlined />,
       label: 'Дома',
+    },
+    {
+      key: '/inventory',
+      icon: <ShopOutlined />,
+      label: 'Склад',
+    },
+    {
+      key: '/finance',
+      icon: <DollarOutlined />,
+      label: 'Финансы',
     },
     {
       key: '/reports',

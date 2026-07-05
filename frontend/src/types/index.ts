@@ -287,3 +287,76 @@ export interface BuildingFormValues {
   equipment_type: string;
   notes?: string;
 }
+
+// Склад
+export interface InventoryItem {
+  id: number;
+  name: string;
+  item_type: string;
+  item_type_display: string;
+  serial_number: string;
+  model_name: string;
+  quantity: number;
+  unit: string;
+  cost_price: number | null;
+  sale_price: number | null;
+  total_value: number | null;
+  status: string;
+  status_display: string;
+  location: string;
+  supplier: string;
+  warranty_months: number;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryMovement {
+  id: number;
+  movement_type: string;
+  movement_type_display: string;
+  item_name: string;
+  master_name: string;
+  order_number: string;
+  performed_by_name: string;
+  quantity: number;
+  notes: string;
+  created_at: string;
+  item: number;
+  master: number | null;
+  order: number | null;
+}
+
+// Финансы
+export interface Payment {
+  id: number;
+  order: number;
+  order_number: string;
+  amount: number;
+  payment_method: string;
+  payment_method_display: string;
+  is_received: boolean;
+  paid_at: string;
+  received_by_name: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface MasterSalary {
+  id: number;
+  master: number;
+  master_name: string;
+  period_start: string;
+  period_end: string;
+  orders_total: number;
+  orders_completed: number;
+  total_revenue: number;
+  commission_percent: number;
+  bonus: number;
+  deduction: number;
+  total_salary: number;
+  status: string;
+  status_display: string;
+  notes: string;
+  created_at: string;
+}
