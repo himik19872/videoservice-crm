@@ -46,7 +46,7 @@ function AppContent() {
     return <LoginPage />;
   }
 
-  if (user?.role === 'master') {
+  if (user?.role === 'master' || user?.role === 'installer') {
     return (
       <MasterLayout>
         <Routes>

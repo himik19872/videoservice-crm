@@ -7,7 +7,7 @@ interface User {
   email: string;
   first_name: string;
   last_name: string;
-  role: 'admin' | 'dispatcher' | 'master';
+  role: 'admin' | 'dispatcher' | 'master' | 'installer' | 'engineer' | 'chief_engineer' | 'supervisor' | 'tech_director' | 'executive_director' | 'general_director';
   master_profile?: {
     id: number;
     phone: string;

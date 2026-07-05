@@ -12,12 +12,23 @@ const OrdersCreatePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [regions, setRegions] = useState([]);
   const [clients, setClients] = useState([]);
+  const [users, setUsers] = useState([]);
   const [form] = Form.useForm();
 
   React.useEffect(() => {
     fetchRegions();
     fetchClients();
+    fetchUsers();
   }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/users/');
+      setUsers((response.data.results || response.data).map((u: any) => ({...u, full_name: u.user?.first_name ? `${u.user.last_name} ${u.user.first_name}`.trim() : u.user?.username, role: u.role})));
+    } catch (error) {
+      console.error('Ошибка загрузки пользователей:', error);
+    }
+  };
 
   const fetchRegions = async () => {
     try {
@@ -99,9 +110,22 @@ const OrdersCreatePage: React.FC = () => {
           rules={[{ required: true, message: 'Выберите тип заявки' }]}
         >
           <Select placeholder="Выберите тип">
-            <Select.Option value="repair">Ремонт</Select.Option>
-            <Select.Option value="connection">Подключение</Select.Option>
-            <Select.Option value="sale">Продажа</Select.Option>
+            <Select.Option value="repair">🔧 Ремонт</Select.Option>
+            <Select.Option value="sale">💰 Продажа оборудования</Select.Option>
+            <Select.Option value="installation">🏗️ Монтаж оборудования</Select.Option>
+            <Select.Option value="maintenance">🔄 Сервисное ТО</Select.Option>
+            <Select.Option value="inspection">🔍 Обследование</Select.Option>
+            <Select.Option value="contract_install">📝 Договор на монтаж</Select.Option>
+            <Select.Option value="contract_service">📋 Договор на обслуживание</Select.Option>
+            <Select.Option value="connection">🔌 Подключение</Select.Option>
+          </Select>
+        </Form.Item>
+
+        <Form.Item name="helper_ids" label="👥 Помощники">
+          <Select mode="multiple" placeholder="Выберите сотрудников в помощь" allowClear>
+            {users.map((u: any) => (
+              <Select.Option key={u.id} value={u.id}>{u.full_name || u.username} ({u.role})</Select.Option>
+            ))}
           </Select>
         </Form.Item>
 

@@ -86,11 +86,16 @@ class UserProfile(models.Model):
         ('admin', _('Администратор')),
         ('dispatcher', _('Диспетчер')),
         ('master', _('Мастер')),
+        ('installer', _('Монтажник')),
         ('engineer', _('Инженер')),
-        ('supervisor', _('Руководитель сервисной службы')),
+        ('chief_engineer', _('Главный инженер')),
+        ('supervisor', _('Начальник сервисной службы')),
+        ('tech_director', _('Технический директор')),
+        ('executive_director', _('Исполнительный директор')),
+        ('general_director', _('Генеральный директор')),
     ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile', verbose_name=_('Пользователь'))
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='master', verbose_name=_('Роль'))
+    role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='master', verbose_name=_('Роль'))
     phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
     is_on_shift = models.BooleanField(default=False, verbose_name=_('На смене'))
     shift_started_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Смена начата'))
@@ -177,8 +182,13 @@ class Order(models.Model):
     """Заявка"""
     ORDER_TYPES = [
         ('repair', _('Ремонт')),
+        ('sale', _('Продажа оборудования')),
+        ('maintenance', _('Сервисное ТО')),
+        ('installation', _('Монтаж оборудования')),
+        ('contract_install', _('Договор на монтаж')),
+        ('contract_service', _('Договор на обслуживание')),
+        ('inspection', _('Обследование')),
         ('connection', _('Подключение')),
-        ('sale', _('Продажа')),
     ]
 
     STATUS_CHOICES = [
@@ -208,7 +218,8 @@ class Order(models.Model):
     number = models.CharField(max_length=20, unique=True, verbose_name=_('Номер'), default=generate_order_number)
     order_type = models.CharField(max_length=20, choices=ORDER_TYPES, verbose_name=_('Тип заявки'))
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='orders', verbose_name=_('Клиент'))
-    master = models.ForeignKey(Master, on_delete=models.SET_NULL, null=True, related_name='orders', verbose_name=_('Мастер'))
+    master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, related_name='orders', verbose_name=_('Исполнитель'))
+    helpers = models.ManyToManyField(User, blank=True, related_name='helper_orders', verbose_name=_('Помощники'))
     equipment = models.ForeignKey(Equipment, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders', verbose_name=_('Оборудование'))
     building = models.ForeignKey('Building', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders', verbose_name=_('Дом'))
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, related_name='orders', verbose_name=_('Район'))

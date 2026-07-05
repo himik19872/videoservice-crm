@@ -203,6 +203,7 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     payment_type_display = serializers.SerializerMethodField()
     confirmed_by = serializers.SerializerMethodField()
+    helpers = serializers.SerializerMethodField()
     history = OrderHistorySerializer(many=True, read_only=True)
     media = OrderMediaSerializer(many=True, read_only=True)
 
@@ -218,12 +219,12 @@ class OrderSerializer(serializers.ModelSerializer):
             'photo_report_required', 'deadline',
             'assigned_at', 'scheduled_at', 'accepted_at', 'started_at', 'paused_at',
             'completed_at', 'confirmed_at', 'confirmed_by',
-            'history', 'media', 'created_at', 'updated_at'
+            'helpers', 'history', 'media', 'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'number', 'assigned_at', 'scheduled_at', 'accepted_at', 'started_at',
             'paused_at', 'completed_at', 'confirmed_at', 'confirmed_by',
-            'created_at', 'updated_at', 'history', 'media'
+            'created_at', 'updated_at', 'helpers', 'history', 'media'
         ]
 
     def get_client_info(self, obj):
@@ -264,6 +265,9 @@ class OrderSerializer(serializers.ModelSerializer):
             }
         return None
 
+    def get_helpers(self, obj):
+        return [{'id': u.id, 'username': u.username, 'full_name': u.get_full_name() or u.username} for u in obj.helpers.all()]
+
 
 class ReportSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
@@ -295,6 +299,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     building_id = serializers.PrimaryKeyRelatedField(
         queryset=Building.objects.all(), source='building', required=False, allow_null=True
     )
+    helper_ids = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(), many=True, required=False, write_only=True
+    )
 
     class Meta:
         model = Order
@@ -303,7 +310,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             'building_id', 'region_id',
             'city', 'street_name', 'house_number', 'building_number', 'apartment', 'entrance', 'address',
             'description', 'priority',
-            'cost', 'payment_type', 'photo_report_required', 'deadline', 'scheduled_at'
+            'cost', 'payment_type', 'photo_report_required', 'deadline', 'scheduled_at',
+            'helper_ids'
         ]
 
 

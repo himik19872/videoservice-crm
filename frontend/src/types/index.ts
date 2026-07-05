@@ -50,7 +50,7 @@ export interface Equipment {
 export interface Order {
   id: number;
   number: string;
-  order_type: 'repair' | 'connection' | 'sale';
+  order_type: 'repair' | 'sale' | 'maintenance' | 'installation' | 'contract_install' | 'contract_service' | 'inspection' | 'connection';
   client: Client;
   client_id: number;
   client_info?: ClientInfo;
@@ -90,6 +90,7 @@ export interface Order {
   deadline?: string | null;
   history?: OrderHistory[];
   media?: OrderMedia[];
+  helpers?: { id: number; username: string; full_name: string }[];
 }
 
 export interface OrderMedia {

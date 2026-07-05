@@ -300,30 +300,37 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         role = profile.role
 
-        # Админ, диспетчер, руководитель — видят все заявки
-        if role in ('admin', 'dispatcher', 'supervisor'):
+        # Админ, диспетчер, главный инженер, техдиректор, исполнительный, гендиректор — видят все заявки
+        if role in ('admin', 'dispatcher', 'chief_engineer', 'tech_director', 'executive_director', 'general_director'):
             return queryset
 
-        # Мастер — только свои
-        if role == 'master':
+        # Мастер, монтажник — только свои
+        if role in ('master', 'installer'):
             try:
                 master = user.master_profile
-                return queryset.filter(master=master)
+                return queryset.filter(Q(master=master) | Q(helpers=user))
             except Master.DoesNotExist:
                 return Order.objects.none()
 
-        # Инженер — заявки где нужна помощь или он назначен
-        if role == 'engineer':
+        # Инженер, начальник сервисной службы — заявки где нужна помощь или они помощники
+        if role in ('engineer', 'supervisor'):
             return queryset.filter(
-                Q(status='need_help') | Q(master__user=user)
+                Q(status='need_help') | Q(master__user=user) | Q(helpers=user)
             )
 
-        return Order.objects.none()
+        # Помощники в любых ролях видят свои заявки
+        return queryset.filter(Q(helpers=user) | Q(master__user=user)).distinct()
 
     def create(self, request, *args, **kwargs):
         serializer = OrderCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
+
+        # Добавляем помощников
+        helper_ids = request.data.get('helper_ids', [])
+        if helper_ids:
+            from django.contrib.auth.models import User as AuthUser
+            order.helpers.set(AuthUser.objects.filter(id__in=helper_ids))
 
         # Создаем запись в истории
         OrderHistory.objects.create(
@@ -538,6 +545,21 @@ class OrderViewSet(viewsets.ModelViewSet):
         # Клиенту НЕ отправляем — ждём подтверждения диспетчером (confirm)
 
         return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
+    def helpers(self, request, pk=None):
+        """Добавить/убрать помощников к заявке"""
+        order = self.get_object()
+        helper_ids = request.data.get('helper_ids', [])
+        if not helper_ids:
+            return Response({'error': 'Укажите helper_ids (список ID пользователей)'}, status=400)
+        from django.contrib.auth.models import User as AuthUser
+        users = AuthUser.objects.filter(id__in=helper_ids)
+        order.helpers.set(users)
+        return Response({
+            'ok': True,
+            'helpers': [{'id': u.id, 'username': u.username, 'full_name': u.get_full_name() or u.username} for u in users]
+        })
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
