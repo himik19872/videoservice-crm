@@ -326,12 +326,6 @@ class OrderViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
 
-        # Добавляем помощников
-        helper_ids = request.data.get('helper_ids', [])
-        if helper_ids:
-            from django.contrib.auth.models import User as AuthUser
-            order.helpers.set(AuthUser.objects.filter(id__in=helper_ids))
-
         # Создаем запись в истории
         OrderHistory.objects.create(
             order=order,

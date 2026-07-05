@@ -314,6 +314,13 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             'helper_ids'
         ]
 
+    def create(self, validated_data):
+        helper_ids = validated_data.pop('helper_ids', [])
+        order = Order.objects.create(**validated_data)
+        if helper_ids:
+            order.helpers.set(helper_ids)
+        return order
+
 
 class OrderStatusUpdateSerializer(serializers.ModelSerializer):
     notes = serializers.CharField(required=False, allow_blank=True, write_only=True)
