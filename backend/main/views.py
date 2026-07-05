@@ -11,6 +11,7 @@ from datetime import timedelta
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, UserProfile, WorkShift, OrderMedia, PushToken
 from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
+from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -539,6 +540,57 @@ class OrderViewSet(viewsets.ModelViewSet):
         # Клиенту НЕ отправляем — ждём подтверждения диспетчером (confirm)
 
         return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
+    def receive_payment(self, request, pk=None):
+        """Мастер принимает оплату от клиента (нал/безнал/перевод)"""
+        order = self.get_object()
+        amount = request.data.get('amount')
+        method = request.data.get('payment_method', 'cash')
+        if not amount:
+            return Response({'error': 'Укажите amount'}, status=400)
+        try:
+            master = request.user.master_profile
+        except Exception:
+            return Response({'error': 'Только мастер может принимать оплату'}, status=403)
+        # Создаём платёж
+        payment = Payment.objects.create(
+            order=order, amount=float(amount), payment_method=method,
+            collected_by_master=master, collected_by_master_at=timezone.now(),
+            is_submitted_to_office=False, received_by=request.user
+        )
+        # Если наличные — создаём долг мастеру
+        if method == 'cash':
+            MasterCashDebt.objects.create(
+                master=master, order=order, amount=float(amount),
+                notes=f'Наличные от клиента по заявке {order.number}'
+            )
+        return Response({'ok': True, 'payment_id': payment.id})
+
+    @action(detail=True, methods=['post'])
+    def submit_cash(self, request, pk=None):
+        """Мастер сдал наличные в кассу"""
+        debt = MasterCashDebt.objects.filter(order_id=pk, is_paid_to_office=False).first()
+        if not debt:
+            return Response({'error': 'Нет неоплаченного долга по этой заявке'}, status=404)
+        debt.is_paid_to_office = True
+        debt.paid_to_office_at = timezone.now()
+        debt.accepted_by = request.user
+        debt.save()
+        return Response({'ok': True})
+
+    @action(detail=True, methods=['post'])
+    def return_item(self, request, pk=None):
+        """Мастер возвращает сломанное/старое оборудование на склад"""
+        debt = MasterInventoryDebt.objects.filter(order_id=pk, is_returned=False).first()
+        if not debt:
+            return Response({'error': 'Нет невозвращённого оборудования по этой заявке'}, status=404)
+        debt.is_returned = True
+        debt.returned_at = timezone.now()
+        debt.accepted_by = request.user
+        debt.condition = request.data.get('condition', 'broken')
+        debt.save()
+        return Response({'ok': True})
 
     @action(detail=True, methods=['post'])
     def helpers(self, request, pk=None):
@@ -1412,4 +1464,18 @@ class MasterSalaryViewSet(viewsets.ModelViewSet):
         salary.status = 'approved'
         salary.save(update_fields=['status'])
         return Response(MasterSalarySerializer(salary).data)
+
+    @action(detail=False, methods=['get'])
+    def master_debts(self, request):
+        """Долги мастеров по наличным и оборудованию"""
+        master_id = request.query_params.get('master_id')
+        cash_qs = MasterCashDebt.objects.select_related('master', 'master__user', 'order')
+        inv_qs = MasterInventoryDebt.objects.select_related('master', 'master__user', 'order', 'item')
+        if master_id:
+            cash_qs = cash_qs.filter(master_id=master_id, is_paid_to_office=False)
+            inv_qs = inv_qs.filter(master_id=master_id, is_returned=False)
+        return Response({
+            'cash_debts': [{'id': d.id, 'master': str(d.master), 'order': d.order.number, 'amount': float(d.amount), 'is_paid': d.is_paid_to_office} for d in cash_qs],
+            'inventory_debts': [{'id': d.id, 'master': str(d.master), 'order': d.order.number, 'description': d.description, 'is_returned': d.is_returned, 'condition': d.condition} for d in inv_qs],
+        })
 

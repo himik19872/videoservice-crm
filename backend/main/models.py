@@ -249,6 +249,7 @@ class Order(models.Model):
     completed_at = models.DateTimeField(blank=True, null=True, verbose_name=_('Завершена'))
     confirmed_at = models.DateTimeField(blank=True, null=True, verbose_name=_('Подтверждена'))
     confirmed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='confirmed_orders', verbose_name=_('Подтвердил'))
+    used_materials = models.ManyToManyField('InventoryItem', through='OrderMaterial', blank=True, related_name='used_in_orders', verbose_name=_('Материалы'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата создания'))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Дата обновления'))
     deadline = models.DateTimeField(blank=True, null=True, verbose_name=_('Срок выполнения'))
@@ -662,6 +663,9 @@ class Payment(models.Model):
     is_received = models.BooleanField(default=True, verbose_name=_('Получено'))
     paid_at = models.DateTimeField(default=timezone.now, verbose_name=_('Дата оплаты'))
     received_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='received_payments', verbose_name=_('Принял'))
+    collected_by_master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, blank=True, related_name='collected_payments', verbose_name=_('Мастер получил деньги'))
+    collected_by_master_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата получения денег мастером'))
+    is_submitted_to_office = models.BooleanField(default=False, verbose_name=_('Сдано в офис'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
 
@@ -715,3 +719,75 @@ class MasterSalary(models.Model):
 
     def __str__(self):
         return f'{self.master}: {self.total_salary} ₽ ({self.period_start} — {self.period_end})'
+
+
+# ══════════════════════════════════════════════════════════════════
+# Учёт долгов мастеров (наличные + оборудование)
+# ══════════════════════════════════════════════════════════════════
+
+class MasterCashDebt(models.Model):
+    """Долг мастера по наличным: получил от клиента → должен сдать в кассу"""
+    master = models.ForeignKey(Master, on_delete=models.CASCADE, related_name='cash_debts', verbose_name=_('Мастер'))
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='cash_debts', verbose_name=_('Заявка'))
+    amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_('Сумма'))
+    is_paid_to_office = models.BooleanField(default=False, verbose_name=_('Сдано в кассу'))
+    paid_to_office_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата сдачи в кассу'))
+    accepted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='accepted_cash', verbose_name=_('Принял в кассу'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+
+    class Meta:
+        verbose_name = _('Долг по наличным')
+        verbose_name_plural = _('Долги по наличным')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        status = '✅ сдано' if self.is_paid_to_office else '❌ не сдано'
+        return f'{self.master}: {self.amount} ₽ — {self.order.number} ({status})'
+
+
+class MasterInventoryDebt(models.Model):
+    """Оборудование, которое мастер должен вернуть (старое/сломанное после замены)"""
+    master = models.ForeignKey(Master, on_delete=models.CASCADE, related_name='inventory_debts', verbose_name=_('Мастер'))
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='inventory_debts', verbose_name=_('Заявка'))
+    item = models.ForeignKey(InventoryItem, on_delete=models.SET_NULL, null=True, related_name='master_debts', verbose_name=_('Позиция склада'))
+    description = models.CharField(max_length=300, verbose_name=_('Что нужно сдать'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    is_returned = models.BooleanField(default=False, verbose_name=_('Возвращено'))
+    returned_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата возврата'))
+    condition = models.CharField(max_length=20, choices=[('working', _('Рабочее')), ('broken', _('Сломанное')), ('repairable', _('Ремонтопригодное'))], default='broken', verbose_name=_('Состояние'))
+    accepted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='accepted_returns', verbose_name=_('Принял'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+
+    class Meta:
+        verbose_name = _('Долг по оборудованию')
+        verbose_name_plural = _('Долги по оборудованию')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        status = '✅ возвращено' if self.is_returned else '❌ не возвращено'
+        return f'{self.master}: {self.description} — {self.order.number} ({status})'
+
+
+class OrderMaterial(models.Model):
+    """Связь: материал, использованный в заявке (снят со склада)"""
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, verbose_name=_('Заявка'))
+    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, verbose_name=_('Материал'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    used_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Использован'))
+
+    class Meta:
+        verbose_name = _('Материал в заявке')
+        verbose_name_plural = _('Материалы в заявках')
+        unique_together = ['order', 'item']
+
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        if is_new:
+            self.item.quantity = max(0, self.item.quantity - self.quantity)
+            self.item.save(update_fields=['quantity', 'updated_at'])
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.item.name} x{self.quantity} → {self.order.number}'
