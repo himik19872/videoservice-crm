@@ -1,0 +1,44 @@
+const express = require('express');
+const http = require('http');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const API_HOST = process.env.API_HOST || 'localhost';
+const API_PORT = process.env.API_PORT || 8000;
+
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+function proxyRequest(req, res) {
+  const options = {
+    hostname: API_HOST, port: API_PORT, path: req.originalUrl,
+    method: req.method, headers: { ...req.headers },
+  };
+  delete options.headers.host;
+  if (options.headers['content-length'] === '0') delete options.headers['content-length'];
+  const proxyReq = http.request(options, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+  proxyReq.on('error', (e) => {
+    res.status(502).json({ error: 'Backend unavailable: ' + e.message });
+  });
+  if (req.method !== 'GET' && req.method !== 'HEAD') { req.pipe(proxyReq); }
+  else { proxyReq.end(); }
+}
+
+app.use('/api', proxyRequest);
+app.use('/admin', proxyRequest);
+app.use('/media', proxyRequest);
+
+const buildPath = path.join(__dirname, '..', 'frontend', 'build');
+app.use(express.static(buildPath));
+app.get('*', (req, res) => res.sendFile(path.join(buildPath, 'index.html')));
+
+app.listen(PORT, '0.0.0.0', () => console.log('CRM on 0.0.0.0:' + PORT));

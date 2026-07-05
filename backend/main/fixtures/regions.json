@@ -1,0 +1,42 @@
+[
+  {
+    "model": "main.region",
+    "pk": 1,
+    "fields": {
+      "name": "Центральный",
+      "description": "Центральный район города"
+    }
+  },
+  {
+    "model": "main.region",
+    "pk": 2,
+    "fields": {
+      "name": "Северный",
+      "description": "Северный район города"
+    }
+  },
+  {
+    "model": "main.region",
+    "pk": 3,
+    "fields": {
+      "name": "Южный",
+      "description": "Южный район города"
+    }
+  },
+  {
+    "model": "main.region",
+    "pk": 4,
+    "fields": {
+      "name": "Западный",
+      "description": "Западный район города"
+    }
+  },
+  {
+    "model": "main.region",
+    "pk": 5,
+    "fields": {
+      "name": "Восточный",
+      "description": "Восточн��й район города"
+    }
+  }
+]

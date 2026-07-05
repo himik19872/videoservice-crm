@@ -1,0 +1,81 @@
+# ======================
+# Python / Django
+# ======================
+__pycache__/
+*.py[cod]
+*.pyo
+*.swp
+*.swo
+*~
+*.sqlite3
+*.db
+*.log
+.env
+*.egg-info/
+dist/
+build/
+*.egg
+.DS_Store
+.idea/
+.vscode/
+*.bak
+
+# Django media/uploads
+media/
+staticfiles/
+
+# ======================
+# Node.js / Frontend
+# ======================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Production build (будет пересобираться на сервере)
+frontend/build/
+
+# ======================
+# Docker
+# ======================
+docker-compose.override.yml
+
+# ======================
+# Mobile (Expo)
+# ======================
+mobile/.expo/
+mobile/dist/
+mobile/node_modules/
+mobile/*.jks
+mobile/*.keystore
+*.apk
+*.aab
+*.ipa
+mobile/.expo-shared/
+
+# ======================
+# OS files
+# ======================
+Thumbs.db
+.DS_Store
+*.tmp
+
+# ======================
+# Project plans (local)
+# ======================
+.gigacode/
+
+# ======================
+# Python venv
+# ======================
+backend/venv/
+venv/
+.venv/
+
+# ======================
+# Secrets / Tokens
+# ======================
+*.secret
+*.token
+credentials.json
+service-account.json

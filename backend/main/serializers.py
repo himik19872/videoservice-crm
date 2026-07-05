@@ -1,0 +1,478 @@
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
+from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, OrderMedia, UserProfile, WorkShift, PushToken
+
+
+class UserSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+    master_profile = serializers.SerializerMethodField()
+    profile = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'master_profile', 'profile']
+
+    def get_role(self, obj):
+        try:
+            return obj.profile.role
+        except UserProfile.DoesNotExist:
+            if obj.is_superuser:
+                return 'admin'
+            if obj.is_staff:
+                return 'dispatcher'
+        return 'master'
+
+    def get_master_profile(self, obj):
+        try:
+            m = obj.master_profile
+            return {'id': m.id, 'phone': m.phone, 'region': m.region_id}
+        except Master.DoesNotExist:
+            return None
+
+    def get_profile(self, obj):
+        try:
+            p = obj.profile
+            return {
+                'role': p.role, 'phone': p.phone,
+                'is_on_shift': p.is_on_shift,
+                'shift_started_at': p.shift_started_at.isoformat() if p.shift_started_at else None,
+            }
+        except UserProfile.DoesNotExist:
+            # Авто-создаём профиль
+            if obj.is_superuser:
+                p = UserProfile.objects.create(user=obj, role='admin', phone='')
+            elif obj.is_staff:
+                p = UserProfile.objects.create(user=obj, role='dispatcher', phone='')
+            else:
+                p = UserProfile.objects.create(user=obj, role='master', phone='')
+            return {'role': p.role, 'phone': p.phone, 'is_on_shift': False, 'shift_started_at': None}
+
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+
+class RegionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Region
+        fields = ['id', 'name', 'description']
+
+
+class MasterSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    full_name = serializers.SerializerMethodField()
+    username = serializers.CharField(source='user.username', required=False)
+    password = serializers.CharField(source='user.password', write_only=True, required=False, allow_blank=True)
+    first_name = serializers.CharField(source='user.first_name', required=False)
+    last_name = serializers.CharField(source='user.last_name', required=False)
+    email = serializers.EmailField(source='user.email', required=False, allow_blank=True)
+    region = RegionSerializer(read_only=True)
+    region_id = serializers.PrimaryKeyRelatedField(
+        queryset=Region.objects.all(), source='region', write_only=True, required=False, allow_null=True
+    )
+    traccar_device = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Master
+        fields = [
+            'id', 'user', 'full_name', 'username', 'password',
+            'first_name', 'last_name', 'email', 'region', 'region_id',
+            'phone', 'is_available', 'created_at', 'traccar_device'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def get_traccar_device(self, obj):
+        try:
+            d = obj.traccar_device
+            return {
+                'id': d.id,
+                'device_name': d.device_name,
+                'internal_device_id': d.internal_device_id,
+                'unique_id': d.unique_id,
+                'last_latitude': d.last_latitude,
+                'last_longitude': d.last_longitude,
+                'last_speed': d.last_speed,
+                'last_update': d.last_update.isoformat() if d.last_update else None,
+                'is_online': d.is_online,
+            }
+        except Exception:
+            return None
+
+    def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop('user', {})
+        password = user_data.pop('password', None)
+
+        user = instance.user
+        for attr, value in user_data.items():
+            setattr(user, attr, value)
+        if password:
+            user.set_password(password)
+        user.save()
+
+        return super().update(instance, validated_data)
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(source='name')
+    region = RegionSerializer(read_only=True)
+    region_id = serializers.PrimaryKeyRelatedField(
+        queryset=Region.objects.all(), source='region', write_only=True, required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Client
+        fields = [
+            'id', 'full_name', 'phone', 'email', 'address', 
+            'region', 'region_id', 'created_at', 'notes'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class EquipmentSerializer(serializers.ModelSerializer):
+    client = ClientSerializer(read_only=True)
+    client_id = serializers.PrimaryKeyRelatedField(
+        queryset=Client.objects.all(), source='client', write_only=True
+    )
+
+    class Meta:
+        model = Equipment
+        fields = [
+            'id', 'name', 'equipment_type', 'serial_number', 
+            'client', 'client_id', 'status', 'warranty_until',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class OrderHistorySerializer(serializers.ModelSerializer):
+    changed_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = OrderHistory
+        fields = ['id', 'order', 'changed_by', 'old_status', 'new_status',
+                  'notes', 'master_lat', 'master_lon', 'changed_at']
+        read_only_fields = ['id', 'changed_at']
+
+
+class OrderMediaSerializer(serializers.ModelSerializer):
+    uploaded_by = UserSerializer(read_only=True)
+    file = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderMedia
+        fields = ['id', 'order', 'file', 'file_type', 'uploaded_by', 'notes', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
+
+    def get_file(self, obj):
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    client = ClientSerializer(read_only=True)
+    client_id = serializers.PrimaryKeyRelatedField(
+        queryset=Client.objects.all(), source='client', write_only=True
+    )
+    client_info = serializers.SerializerMethodField()
+    master = MasterSerializer(read_only=True)
+    master_id = serializers.PrimaryKeyRelatedField(
+        queryset=Master.objects.all(), source='master', write_only=True, required=False, allow_null=True
+    )
+    master_info = serializers.SerializerMethodField()
+    equipment = EquipmentSerializer(read_only=True)
+    equipment_id = serializers.PrimaryKeyRelatedField(
+        queryset=Equipment.objects.all(), source='equipment', write_only=True, required=False, allow_null=True
+    )
+    region = RegionSerializer(read_only=True)
+    region_id = serializers.PrimaryKeyRelatedField(
+        queryset=Region.objects.all(), source='region', write_only=True
+    )
+    region_info = serializers.SerializerMethodField()
+    building_id = serializers.PrimaryKeyRelatedField(
+        queryset=Building.objects.all(), source='building', write_only=True, required=False, allow_null=True
+    )
+    payment_type_display = serializers.SerializerMethodField()
+    confirmed_by = serializers.SerializerMethodField()
+    history = OrderHistorySerializer(many=True, read_only=True)
+    media = OrderMediaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'number', 'order_type', 'client', 'client_id', 'client_info',
+            'master', 'master_id', 'master_info', 'equipment', 'equipment_id',
+            'building_id', 'region', 'region_id', 'region_info',
+            'city', 'street_name', 'house_number', 'building_number', 'apartment', 'entrance', 'address',
+            'description', 'status', 'priority', 'cost', 'payment_type',
+            'payment_type_display', 'is_paid', 'is_warranty',
+            'photo_report_required', 'deadline',
+            'assigned_at', 'scheduled_at', 'accepted_at', 'started_at', 'paused_at',
+            'completed_at', 'confirmed_at', 'confirmed_by',
+            'history', 'media', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'number', 'assigned_at', 'scheduled_at', 'accepted_at', 'started_at',
+            'paused_at', 'completed_at', 'confirmed_at', 'confirmed_by',
+            'created_at', 'updated_at', 'history', 'media'
+        ]
+
+    def get_client_info(self, obj):
+        if obj.client:
+            return {
+                'id': obj.client.id,
+                'full_name': obj.client.name,
+                'phone': obj.client.phone,
+                'address': obj.client.address,
+            }
+        return None
+
+    def get_region_info(self, obj):
+        if obj.region:
+            return {
+                'id': obj.region.id,
+                'name': obj.region.name,
+            }
+        return None
+
+    def get_master_info(self, obj):
+        if obj.master:
+            return {
+                'id': obj.master.id,
+                'full_name': obj.master.user.get_full_name() or obj.master.user.username,
+                'phone': obj.master.phone,
+            }
+        return None
+
+    def get_payment_type_display(self, obj):
+        return obj.get_payment_type_display() if obj.payment_type else None
+
+    def get_confirmed_by(self, obj):
+        if obj.confirmed_by:
+            return {
+                'id': obj.confirmed_by.id,
+                'username': obj.confirmed_by.username,
+            }
+        return None
+
+
+class ReportSerializer(serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = Report
+        fields = [
+            'id', 'title', 'report_type', 'period_start', 
+            'period_end', 'data', 'status', 'generated_at', 'created_by'
+        ]
+        read_only_fields = ['id', 'generated_at']
+
+
+# Дополнительные сериализаторы для API
+
+class OrderCreateSerializer(serializers.ModelSerializer):
+    client_id = serializers.PrimaryKeyRelatedField(
+        queryset=Client.objects.all(), source='client'
+    )
+    region_id = serializers.PrimaryKeyRelatedField(
+        queryset=Region.objects.all(), source='region'
+    )
+    master_id = serializers.PrimaryKeyRelatedField(
+        queryset=Master.objects.all(), source='master', required=False, allow_null=True
+    )
+    equipment_id = serializers.PrimaryKeyRelatedField(
+        queryset=Equipment.objects.all(), source='equipment', required=False, allow_null=True
+    )
+    building_id = serializers.PrimaryKeyRelatedField(
+        queryset=Building.objects.all(), source='building', required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Order
+        fields = [
+            'order_type', 'client_id', 'master_id', 'equipment_id',
+            'building_id', 'region_id',
+            'city', 'street_name', 'house_number', 'building_number', 'apartment', 'entrance', 'address',
+            'description', 'priority',
+            'cost', 'payment_type', 'photo_report_required', 'deadline', 'scheduled_at'
+        ]
+
+
+class OrderStatusUpdateSerializer(serializers.ModelSerializer):
+    notes = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    master_id = serializers.PrimaryKeyRelatedField(
+        queryset=Master.objects.all(), source='master', required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Order
+        fields = ['status', 'notes', 'master_id', 'cost', 'payment_type']
+
+
+class BuildingSerializer(serializers.ModelSerializer):
+    region = RegionSerializer(read_only=True)
+    region_id = serializers.PrimaryKeyRelatedField(
+        queryset=Region.objects.all(), source='region', write_only=True
+    )
+    street_type_display = serializers.SerializerMethodField()
+    equipment_type_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Building
+        fields = [
+            'id', 'region', 'region_id', 'city', 'street_type',
+            'street_type_display', 'street_name', 'house_number',
+            'building_number', 'apartments_count', 'entrances_count',
+            'equipment_type', 'equipment_type_display', 'notes',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_street_type_display(self, obj):
+        return obj.get_street_type_display()
+
+    def get_equipment_type_display(self, obj):
+        return obj.get_equipment_type_display() if obj.equipment_type else ''
+
+
+class BuildingDetailSerializer(BuildingSerializer):
+    orders = serializers.SerializerMethodField()
+
+    class Meta(BuildingSerializer.Meta):
+        fields = BuildingSerializer.Meta.fields + ['orders']
+
+    def get_orders(self, obj):
+        orders = obj.orders.select_related('master__user').order_by('-created_at')
+        return [{
+            'id': o.id,
+            'number': o.number,
+            'order_type': o.order_type,
+            'order_type_display': o.get_order_type_display(),
+            'status': o.status,
+            'status_display': o.get_status_display(),
+            'master_name': o.master.user.get_full_name() or o.master.user.username if o.master else '—',
+            'created_at': o.created_at.isoformat(),
+        } for o in orders]
+
+
+class TraccarSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TraccarSettings
+        fields = ['id', 'server_url', 'username', 'password', 'is_active', 'sync_interval_minutes', 'updated_at']
+        read_only_fields = ['id', 'updated_at']
+        extra_kwargs = {'password': {'write_only': True}}
+
+
+class TraccarDeviceSerializer(serializers.ModelSerializer):
+    master_name = serializers.SerializerMethodField()
+    master_id = serializers.PrimaryKeyRelatedField(
+        queryset=Master.objects.all(), source='master', write_only=True
+    )
+    display_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TraccarDevice
+        fields = ['id', 'master_id', 'master_name', 'internal_device_id', 'unique_id',
+                  'display_id', 'device_name', 'last_latitude', 'last_longitude',
+                  'last_speed', 'last_update', 'is_online', 'created_at']
+        read_only_fields = ['id', 'last_latitude', 'last_longitude', 'last_speed', 'last_update', 'is_online', 'created_at']
+
+    def get_master_name(self, obj):
+        return str(obj.master)
+
+    def get_display_id(self, obj):
+        return f"#{obj.internal_device_id} / {obj.unique_id}"
+
+
+class MasterStatsSerializer(serializers.Serializer):
+    """Статистика по мастеру"""
+    master_id = serializers.IntegerField()
+    master_name = serializers.CharField()
+    total_orders = serializers.IntegerField()
+    completed_orders = serializers.IntegerField()
+    overdue_orders = serializers.IntegerField()
+    avg_completion_hours = serializers.FloatField()
+    total_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
+    by_type = serializers.DictField()
+    month = serializers.CharField()
+
+
+class SystemSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemSettings
+        fields = '__all__'
+        read_only_fields = ['id', 'updated_at']
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    username = serializers.CharField(write_only=True, required=False)
+    password = serializers.CharField(write_only=True, required=False)
+    first_name = serializers.CharField(write_only=True, required=False)
+    last_name = serializers.CharField(write_only=True, required=False)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+
+    class Meta:
+        model = UserProfile
+        fields = ['id', 'user', 'role', 'phone', 'is_on_shift', 'shift_started_at',
+                  'username', 'password', 'first_name', 'last_name', 'email']
+
+    def create(self, validated_data):
+        username = validated_data.pop('username', None)
+        password = validated_data.pop('password', 'admin123')
+        first_name = validated_data.pop('first_name', '')
+        last_name = validated_data.pop('last_name', '')
+        email = validated_data.pop('email', '')
+        if not username:
+            import random; username = f"user{random.randint(100, 999)}"
+        user = User.objects.create_user(username=username, password=password, first_name=first_name, last_name=last_name, email=email)
+        role = validated_data.get('role', 'master')
+        user.is_superuser = (role == 'admin')
+        user.is_staff = (role in ['admin', 'dispatcher'])
+        user.save()
+        return UserProfile.objects.create(user=user, **validated_data)
+
+    def update(self, instance, validated_data):
+        username = validated_data.pop('username', None)
+        password = validated_data.pop('password', None)
+        first_name = validated_data.pop('first_name', None)
+        last_name = validated_data.pop('last_name', None)
+        email = validated_data.pop('email', None)
+        user = instance.user
+        if username: user.username = username
+        if password: user.set_password(password)
+        if first_name is not None: user.first_name = first_name
+        if last_name is not None: user.last_name = last_name
+        if email is not None: user.email = email
+        role = validated_data.get('role', instance.role)
+        user.is_superuser = (role == 'admin')
+        user.is_staff = (role in ['admin', 'dispatcher'])
+        user.save()
+        return super().update(instance, validated_data)
+
+
+class WorkShiftSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkShift
+        fields = '__all__'
+        read_only_fields = ['id', 'orders_total', 'orders_completed', 'total_cost', 'total_mileage_km', 'hours_worked']
+
+    def get_user_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+
+class PushTokenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PushToken
+        fields = ['id', 'token', 'platform', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']

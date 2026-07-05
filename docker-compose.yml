@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: crm_db
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: crm_user
+      POSTGRES_PASSWORD: crm_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5433:5432"
+
+  web:
+    build: ./backend
+    container_name: crm_web
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py loaddata regions.json &&
+             python manage.py loaddata users.json &&
+             python manage.py loaddata masters.json &&
+             python manage.py loaddata user_profiles.json &&
+             python manage.py runserver 0.0.0.0:8000"
+    environment:
+      - DB_NAME=crm
+      - DB_USER=crm_user
+      - DB_PASSWORD=crm_pass
+      - DB_HOST=db
+      - DB_PORT=5432
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
