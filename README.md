@@ -69,7 +69,7 @@
 ### Одна команда (новый сервер)
 
 ```bash
-git clone https://github.com/YOUR_USER/videoservice-crm.git
+git clone https://github.com/himik19872/videoservice-crm.git
 cd videoservice-crm
 sudo chmod +x install.sh && sudo ./install.sh
 ```

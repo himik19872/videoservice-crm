@@ -26,7 +26,7 @@ step()  { echo -e "\n${BLUE}${BOLD}━━━ $1 ━━━${NC}"; }
 
 # ─── Конфигурация ────────────────────────────────────────────────────────────
 APP_DIR="/opt/videoservice-crm"
-GITHUB_REPO="https://github.com/YOUR_USER/videoservice-crm.git"  # ← замени на свой
+GITHUB_REPO="https://github.com/himik19872/videoservice-crm.git"
 DOMAIN="${1:-}"            # Можно передать домен: sudo ./install.sh crm.mydomain.ru
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
