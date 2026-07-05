@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Select, Typography, Card, message, Divider, Row, Col } from 'antd';
+import { Form, Input, Button, Select, Typography, Card, message, Divider, Row, Col, InputNumber } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import AddressSuggest from '../../components/AddressSuggest';
@@ -190,11 +190,7 @@ const OrdersCreatePage: React.FC = () => {
           <Input.TextArea rows={4} placeholder="Опишите проблему" />
         </Form.Item>
 
-        <Form.Item
-          name="priority"
-          label="Приоритет"
-          initialValue="medium"
-        >
+        <Form.Item name="priority" label="Приоритет" initialValue="medium">
           <Select>
             <Select.Option value="low">Низкий</Select.Option>
             <Select.Option value="medium">Средний</Select.Option>
@@ -202,6 +198,24 @@ const OrdersCreatePage: React.FC = () => {
             <Select.Option value="urgent">Срочный</Select.Option>
           </Select>
         </Form.Item>
+
+        <Divider>💰 Стоимость и оплата</Divider>
+        <Row gutter={12}>
+          <Col span={8}>
+            <Form.Item name="cost" label="Стоимость (₽)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="payment_type" label="Тип оплаты">
+              <Select placeholder="Выберите" allowClear>
+                <Select.Option value="cash">💵 Наличные</Select.Option>
+                <Select.Option value="cashless">🏦 Безналичные</Select.Option>
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="is_warranty" label="Гарантия" valuePropName="checked"><Select placeholder="Нет"><Select.Option value={false}>Нет</Select.Option><Select.Option value={true}>Да (бесплатно)</Select.Option></Select></Form.Item>
+          </Col>
+        </Row>
 
         <Form.Item
           name="photo_report_required"

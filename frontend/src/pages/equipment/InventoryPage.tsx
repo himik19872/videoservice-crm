@@ -1,19 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic } from 'antd';
+import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic, Form, Input } from 'antd';
 import { PlusOutlined, ReloadOutlined, ExportOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import type { InventoryItem, InventoryMovement } from '../../types';
 
 const { Title } = Typography;
 
-const statusColors: Record<string, string> = {
-  in_stock: 'green',
-  with_master: 'blue',
-  installed: 'purple',
-  returned: 'orange',
-  defective: 'red',
-  written_off: 'default',
-};
+const ITEM_TYPES = [
+  { value: 'intercom', label: 'Домофон' }, { value: 'video_intercom', label: 'Видеодомофон' },
+  { value: 'camera', label: 'Камера' }, { value: 'call_panel', label: 'Вызывная панель' },
+  { value: 'door_lock', label: 'Дверной замок' }, { value: 'monitor', label: 'Монитор' },
+  { value: 'power_supply', label: 'Блок питания' }, { value: 'cable', label: 'Кабель' },
+  { value: 'mounting_kit', label: 'Монтажный комплект' }, { value: 'other', label: 'Другое' },
+];
 
 const InventoryPage: React.FC = () => {
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -22,8 +21,15 @@ const InventoryPage: React.FC = () => {
   const [summary, setSummary] = useState<any>({});
   const [issueModal, setIssueModal] = useState(false);
   const [addModal, setAddModal] = useState(false);
+  const [createModal, setCreateModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [tab, setTab] = useState<'items' | 'movements'>('items');
+  const [createForm] = Form.useForm();
+
+  const statusColors: Record<string, string> = {
+    in_stock: 'green', with_master: 'blue', installed: 'purple',
+    returned: 'orange', defective: 'red', written_off: 'default',
+  };
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -50,6 +56,16 @@ const InventoryPage: React.FC = () => {
       setAddModal(false);
       fetchAll();
     } catch (e: any) { message.error(e.response?.data?.error || 'Ошибка'); }
+  };
+
+  const handleCreateItem = async (values: any) => {
+    try {
+      await api.post('/inventory/', values);
+      message.success('Позиция создана');
+      setCreateModal(false);
+      createForm.resetFields();
+      fetchAll();
+    } catch (e: any) { message.error(e.response?.data?.detail || 'Ошибка'); }
   };
 
   const handleIssue = async (masterId: number, qty: number) => {
@@ -105,6 +121,7 @@ const InventoryPage: React.FC = () => {
       <Space style={{ marginBottom: 16 }}>
         <Button type={tab === 'items' ? 'primary' : 'default'} onClick={() => setTab('items')}>Оборудование</Button>
         <Button type={tab === 'movements' ? 'primary' : 'default'} onClick={() => setTab('movements')}>Движения</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); setCreateModal(true); }}>Новая позиция</Button>
         <Button icon={<ReloadOutlined />} onClick={fetchAll}>Обновить</Button>
       </Space>
 
@@ -120,6 +137,25 @@ const InventoryPage: React.FC = () => {
 
       <Modal title="Выдать мастеру" open={issueModal} onCancel={() => setIssueModal(false)} footer={null}>
         <IssueForm item={selectedItem} onSubmit={handleIssue} />
+      </Modal>
+
+      <Modal title="Новая позиция на складе" open={createModal} onCancel={() => setCreateModal(false)} footer={null}>
+        <Form form={createForm} layout="vertical" onFinish={handleCreateItem}>
+          <Form.Item name="name" label="Название" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="item_type" label="Тип" rules={[{ required: true }]}>
+            <Select options={ITEM_TYPES} />
+          </Form.Item>
+          <Form.Item name="serial_number" label="Серийный номер"><Input /></Form.Item>
+          <Form.Item name="model_name" label="Модель"><Input /></Form.Item>
+          <Row gutter={12}>
+            <Col span={8}><Form.Item name="quantity" label="Кол-во" initialValue={1}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="cost_price" label="Закупка (₽)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="sale_price" label="Продажа (₽)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+          </Row>
+          <Form.Item name="supplier" label="Поставщик"><Input /></Form.Item>
+          <Form.Item name="warranty_months" label="Гарантия (мес.)" initialValue={12}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+          <Button type="primary" htmlType="submit" block>Создать</Button>
+        </Form>
       </Modal>
     </div>
   );

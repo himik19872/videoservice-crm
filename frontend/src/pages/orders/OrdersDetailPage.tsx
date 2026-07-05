@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -52,7 +52,6 @@ const OrdersDetailPage: React.FC = () => {
 
   const handleStatusChange = async (newStatus: string, notes?: string, extra?: Record<string, any>) => {
     if (!order) return;
-
     setUpdating(true);
     try {
       const response = await api.patch(`/orders/${order.id}/`, {
@@ -67,6 +66,29 @@ const OrdersDetailPage: React.FC = () => {
     } finally {
       setUpdating(false);
     }
+  };
+
+  const handleReceivePayment = async () => {
+    const amount = prompt('Сумма оплаты (₽):', String(order?.cost || ''));
+    if (!amount || !Number(amount)) return;
+    const method = prompt('Способ оплаты: cash/card/transfer/online', 'cash') || 'cash';
+    setUpdating(true);
+    try {
+      await api.post(`/orders/${order!.id}/receive_payment/`, { amount: Number(amount), payment_method: method });
+      message.success('Оплата принята');
+      fetchOrder();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
+    finally { setUpdating(false); }
+  };
+
+  const handleSubmitCash = async () => {
+    setUpdating(true);
+    try {
+      await api.post(`/orders/${order!.id}/submit_cash/`);
+      message.success('Наличные сданы в кассу');
+      fetchOrder();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
+    finally { setUpdating(false); }
   };
 
   const handleAssignMaster = async () => {
@@ -438,6 +460,15 @@ const OrdersDetailPage: React.FC = () => {
         {order.status === 'completed' && !isStaff && (
           <Tag color="orange">Ожидает подтверждения диспетчера</Tag>
         )}
+        <Divider />
+        <Space>
+          <Button icon={<DollarOutlined />} onClick={handleReceivePayment} loading={updating}>
+            💰 Принять оплату
+          </Button>
+          <Button onClick={handleSubmitCash} loading={updating}>
+            🏦 Сдать в кассу
+          </Button>
+        </Space>
         {!['completed', 'cancelled', 'confirmed'].includes(order.status) && (
           <Button danger onClick={handleCancel} loading={updating}>
             Отменить

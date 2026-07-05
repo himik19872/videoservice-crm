@@ -16,10 +16,15 @@ const FinancePage: React.FC = () => {
   const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(false);
   const [salaryModal, setSalaryModal] = useState(false);
-  const [tab, setTab] = useState<'payments' | 'salaries'>('payments');
+  const [tab, setTab] = useState<'payments' | 'salaries' | 'debts'>('payments');
   const [masters, setMasters] = useState<any[]>([]);
+  const [debts, setDebts] = useState<any>({ cash_debts: [], inventory_debts: [] });
 
-  useEffect(() => { fetchAll(); loadMasters(); }, []);
+  useEffect(() => { fetchAll(); loadMasters(); fetchDebts(); }, []);
+
+  const fetchDebts = async () => {
+    try { const r = await api.get('/master-salaries/master_debts/'); setDebts(r.data); } catch {}
+  };
 
   const fetchAll = async () => {
     setLoading(true);
@@ -111,14 +116,33 @@ const FinancePage: React.FC = () => {
       <Space style={{ marginBottom: 16 }}>
         <Button type={tab === 'payments' ? 'primary' : 'default'} onClick={() => setTab('payments')}>Оплаты</Button>
         <Button type={tab === 'salaries' ? 'primary' : 'default'} onClick={() => setTab('salaries')}>Зарплаты</Button>
-        <Button icon={<ReloadOutlined />} onClick={fetchAll}>Обновить</Button>
+        <Button type={tab === 'debts' ? 'primary' : 'default'} onClick={() => setTab('debts')}>Долги мастеров</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => { fetchAll(); fetchDebts(); }}>Обновить</Button>
         {tab === 'salaries' && <Button icon={<CalculatorOutlined />} type="primary" onClick={() => setSalaryModal(true)}>Рассчитать</Button>}
       </Space>
 
       {tab === 'payments' ? (
         <Table columns={paymentColumns} dataSource={payments} rowKey="id" loading={loading} pagination={{ pageSize: 20 }} size="middle" />
-      ) : (
+      ) : tab === 'salaries' ? (
         <Table columns={salaryColumns} dataSource={salaries} rowKey="id" loading={loading} pagination={{ pageSize: 20 }} size="middle" />
+      ) : (
+        <>
+          <Title level={5}>💵 Наличные к сдаче</Title>
+          <Table dataSource={debts.cash_debts || []} rowKey="id" pagination={false} size="small" columns={[
+            { title: 'Мастер', dataIndex: 'master', key: 'm' },
+            { title: 'Заявка', dataIndex: 'order', key: 'o' },
+            { title: 'Сумма', dataIndex: 'amount', key: 'a', render: (v: number) => <b style={{color:'red'}}>{v} ₽</b> },
+            { title: 'Статус', dataIndex: 'is_paid', key: 's', render: (v: boolean) => <Tag color={v?'green':'red'}>{v ? '✅ Сдано' : '❌ Не сдано'}</Tag> },
+          ]} />
+          <Title level={5} style={{ marginTop: 24 }}>🔧 Оборудование к возврату</Title>
+          <Table dataSource={debts.inventory_debts || []} rowKey="id" pagination={false} size="small" columns={[
+            { title: 'Мастер', dataIndex: 'master', key: 'm' },
+            { title: 'Заявка', dataIndex: 'order', key: 'o' },
+            { title: 'Описание', dataIndex: 'description', key: 'd' },
+            { title: 'Состояние', dataIndex: 'condition', key: 'c' },
+            { title: 'Статус', dataIndex: 'is_returned', key: 's', render: (v: boolean) => <Tag color={v?'green':'red'}>{v ? '✅ Возвращено' : '❌ Не возвращено'}</Tag> },
+          ]} />
+        </>
       )}
 
       <Modal title="Расчёт зарплаты" open={salaryModal} onCancel={() => setSalaryModal(false)} footer={null}>
