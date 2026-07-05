@@ -10,6 +10,7 @@ from django.utils import timezone
 from datetime import timedelta
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, UserProfile, WorkShift, OrderMedia, PushToken
 from .models import MaxBotSettings, MaxUserLink
+from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -18,6 +19,7 @@ from .serializers import (
     BuildingSerializer, BuildingDetailSerializer, TraccarSettingsSerializer, TraccarDeviceSerializer,
     SystemSettingsSerializer, UserProfileSerializer, WorkShiftSerializer, OrderMediaSerializer, PushTokenSerializer
 )
+from .serializers import InventoryItemSerializer, InventoryMovementSerializer, PaymentSerializer, MasterSalarySerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -1216,4 +1218,182 @@ def refresh_token_view(request):
     request.user.auth_token.delete()
     token = Token.objects.create(user=request.user)
     return Response({'token': token.key})
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад и оборудование
+# ══════════════════════════════════════════════════════════════════
+
+class InventoryItemViewSet(viewsets.ModelViewSet):
+    """Склад: оборудование (приход, учёт, остатки)"""
+    queryset = InventoryItem.objects.all()
+    serializer_class = InventoryItemSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['item_type', 'status']
+    search_fields = ['name', 'serial_number', 'model_name', 'supplier']
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Сводка по складу"""
+        items = InventoryItem.objects.all()
+        total_items = items.count()
+        in_stock = items.filter(status='in_stock').count()
+        with_masters = items.filter(status='with_master').count()
+        total_value = sum(
+            (i.sale_price or 0) * i.quantity
+            for i in items.filter(status__in=['in_stock', 'with_master'])
+        )
+        by_type = {}
+        for t in InventoryItem.ITEM_TYPES:
+            cnt = items.filter(item_type=t[0]).count()
+            if cnt:
+                by_type[str(t[1])] = cnt
+        return Response({
+            'total_items': total_items,
+            'in_stock': in_stock,
+            'with_masters': with_masters,
+            'total_value': float(total_value),
+            'by_type': by_type,
+        })
+
+    @action(detail=True, methods=['post'])
+    def add_stock(self, request, pk=None):
+        """Приход на склад"""
+        item = self.get_object()
+        qty = int(request.data.get('quantity', 0))
+        if qty <= 0:
+            return Response({'error': 'Укажите количество > 0'}, status=400)
+        InventoryMovement.objects.create(
+            item=item, movement_type='in', quantity=qty,
+            performed_by=request.user,
+            notes=request.data.get('notes', 'Приход на склад')
+        )
+        return Response(InventoryItemSerializer(item).data)
+
+    @action(detail=True, methods=['post'])
+    def issue_to_master(self, request, pk=None):
+        """Выдать мастеру"""
+        item = self.get_object()
+        master_id = request.data.get('master_id')
+        qty = int(request.data.get('quantity', 1))
+        if not master_id:
+            return Response({'error': 'Укажите master_id'}, status=400)
+        try:
+            master = Master.objects.get(id=master_id)
+        except Master.DoesNotExist:
+            return Response({'error': 'Мастер не найден'}, status=404)
+        if item.quantity < qty:
+            return Response({'error': f'Недостаточно на складе (доступно: {item.quantity})'}, status=400)
+        InventoryMovement.objects.create(
+            item=item, movement_type='out_to_master', quantity=qty,
+            master=master, performed_by=request.user,
+            notes=request.data.get('notes', f'Выдано мастеру {master}')
+        )
+        return Response(InventoryItemSerializer(item).data)
+
+
+class InventoryMovementViewSet(viewsets.ReadOnlyModelViewSet):
+    """Движения оборудования (только чтение)"""
+    queryset = InventoryMovement.objects.select_related('item', 'master', 'master__user', 'order', 'performed_by')
+    serializer_class = InventoryMovementSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['movement_type', 'master', 'item']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        master_id = self.request.query_params.get('master_id')
+        if master_id:
+            qs = qs.filter(master_id=master_id)
+        return qs
+
+
+# ══════════════════════════════════════════════════════════════════
+# Финансы
+# ══════════════════════════════════════════════════════════════════
+
+class PaymentViewSet(viewsets.ModelViewSet):
+    """Оплаты по заявкам"""
+    queryset = Payment.objects.select_related('order', 'order__client', 'received_by')
+    serializer_class = PaymentSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['payment_method', 'is_received', 'order']
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Финансовая сводка за период"""
+        days = int(request.query_params.get('days', 30))
+        since = timezone.now() - timedelta(days=days)
+        payments = Payment.objects.filter(paid_at__gte=since, is_received=True)
+        total = payments.aggregate(s=Sum('amount'))['s'] or 0
+        by_method = {}
+        for m in Payment.PAYMENT_METHODS:
+            s = payments.filter(payment_method=m[0]).aggregate(s=Sum('amount'))['s'] or 0
+            if s:
+                by_method[str(m[1])] = float(s)
+        return Response({
+            'total': float(total),
+            'count': payments.count(),
+            'by_method': by_method,
+            'days': days,
+        })
+
+
+class MasterSalaryViewSet(viewsets.ModelViewSet):
+    """Зарплаты мастеров"""
+    queryset = MasterSalary.objects.select_related('master', 'master__user')
+    serializer_class = MasterSalarySerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['master', 'status']
+
+    @action(detail=False, methods=['post'])
+    def calculate(self, request):
+        """Рассчитать зарплату мастера за период"""
+        master_id = request.data.get('master_id')
+        period_start = request.data.get('period_start')
+        period_end = request.data.get('period_end')
+        commission = float(request.data.get('commission_percent', 30))
+
+        if not master_id or not period_start or not period_end:
+            return Response({'error': 'Укажите master_id, period_start, period_end'}, status=400)
+
+        try:
+            master = Master.objects.get(id=master_id)
+        except Master.DoesNotExist:
+            return Response({'error': 'Мастер не найден'}, status=404)
+
+        orders = Order.objects.filter(
+            master=master,
+            confirmed_at__date__gte=period_start,
+            confirmed_at__date__lte=period_end,
+            status='confirmed',
+        )
+
+        total_orders = orders.count()
+        total_revenue = orders.aggregate(s=Sum('cost'))['s'] or 0
+        base_salary = float(total_revenue) * commission / 100
+        bonus = float(request.data.get('bonus', 0))
+        deduction = float(request.data.get('deduction', 0))
+        total_salary = base_salary + bonus - deduction
+
+        salary, _ = MasterSalary.objects.update_or_create(
+            master=master, period_start=period_start, period_end=period_end,
+            defaults={
+                'orders_total': total_orders,
+                'orders_completed': orders.count(),
+                'total_revenue': total_revenue,
+                'commission_percent': commission,
+                'bonus': bonus,
+                'deduction': deduction,
+                'total_salary': max(0, total_salary),
+                'notes': request.data.get('notes', ''),
+            }
+        )
+        return Response(MasterSalarySerializer(salary).data)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        salary = self.get_object()
+        salary.status = 'approved'
+        salary.save(update_fields=['status'])
+        return Response(MasterSalarySerializer(salary).data)
 

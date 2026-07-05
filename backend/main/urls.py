@@ -5,6 +5,7 @@ from .views import (
     EquipmentViewSet, OrderViewSet, ReportViewSet, BuildingViewSet,
     TraccarSettingsViewSet, TraccarDeviceViewSet, SystemSettingsViewSet,
     UserProfileViewSet, WorkShiftViewSet, OrderMediaViewSet, PushTokenViewSet,
+    InventoryItemViewSet, InventoryMovementViewSet, PaymentViewSet, MasterSalaryViewSet,
     login_view, me_view, refresh_token_view
 )
 from .max_views import MaxSettingsViewSet, max_webhook_view
@@ -25,6 +26,10 @@ router.register(r'shifts', WorkShiftViewSet, basename='work-shifts')
 router.register(r'order-media', OrderMediaViewSet, basename='order-media')
 router.register(r'push-tokens', PushTokenViewSet, basename='push-tokens')
 router.register(r'max-settings', MaxSettingsViewSet, basename='max-settings')
+router.register(r'inventory', InventoryItemViewSet, basename='inventory')
+router.register(r'inventory-movements', InventoryMovementViewSet, basename='inventory-movements')
+router.register(r'payments', PaymentViewSet, basename='payments')
+router.register(r'master-salaries', MasterSalaryViewSet, basename='master-salaries')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),

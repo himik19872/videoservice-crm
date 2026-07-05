@@ -523,3 +523,184 @@ class MaxUserLink(models.Model):
     class Meta:
         verbose_name = _('Связка Max')
         verbose_name_plural = _('Связки Max')
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад и оборудование
+# ══════════════════════════════════════════════════════════════════
+
+class InventoryItem(models.Model):
+    """Единица оборудования на складе (до установки клиенту)"""
+    ITEM_TYPES = [
+        ('intercom', _('Домофон')),
+        ('video_intercom', _('Видеодомофон')),
+        ('camera', _('Камера')),
+        ('call_panel', _('Вызывная панель')),
+        ('door_lock', _('Дверной замок')),
+        ('monitor', _('Монитор')),
+        ('power_supply', _('Блок питания')),
+        ('cable', _('Кабель')),
+        ('mounting_kit', _('Монтажный комплект')),
+        ('other', _('Другое')),
+    ]
+
+    STATUS_CHOICES = [
+        ('in_stock', _('На складе')),
+        ('with_master', _('У мастера')),
+        ('installed', _('Установлено')),
+        ('returned', _('Возвращено')),
+        ('defective', _('Брак')),
+        ('written_off', _('Списано')),
+    ]
+
+    name = models.CharField(max_length=200, verbose_name=_('Название'))
+    item_type = models.CharField(max_length=20, choices=ITEM_TYPES, verbose_name=_('Тип'))
+    serial_number = models.CharField(max_length=100, blank=True, verbose_name=_('Серийный номер'))
+    model_name = models.CharField(max_length=100, blank=True, verbose_name=_('Модель'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    unit = models.CharField(max_length=20, default='шт.', verbose_name=_('Ед. изм.'))
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Закупочная цена'))
+    sale_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Цена продажи'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_stock', verbose_name=_('Статус'))
+    location = models.CharField(max_length=200, blank=True, verbose_name=_('Место хранения'))
+    supplier = models.CharField(max_length=200, blank=True, verbose_name=_('Поставщик'))
+    warranty_months = models.PositiveIntegerField(default=12, verbose_name=_('Гарантия (мес.)'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата поступления'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Складская единица')
+        verbose_name_plural = _('Склад')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        sn = f' S/N:{self.serial_number}' if self.serial_number else ''
+        return f'{self.get_item_type_display()} {self.name}{sn} ({self.get_status_display()})'
+
+
+class InventoryMovement(models.Model):
+    """Движение оборудования: приход, выдача, возврат, установка, списание"""
+    MOVEMENT_TYPES = [
+        ('in', _('Приход')),
+        ('out_to_master', _('Выдано мастеру')),
+        ('return_from_master', _('Возврат от мастера')),
+        ('installed', _('Установлено клиенту')),
+        ('return_from_client', _('Возврат от клиента')),
+        ('written_off', _('Списано')),
+        ('defect', _('Брак')),
+    ]
+
+    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name='movements', verbose_name=_('Оборудование'))
+    movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES, verbose_name=_('Тип движения'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, blank=True, related_name='inventory_movements', verbose_name=_('Мастер'))
+    order = models.ForeignKey('Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='inventory_movements', verbose_name=_('Заявка'))
+    client = models.ForeignKey('Client', on_delete=models.SET_NULL, null=True, blank=True, related_name='inventory_movements', verbose_name=_('Клиент'))
+    performed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, verbose_name=_('Выполнил'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата операции'))
+
+    class Meta:
+        verbose_name = _('Движение оборудования')
+        verbose_name_plural = _('Движения оборудования')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.get_movement_type_display()}: {self.item} ({self.created_at:%d.%m.%Y %H:%M})'
+
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        if is_new:
+            item = self.item
+            if self.movement_type in ('out_to_master', 'installed'):
+                item.quantity = max(0, item.quantity - self.quantity)
+                if self.movement_type == 'out_to_master':
+                    item.status = 'with_master'
+                elif self.movement_type == 'installed':
+                    item.status = 'installed'
+            elif self.movement_type in ('in', 'return_from_master', 'return_from_client'):
+                item.quantity += self.quantity
+                if item.status in ('with_master', 'installed', 'returned'):
+                    item.status = 'in_stock'
+            elif self.movement_type == 'written_off':
+                item.quantity = max(0, item.quantity - self.quantity)
+                item.status = 'written_off'
+            elif self.movement_type == 'defect':
+                item.status = 'defective'
+            item.save(update_fields=['quantity', 'status', 'updated_at'])
+        super().save(*args, **kwargs)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Финансы
+# ══════════════════════════════════════════════════════════════════
+
+class Payment(models.Model):
+    """Оплата по заявке"""
+    PAYMENT_METHODS = [
+        ('cash', _('Наличные')),
+        ('card', _('Карта')),
+        ('transfer', _('Перевод')),
+        ('online', _('Онлайн')),
+    ]
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='payments', verbose_name=_('Заявка'))
+    amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_('Сумма'))
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default='cash', verbose_name=_('Способ оплаты'))
+    is_received = models.BooleanField(default=True, verbose_name=_('Получено'))
+    paid_at = models.DateTimeField(default=timezone.now, verbose_name=_('Дата оплаты'))
+    received_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='received_payments', verbose_name=_('Принял'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+
+    class Meta:
+        verbose_name = _('Оплата')
+        verbose_name_plural = _('Оплаты')
+        ordering = ['-paid_at']
+
+    def __str__(self):
+        return f'{self.order.number}: {self.amount} ₽ ({self.get_payment_method_display()})'
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Автообновление is_paid у заявки
+        order = self.order
+        total_paid = order.payments.filter(is_received=True).aggregate(s=models.Sum('amount'))['s'] or 0
+        if order.cost and total_paid >= order.cost:
+            order.is_paid = True
+        else:
+            order.is_paid = False
+        order.save(update_fields=['is_paid'])
+
+
+class MasterSalary(models.Model):
+    """Расчёт зарплаты мастера за период"""
+    STATUS_CHOICES = [
+        ('draft', _('Черновик')),
+        ('approved', _('Утверждён')),
+        ('paid', _('Выплачен')),
+    ]
+
+    master = models.ForeignKey(Master, on_delete=models.CASCADE, related_name='salaries', verbose_name=_('Мастер'))
+    period_start = models.DateField(verbose_name=_('Начало периода'))
+    period_end = models.DateField(verbose_name=_('Конец периода'))
+    orders_total = models.PositiveIntegerField(default=0, verbose_name=_('Всего заявок'))
+    orders_completed = models.PositiveIntegerField(default=0, verbose_name=_('Выполнено'))
+    total_revenue = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Выручка по заявкам'))
+    commission_percent = models.DecimalField(max_digits=5, decimal_places=2, default=30, verbose_name=_('Комиссия (%)'))
+    bonus = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Премия'))
+    deduction = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Удержания'))
+    total_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Итого к выплате'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name=_('Статус'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Зарплата мастера')
+        verbose_name_plural = _('Зарплаты мастеров')
+        ordering = ['-period_start']
+
+    def __str__(self):
+        return f'{self.master}: {self.total_salary} ₽ ({self.period_start} — {self.period_end})'

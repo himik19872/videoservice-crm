@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, OrderMedia, UserProfile, WorkShift, PushToken
+from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -476,3 +477,108 @@ class PushTokenSerializer(serializers.ModelSerializer):
         model = PushToken
         fields = ['id', 'token', 'platform', 'is_active', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад и оборудование
+# ══════════════════════════════════════════════════════════════════
+
+class InventoryItemSerializer(serializers.ModelSerializer):
+    item_type_display = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    total_value = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InventoryItem
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_item_type_display(self, obj):
+        return obj.get_item_type_display()
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    def get_total_value(self, obj):
+        if obj.sale_price:
+            return float(obj.sale_price) * obj.quantity
+        return None
+
+
+class InventoryMovementSerializer(serializers.ModelSerializer):
+    movement_type_display = serializers.SerializerMethodField()
+    item_name = serializers.SerializerMethodField()
+    master_name = serializers.SerializerMethodField()
+    order_number = serializers.SerializerMethodField()
+    performed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InventoryMovement
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+    def get_movement_type_display(self, obj):
+        return obj.get_movement_type_display()
+
+    def get_item_name(self, obj):
+        return str(obj.item) if obj.item else ''
+
+    def get_master_name(self, obj):
+        if obj.master:
+            return obj.master.user.get_full_name() or obj.master.user.username
+        return ''
+
+    def get_order_number(self, obj):
+        return obj.order.number if obj.order else ''
+
+    def get_performed_by_name(self, obj):
+        if obj.performed_by:
+            return obj.performed_by.get_full_name() or obj.performed_by.username
+        return ''
+
+
+# ══════════════════════════════════════════════════════════════════
+# Финансы
+# ══════════════════════════════════════════════════════════════════
+
+class PaymentSerializer(serializers.ModelSerializer):
+    payment_method_display = serializers.SerializerMethodField()
+    order_number = serializers.SerializerMethodField()
+    received_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Payment
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+    def get_payment_method_display(self, obj):
+        return obj.get_payment_method_display()
+
+    def get_order_number(self, obj):
+        return obj.order.number if obj.order else ''
+
+    def get_received_by_name(self, obj):
+        if obj.received_by:
+            return obj.received_by.get_full_name() or obj.received_by.username
+        return ''
+
+
+class MasterSalarySerializer(serializers.ModelSerializer):
+    master_name = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    total_revenue = serializers.FloatField(read_only=True)
+    total_salary = serializers.FloatField(read_only=True)
+    bonus = serializers.FloatField(read_only=True)
+    deduction = serializers.FloatField(read_only=True)
+    commission_percent = serializers.FloatField(read_only=True)
+
+    class Meta:
+        model = MasterSalary
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'orders_total', 'orders_completed', 'total_revenue', 'total_salary']
+
+    def get_master_name(self, obj):
+        return obj.master.user.get_full_name() or obj.master.user.username if obj.master else ''
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
