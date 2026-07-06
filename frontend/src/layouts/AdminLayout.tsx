@@ -1,19 +1,11 @@
 import React from 'react';
 import { Layout, Menu, theme, Typography, Space, Avatar } from 'antd';
 import {
-  DashboardOutlined,
-  OrderedListOutlined,
-  UsergroupAddOutlined,
-  AppstoreOutlined,
-  TeamOutlined,
-  EnvironmentOutlined,
-  BarChartOutlined,
-  UserOutlined,
-  HomeOutlined,
-  SettingOutlined,
-  CheckCircleOutlined,
-  ShopOutlined,
-  DollarOutlined,
+  DashboardOutlined, OrderedListOutlined, UsergroupAddOutlined,
+  AppstoreOutlined, TeamOutlined, EnvironmentOutlined,
+  BarChartOutlined, SettingOutlined, ShopOutlined, DollarOutlined,
+  HomeOutlined, CalendarOutlined, MessageOutlined,
+  UserOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -96,6 +88,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/finance',
       icon: <DollarOutlined />,
       label: 'Финансы',
+    },
+    {
+      key: '/calendar',
+      icon: <CalendarOutlined />,
+      label: 'Календарь',
+    },
+    {
+      key: '/messages',
+      icon: <MessageOutlined />,
+      label: 'Сообщения',
     },
     {
       key: '/reports',

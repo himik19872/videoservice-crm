@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, OrderMedia, UserProfile, WorkShift, PushToken
-from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
+from .models import InventoryItem, InventoryMovement, Payment, MasterSalary, Message
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -598,3 +598,28 @@ class MasterSalarySerializer(serializers.ModelSerializer):
 
     def get_status_display(self, obj):
         return obj.get_status_display()
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.SerializerMethodField()
+    recipient_name = serializers.SerializerMethodField()
+    unread = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Message
+        fields = ['id', 'sender', 'sender_name', 'recipient', 'recipient_name', 'is_broadcast', 'text', 'read_by', 'created_at', 'unread']
+        read_only_fields = ['id', 'sender', 'created_at', 'read_by']
+
+    def get_sender_name(self, obj):
+        return obj.sender.get_full_name() or obj.sender.username
+
+    def get_recipient_name(self, obj):
+        if obj.recipient:
+            return obj.recipient.get_full_name() or obj.recipient.username
+        return 'Всем'
+
+    def get_unread(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return request.user not in obj.read_by.all()
+        return False

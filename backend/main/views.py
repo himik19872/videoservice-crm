@@ -11,7 +11,7 @@ from datetime import timedelta
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, UserProfile, WorkShift, OrderMedia, PushToken
 from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
-from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial
+from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial, Message
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -20,7 +20,7 @@ from .serializers import (
     BuildingSerializer, BuildingDetailSerializer, TraccarSettingsSerializer, TraccarDeviceSerializer,
     SystemSettingsSerializer, UserProfileSerializer, WorkShiftSerializer, OrderMediaSerializer, PushTokenSerializer
 )
-from .serializers import InventoryItemSerializer, InventoryMovementSerializer, PaymentSerializer, MasterSalarySerializer
+from .serializers import InventoryItemSerializer, InventoryMovementSerializer, PaymentSerializer, MasterSalarySerializer, MessageSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -439,6 +439,27 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
         return Response(OrderSerializer(order).data)
+
+    @action(detail=False, methods=['get'])
+    def calendar(self, request):
+        """Календарь: заявки с датой scheduled_at"""
+        user = request.user
+        qs = Order.objects.filter(scheduled_at__isnull=False).exclude(status__in=['cancelled', 'confirmed'])
+        if not user.is_staff:
+            try:
+                master = user.master_profile
+                qs = qs.filter(master=master)
+            except Master.DoesNotExist:
+                qs = qs.filter(helpers=user)
+        return Response([{
+            'id': o.id, 'number': o.number, 'order_type': o.order_type,
+            'status': o.status,
+            'address': o.address or o.full_address,
+            'master': o.master.user.get_full_name() or o.master.user.username if o.master else None,
+            'client': o.client.name if o.client else None,
+            'scheduled_at': o.scheduled_at.isoformat() if o.scheduled_at else None,
+            'priority': o.priority,
+        } for o in qs.order_by('scheduled_at')])
 
     @action(detail=True, methods=['post'])
     def assign(self, request, pk=None):
@@ -1479,3 +1500,49 @@ class MasterSalaryViewSet(viewsets.ModelViewSet):
             'inventory_debts': [{'id': d.id, 'master': str(d.master), 'order': d.order.number, 'description': d.description, 'is_returned': d.is_returned, 'condition': d.condition} for d in inv_qs],
         })
 
+
+
+class MessageViewSet(viewsets.ModelViewSet):
+    """Чат между сотрудниками"""
+    queryset = Message.objects.all()
+    serializer_class = MessageSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['sender', 'recipient']
+    ordering_fields = ['created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return Message.objects.none()
+        # Видим свои сообщения, адресованные нам, и broadcast
+        return Message.objects.filter(
+            Q(sender=user) | Q(recipient=user) | Q(is_broadcast=True)
+        ).distinct()
+
+    def perform_create(self, serializer):
+        serializer.save(sender=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def read(self, request, pk=None):
+        msg = self.get_object()
+        msg.read_by.add(request.user)
+        return Response({'status': 'ok'})
+
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        user = request.user
+        count = Message.objects.filter(
+            Q(recipient=user) | Q(is_broadcast=True)
+        ).exclude(read_by=user).count()
+        return Response({'unread': count})
+
+    @action(detail=False, methods=['get'])
+    def users(self, request):
+        """Список сотрудников для выбора получателя"""
+        from .models import User
+        users = User.objects.filter(is_active=True).values('id', 'username', 'first_name', 'last_name')
+        return Response([{
+            'id': u['id'],
+            'username': u['username'],
+            'full_name': f"{u['first_name']} {u['last_name']}".strip() or u['username']
+        } for u in users])

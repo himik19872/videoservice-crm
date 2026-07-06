@@ -30,6 +30,8 @@ import SystemSettingsPage from './pages/settings/SystemSettingsPage';
 import ReportsPage from './pages/reports/ReportsPage';
 import FinancePage from './pages/reports/FinancePage';
 import InventoryPage from './pages/equipment/InventoryPage';
+import CalendarPage from './pages/CalendarPage';
+import MessagesPage from './pages/MessagesPage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
@@ -123,6 +125,8 @@ function AppContent() {
           <Route path="/clients/:id" element={<ClientsDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/finance" element={<FinancePage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/messages" element={<MessagesPage />} />
           {user?.role === 'accountant' && <Route path="/settings/admin" element={<AdminSettingsPage />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -187,6 +191,8 @@ function AppContent() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/finance" element={<FinancePage />} />
+        <Route path="/calendar" element={<CalendarPage />} />
+        <Route path="/messages" element={<MessagesPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>

@@ -797,3 +797,21 @@ class OrderMaterial(models.Model):
 
     def __str__(self):
         return f'{self.item.name} x{self.quantity} → {self.order.number}'
+
+
+class Message(models.Model):
+    """Сообщение между сотрудниками (чат)"""
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages', verbose_name=_('Отправитель'))
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='received_messages', verbose_name=_('Получатель'))
+    is_broadcast = models.BooleanField(default=False, verbose_name=_('Всем'))
+    text = models.TextField(verbose_name=_('Текст'))
+    read_by = models.ManyToManyField(User, blank=True, related_name='read_messages', verbose_name=_('Прочитали'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Отправлено'))
+
+    class Meta:
+        verbose_name = _('Сообщение')
+        verbose_name_plural = _('Сообщения')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.sender.username}: {self.text[:50]}'
