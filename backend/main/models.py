@@ -93,12 +93,18 @@ class UserProfile(models.Model):
         ('tech_director', _('Технический директор')),
         ('executive_director', _('Исполнительный директор')),
         ('general_director', _('Генеральный директор')),
+        ('clerk', _('Делопроизводитель')),
+        ('accountant', _('Бухгалтер')),
+        ('cashier', _('Кассир')),
+        ('secretary', _('Секретарь')),
     ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile', verbose_name=_('Пользователь'))
     role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='master', verbose_name=_('Роль'))
     phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
     is_on_shift = models.BooleanField(default=False, verbose_name=_('На смене'))
     shift_started_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Смена начата'))
+    # JSON-поле с персональными правами (переопределяет/расширяет базовые права роли)
+    permissions = models.JSONField(default=dict, blank=True, verbose_name=_('Персональные права'))
 
     class Meta:
         verbose_name = _('Профиль пользователя')

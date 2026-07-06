@@ -284,8 +284,8 @@ class OrderViewSet(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'order_type', 'priority', 'master', 'region', 'client']
-    search_fields = ['number', 'address', 'description']
-    ordering_fields = ['created_at', 'priority', 'status']
+    search_fields = ['number', 'address', 'description', 'client_info__full_name']
+    ordering_fields = ['created_at', 'priority', 'status', 'cost', 'master__user__last_name', 'region__name', 'address', 'city', 'street_name', 'number', 'order_type']
 
     def get_queryset(self):
         queryset = Order.objects.all()

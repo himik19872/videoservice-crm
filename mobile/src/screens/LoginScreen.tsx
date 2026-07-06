@@ -4,9 +4,11 @@ import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 const LoginScreen: React.FC = () => {
   const { login } = useAuth();
+  const { theme } = useTheme();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -43,23 +45,23 @@ const LoginScreen: React.FC = () => {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.card}>
+    <KeyboardAvoidingView style={[styles.container, { backgroundColor: theme.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={[styles.card, { backgroundColor: theme.card }]}>
         <Text style={styles.title}>CRM Система</Text>
-        <Text style={styles.subtitle}>Вход в систему управления</Text>
+        <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Вход в систему управления</Text>
 
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
           placeholder="Имя пользователя"
-          placeholderTextColor="#999"
+          placeholderTextColor={theme.textTertiary}
           autoCapitalize="none"
           value={username}
           onChangeText={setUsername}
         />
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
           placeholder="Пароль"
-          placeholderTextColor="#999"
+          placeholderTextColor={theme.textTertiary}
           secureTextEntry
           value={password}
           onChangeText={setPassword}
@@ -78,11 +80,11 @@ const LoginScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', backgroundColor: '#f0f2f5', padding: 24 },
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 24, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 },
+  container: { flex: 1, justifyContent: 'center', padding: 24 },
+  card: { borderRadius: 12, padding: 24, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 },
   title: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', color: '#1677ff', marginBottom: 4 },
-  subtitle: { fontSize: 14, textAlign: 'center', color: '#666', marginBottom: 24 },
-  input: { borderWidth: 1, borderColor: '#d9d9d9', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 12, color: '#333' },
+  subtitle: { fontSize: 14, textAlign: 'center', marginBottom: 24 },
+  input: { borderWidth: 1, borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 12 },
   button: { backgroundColor: '#1677ff', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 8 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

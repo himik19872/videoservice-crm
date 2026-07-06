@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Alert } fr
 import MapView, { Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import api from '../services/api';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface MasterLocation {
   master_id: number;

@@ -435,11 +435,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(write_only=True, required=False)
     last_name = serializers.CharField(write_only=True, required=False)
     email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    permissions = serializers.JSONField(required=False, default=dict)
 
     class Meta:
         model = UserProfile
         fields = ['id', 'user', 'role', 'phone', 'is_on_shift', 'shift_started_at',
-                  'username', 'password', 'first_name', 'last_name', 'email']
+                  'username', 'password', 'first_name', 'last_name', 'email', 'permissions']
 
     def create(self, validated_data):
         username = validated_data.pop('username', None)

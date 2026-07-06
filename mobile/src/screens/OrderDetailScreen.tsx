@@ -6,6 +6,8 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import api from '../services/api';
+import { useTheme } from '../contexts/ThemeContext';
+import { useOffline, setOfflineApi } from '../contexts/OfflineContext';
 import type { Order } from '../types';
 
 interface Props {
@@ -27,6 +29,8 @@ const statusColors: Record<string, string> = {
 
 const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { id } = route.params;
+  const { theme, isDark } = useTheme();
+  const { isOnline, addPendingAction } = useOffline();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -101,8 +105,21 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       } catch (e) {}
 
-      const res = await api.patch(`/orders/${id}/`, { status, notes, ...gps });
-      setOrder(res.data);
+      if (!isOnline) {
+        // Офлайн — сохраняем в очередь
+        await addPendingAction({
+          method: 'PATCH',
+          url: `/orders/${id}/`,
+          body: { status, notes, ...gps },
+          description: `Смена статуса на "${statusLabels[status]}" для заявки ${order?.number}`,
+        });
+        Alert.alert('Сохранено офлайн', 'Изменение будет отправлено при восстановлении связи');
+        // Оптимистично обновляем локально
+        setOrder((prev) => prev ? { ...prev, status } : prev);
+      } else {
+        const res = await api.patch(`/orders/${id}/`, { status, notes, ...gps });
+        setOrder(res.data);
+      }
     } catch (error: any) {
       Alert.alert('Ошибка', error?.response?.data?.error || 'Не удалось изменить статус');
     } finally {
@@ -110,14 +127,19 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
-  if (loading) return <View style={styles.centered}><ActivityIndicator size="large" color="#1677ff" /></View>;
+  if (loading) return <View style={[styles.centered, { backgroundColor: theme.background }]}><ActivityIndicator size="large" color={theme.primary} /></View>;
   if (!order) return null;
 
   const s = order.status;
   const canAct = !['completed', 'confirmed', 'cancelled'].includes(s);
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
+      {!isOnline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>📴 Офлайн-режим — изменения сохранятся локально</Text>
+        </View>
+      )}
       <View style={styles.statusRow}>
         <View style={[styles.statusBadge, { backgroundColor: statusColors[order.status] }]}>
           <Text style={styles.statusText}>{statusLabels[order.status]}</Text>
@@ -125,16 +147,15 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {order.photo_report_required && <Text style={styles.requiredBadge}>📸 Фотоотчёт</Text>}
       </View>
 
-      <Text style={styles.orderNum}>{order.number}</Text>
-      <Text style={styles.client}>{order.client_info?.full_name || '—'}</Text>
-      <Text style={styles.phone}>📞 {order.client_info?.phone || order.client?.phone || '—'}</Text>
+      <Text style={[styles.orderNum, { color: theme.text }]}>{order.number}</Text>
+      <Text style={[styles.client, { color: theme.text }]}>{order.client_info?.full_name || '—'}</Text>
+      <Text style={[styles.phone, { color: theme.primary }]}>📞 {order.client_info?.phone || order.client?.phone || '—'}</Text>
       <TouchableOpacity onPress={() => {
         const city = order.city || '';
         const street = order.street_name || '';
         const house = order.house_number || '';
         const build = order.building_number || '';
         const apart = order.apartment || '';
-        // Правильный формат: "Город, улица, дом"
         const parts = [city, street].filter(Boolean);
         if (house) parts.push('д.' + house + (build ? ' к' + build : ''));
         if (apart) parts.push('кв.' + apart);
@@ -142,47 +163,65 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         if (!addr) return;
         const encoded = encodeURIComponent(addr);
-        // Открываем Яндекс.Карты с построением маршрута (работает всегда)
         Linking.openURL(`https://yandex.ru/maps/?rtext=~${encoded}&rtt=auto`);
       }}>
-        <Text style={styles.address}>📍 {order.address || [order.city, order.street_name, 'д.' + order.house_number].filter(Boolean).join(', ')}</Text>
-        <Text style={styles.navHint}>🚗 Нажмите, чтобы построить маршрут</Text>
+        <Text style={[styles.address, { color: theme.textSecondary }]}>📍 {order.address || [order.city, order.street_name, 'д.' + order.house_number].filter(Boolean).join(', ')}</Text>
+        <Text style={[styles.navHint, { color: theme.primary }]}>🚗 Нажмите, чтобы построить маршрут</Text>
       </TouchableOpacity>
-      <Text style={styles.desc}>{order.description}</Text>
+      {order.description ? (
+        <Text style={[styles.desc, { color: theme.text, backgroundColor: theme.inputBg }]}>{order.description}</Text>
+      ) : null}
+
+      {/* Финансовая информация */}
+      {order.cost != null && (
+        <View style={[styles.financeRow, { backgroundColor: theme.card }]}>
+          <Text style={[styles.costLabel, { color: theme.textSecondary }]}>
+            💰 Стоимость: <Text style={{ color: theme.text, fontWeight: '700' }}>{order.cost} ₽</Text>
+          </Text>
+          {order.payment_type && (
+            <Text style={[styles.paymentType, { color: theme.textTertiary }]}>
+              {order.payment_type === 'cash' ? '💵 Наличные' : order.payment_type === 'cashless' ? '🏦 Безналичные' : order.payment_type}
+            </Text>
+          )}
+          <Text style={{ color: order.is_paid ? theme.success : theme.warning, fontWeight: '600', fontSize: 13 }}>
+            {order.is_paid ? '✅ Оплачено' : '⚠️ Не оплачено'}
+          </Text>
+        </View>
+      )}
 
       {/* GPS-история мастера */}
       {order.history && order.history.filter((h: any) => h.master_lat && h.master_lon).length > 0 && (
-        <View style={styles.mapContainer}>
-          <Text style={styles.mapTitle}>📍 GPS-история мастера</Text>
+        <View style={[styles.mapContainer, { backgroundColor: theme.card }]}>
+          <Text style={[styles.mapTitle, { color: theme.primary }]}>📍 GPS-история мастера</Text>
           {order.history.filter((h: any) => h.master_lat && h.master_lon).map((h: any, i: number) => (
             <TouchableOpacity
               key={i}
-              style={styles.gpsPoint}
+              style={[styles.gpsPoint, { borderBottomColor: theme.border }]}
               onPress={() => {
                 Linking.openURL(
                   `https://yandex.ru/maps/?pt=${h.master_lon},${h.master_lat}&z=16`
                 );
               }}
             >
-              <Text style={styles.gpsStatus}>
+              <Text style={[styles.gpsStatus, { color: theme.text }]}>
                 {statusLabels[h.new_status] || h.new_status}: {h.master_lat.toFixed(4)}, {h.master_lon.toFixed(4)}
               </Text>
-              <Text style={styles.gpsTime}>{h.changed_at ? new Date(h.changed_at).toLocaleString('ru-RU') : ''}</Text>
-              <Text style={{ fontSize: 10, color: '#1677ff' }}>🗺️ Открыть на карте</Text>
+              <Text style={[styles.gpsTime, { color: theme.textTertiary }]}>{h.changed_at ? new Date(h.changed_at).toLocaleString('ru-RU') : ''}</Text>
+              <Text style={{ fontSize: 10, color: theme.primary }}>🗺️ Открыть на карте</Text>
             </TouchableOpacity>
           ))}
         </View>
       )}
 
       <View style={styles.toolbar}>
-        <TouchableOpacity style={styles.toolBtn} onPress={takePhoto}>
-          <Text style={styles.toolText}>📷 Фото</Text>
+        <TouchableOpacity style={[styles.toolBtn, { backgroundColor: theme.card }]} onPress={takePhoto}>
+          <Text style={[styles.toolText, { color: theme.text }]}>📷 Фото</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.toolBtn} onPress={takeVideo}>
-          <Text style={styles.toolText}>🎥 Видео</Text>
+        <TouchableOpacity style={[styles.toolBtn, { backgroundColor: theme.card }]} onPress={takeVideo}>
+          <Text style={[styles.toolText, { color: theme.text }]}>🎥 Видео</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.toolBtn} onPress={callClient}>
-          <Text style={styles.toolText}>📞 Позвонить</Text>
+        <TouchableOpacity style={[styles.toolBtn, { backgroundColor: theme.card }]} onPress={callClient}>
+          <Text style={[styles.toolText, { color: theme.text }]}>📞 Позвонить</Text>
         </TouchableOpacity>
       </View>
 
@@ -194,6 +233,16 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             <View key={m.id} style={styles.videoTag}><Text>🎬 Видео</Text></View>
           ))}
         </View>
+      )}
+
+      {/* Кнопка приёма оплаты */}
+      {canAct && order.cost != null && !order.is_paid && (
+        <TouchableOpacity
+          style={[styles.payBtn, { backgroundColor: theme.warning }]}
+          onPress={() => navigation.navigate('AddPayment', { orderId: order.id, orderNumber: order.number, orderCost: order.cost })}
+        >
+          <Text style={styles.payBtnText}>💰 Принять оплату</Text>
+        </TouchableOpacity>
       )}
 
       {canAct && (
@@ -230,8 +279,8 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       )}
 
       {!canAct && (
-        <View style={styles.doneBlock}>
-          <Text style={styles.doneText}>✅ Заявка {statusLabels[order.status].toLowerCase()}</Text>
+        <View style={[styles.doneBlock, { backgroundColor: isDark ? '#1a3a1a' : '#f6ffed', borderColor: isDark ? '#2d6a2d' : '#b7eb8f' }]}>
+          <Text style={[styles.doneText, { color: theme.success }]}>✅ Заявка {statusLabels[order.status].toLowerCase()}</Text>
         </View>
       )}
     </ScrollView>
@@ -239,25 +288,32 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f2f5', padding: 16 },
+  container: { flex: 1, padding: 16 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  offlineBanner: { backgroundColor: '#ff4d4f', padding: 8, borderRadius: 8, marginBottom: 10 },
+  offlineBannerText: { color: '#fff', fontSize: 12, textAlign: 'center', fontWeight: '600' },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   statusBadge: { paddingHorizontal: 14, paddingVertical: 4, borderRadius: 12 },
   statusText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   requiredBadge: { color: '#fa8c16', fontSize: 12, fontWeight: '600' },
-  orderNum: { fontSize: 22, fontWeight: '800', color: '#333', marginBottom: 8 },
-  client: { fontSize: 18, color: '#333', marginBottom: 4 },
-  phone: { fontSize: 15, color: '#1677ff', marginBottom: 4 },
-  address: { fontSize: 15, color: '#666', marginBottom: 4 },
-  desc: { fontSize: 14, color: '#444', backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 12 },
-  navHint: { fontSize: 11, color: '#1677ff', marginBottom: 4 },
-  mapContainer: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 12 },
-  mapTitle: { fontWeight: '700', fontSize: 14, marginBottom: 8, color: '#1677ff' },
-  gpsPoint: { paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  gpsStatus: { fontSize: 12, color: '#333' },
-  gpsTime: { fontSize: 10, color: '#999' },
+  orderNum: { fontSize: 22, fontWeight: '800', marginBottom: 8 },
+  client: { fontSize: 18, marginBottom: 4 },
+  phone: { fontSize: 15, marginBottom: 4 },
+  address: { fontSize: 15, marginBottom: 4 },
+  desc: { fontSize: 14, padding: 12, borderRadius: 8, marginBottom: 12 },
+  navHint: { fontSize: 11, marginBottom: 4 },
+  financeRow: { padding: 12, borderRadius: 8, marginBottom: 12, elevation: 1 },
+  costLabel: { fontSize: 14, marginBottom: 2 },
+  paymentType: { fontSize: 12, marginBottom: 2 },
+  payBtn: { padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
+  payBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  mapContainer: { padding: 12, borderRadius: 8, marginBottom: 12 },
+  mapTitle: { fontWeight: '700', fontSize: 14, marginBottom: 8 },
+  gpsPoint: { paddingVertical: 4, borderBottomWidth: 1 },
+  gpsStatus: { fontSize: 12 },
+  gpsTime: { fontSize: 10 },
   toolbar: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  toolBtn: { backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, elevation: 1 },
+  toolBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, elevation: 1 },
   toolText: { fontSize: 14 },
   mediaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   thumb: { width: 80, height: 80, borderRadius: 8, backgroundColor: '#ddd' },
@@ -265,8 +321,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   btn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  doneBlock: { backgroundColor: '#f6ffed', padding: 20, borderRadius: 10, borderWidth: 1, borderColor: '#b7eb8f', alignItems: 'center' },
-  doneText: { color: '#52c41a', fontSize: 16, fontWeight: '600' },
+  doneBlock: { padding: 20, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
+  doneText: { fontSize: 16, fontWeight: '600' },
 });
 
 export default OrderDetailScreen;

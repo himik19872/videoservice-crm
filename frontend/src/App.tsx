@@ -88,8 +88,78 @@ function AppContent() {
     );
   }
 
-  // Admin
-  return (
+  // Admin + управленческие роли (расширенный доступ)
+  const isManagement = user?.role === 'admin' || user?.role === 'general_director' || user?.role === 'executive_director' || user?.role === 'tech_director' || user?.role === 'chief_engineer';
+  const isFinance = user?.role === 'accountant' || user?.role === 'cashier';
+  const isOffice = user?.role === 'clerk' || user?.role === 'secretary' || user?.role === 'supervisor';
+
+  // Инженер (отдельная роль с ограниченным доступом к заявкам и оборудованию)
+  if (user?.role === 'engineer') {
+    return (
+      <DispatcherLayout>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/orders" element={<OrdersPage />} />
+          <Route path="/orders/:id" element={<OrdersDetailPage />} />
+          <Route path="/equipment" element={<EquipmentPage />} />
+          <Route path="/equipment/:id" element={<EquipmentDetailPage />} />
+          <Route path="/masters" element={<MastersPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </DispatcherLayout>
+    );
+  }
+
+  // Финансы: видят заявки (просмотр), оплаты, отчёты
+  if (isFinance) {
+    return (
+      <AdminLayout>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/orders" element={<OrdersPage />} />
+          <Route path="/orders/:id" element={<OrdersDetailPage />} />
+          <Route path="/clients" element={<ClientsPage />} />
+          <Route path="/clients/:id" element={<ClientsDetailPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/finance" element={<FinancePage />} />
+          {user?.role === 'accountant' && <Route path="/settings/admin" element={<AdminSettingsPage />} />}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AdminLayout>
+    );
+  }
+
+  // Делопроизводитель, секретарь, начальник сервисной службы
+  if (isOffice) {
+    return (
+      <AdminLayout>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/orders" element={<OrdersPage />} />
+          <Route path="/orders/create" element={<OrdersCreatePage />} />
+          <Route path="/orders/:id" element={<OrdersDetailPage />} />
+          <Route path="/orders/confirm" element={<OrdersConfirmPage />} />
+          <Route path="/clients" element={<ClientsPage />} />
+          <Route path="/clients/create" element={<ClientsCreatePage />} />
+          <Route path="/clients/:id" element={<ClientsDetailPage />} />
+          <Route path="/equipment" element={<EquipmentPage />} />
+          <Route path="/equipment/:id" element={<EquipmentDetailPage />} />
+          <Route path="/masters" element={<MastersPage />} />
+          <Route path="/masters/:id" element={<MasterDetailPage />} />
+          <Route path="/buildings" element={<BuildingsPage />} />
+          <Route path="/buildings/:id" element={<BuildingDetailPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AdminLayout>
+    );
+  }
+
+  // Управленцы (admin, директора) — полный доступ
+  if (isManagement) {
+    return (
     <AdminLayout>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
@@ -121,6 +191,10 @@ function AppContent() {
       </Routes>
     </AdminLayout>
   );
+  }
+
+  // Fallback для неизвестных ролей
+  return <LoginPage />;
 }
 
 function App() {

@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Alert,
 } from 'react-native';
 import Signature from 'react-native-signature-canvas';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface Props {
   route: { params: { orderId: number; onSign: (signature: string) => void } };
@@ -11,6 +12,7 @@ interface Props {
 
 const SignatureScreen: React.FC<Props> = ({ route, navigation }) => {
   const { orderId, onSign } = route.params;
+  const { theme } = useTheme();
   const ref = useRef<any>(null);
 
   const handleOK = (signature: string) => {
@@ -21,9 +23,9 @@ const SignatureScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleClear = () => ref.current?.clearSignature();
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Подпись клиента</Text>
-      <Text style={styles.subtitle}>Заявка #{orderId}</Text>
+    <View style={[styles.container, { backgroundColor: theme.card }]}>
+      <Text style={[styles.title, { color: theme.text }]}>Подпись клиента</Text>
+      <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Заявка #{orderId}</Text>
       <View style={styles.sigBox}>
         <Signature
           ref={ref}
@@ -53,9 +55,9 @@ const webStyles = `
 `;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', padding: 16 },
+  container: { flex: 1, padding: 16 },
   title: { fontSize: 20, fontWeight: '700', textAlign: 'center', marginTop: 10 },
-  subtitle: { fontSize: 15, color: '#666', textAlign: 'center', marginBottom: 10 },
+  subtitle: { fontSize: 15, textAlign: 'center', marginBottom: 10 },
   sigBox: { flex: 1, borderWidth: 2, borderColor: '#1677ff', borderRadius: 12, marginBottom: 16, overflow: 'hidden' },
   buttons: { flexDirection: 'row', gap: 12, justifyContent: 'center', marginBottom: 20 },
   clearBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, backgroundColor: '#f5f5f5' },

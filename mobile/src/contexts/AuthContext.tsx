@@ -40,8 +40,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const notificationListener = useRef<any>(null);
+  const responseListener = useRef<any>(null);
 
   useEffect(() => {
     restoreSession();
@@ -66,8 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch { return; }
 
     try {
-      notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
-      responseListener.current = Notifications.addNotificationResponseReceivedListener(() => {});
+      notificationListener.current = Notifications.addNotificationReceivedListener((_event: any) => {});
+      responseListener.current = Notifications.addNotificationResponseReceivedListener((_event: any) => {});
     } catch {}
 
     if (Platform.OS === 'android') {
