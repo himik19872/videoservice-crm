@@ -284,7 +284,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'order_type', 'priority', 'master', 'region', 'client']
-    search_fields = ['number', 'address', 'description', 'client_info__full_name']
+    search_fields = ['number', 'address', 'description', 'city', 'street_name', 'client__first_name', 'client__last_name']
     ordering_fields = ['created_at', 'priority', 'status', 'cost', 'master__user__last_name', 'region__name', 'address', 'city', 'street_name', 'number', 'order_type']
 
     def get_queryset(self):
@@ -309,7 +309,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         if role in ('master', 'installer'):
             try:
                 master = user.master_profile
-                return queryset.filter(Q(master=master) | Q(helpers=user))
+                return queryset.filter(Q(master=master) | Q(helpers=user)).distinct()
             except Master.DoesNotExist:
                 return Order.objects.none()
 
