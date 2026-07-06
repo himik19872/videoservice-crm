@@ -815,3 +815,237 @@ class Message(models.Model):
 
     def __str__(self):
         return f'{self.sender.username}: {self.text[:50]}'
+
+
+# ══════════════════════════════════════════════════════════════════
+# Сметы и коммерческие предложения
+# ══════════════════════════════════════════════════════════════════
+
+class LegalEntity(models.Model):
+    """Юридическое лицо компании (может быть несколько: ООО Видео Сервис, ИП и т.д.)"""
+    name = models.CharField(max_length=300, verbose_name=_('Название организации'))
+    short_name = models.CharField(max_length=100, blank=True, verbose_name=_('Краткое название'))
+    inn = models.CharField(max_length=12, blank=True, verbose_name=_('ИНН'))
+    kpp = models.CharField(max_length=9, blank=True, verbose_name=_('КПП'))
+    ogrn = models.CharField(max_length=15, blank=True, verbose_name=_('ОГРН'))
+    legal_address = models.CharField(max_length=500, blank=True, verbose_name=_('Юридический адрес'))
+    actual_address = models.CharField(max_length=500, blank=True, verbose_name=_('Фактический адрес'))
+    phone = models.CharField(max_length=50, blank=True, verbose_name=_('Телефон'))
+    email = models.EmailField(blank=True, verbose_name=_('Email'))
+    bank_name = models.CharField(max_length=300, blank=True, verbose_name=_('Банк'))
+    bik = models.CharField(max_length=9, blank=True, verbose_name=_('БИК'))
+    corr_account = models.CharField(max_length=20, blank=True, verbose_name=_('Корр. счёт'))
+    settlement_account = models.CharField(max_length=20, blank=True, verbose_name=_('Расчётный счёт'))
+    director = models.CharField(max_length=200, blank=True, verbose_name=_('Директор'))
+    is_default = models.BooleanField(default=False, verbose_name=_('По умолчанию'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+
+    class Meta:
+        verbose_name = _('Юридическое лицо')
+        verbose_name_plural = _('Юридические лица')
+
+    def __str__(self):
+        return self.short_name or self.name
+
+    def save(self, *args, **kwargs):
+        if self.is_default:
+            LegalEntity.objects.exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class EstimateService(models.Model):
+    """Справочник услуг и работ для смет"""
+    CATEGORIES = [
+        ('installation', _('Монтаж')),
+        ('setup', _('Настройка/Пусконаладка')),
+        ('design', _('Проектирование')),
+        ('maintenance', _('Обслуживание/ТО')),
+        ('repair', _('Ремонт')),
+        ('consulting', _('Консультация')),
+        ('other', _('Другое')),
+    ]
+
+    name = models.CharField(max_length=300, verbose_name=_('Наименование услуги'))
+    category = models.CharField(max_length=30, choices=CATEGORIES, default='installation', verbose_name=_('Категория'))
+    unit = models.CharField(max_length=30, default='шт', verbose_name=_('Единица измерения'))
+    cost_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Себестоимость'))
+    sale_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Цена для клиента'))
+    installer_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Зарплата монтажникам'))
+    notes = models.TextField(blank=True, verbose_name=_('Описание'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активна'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Услуга')
+        verbose_name_plural = _('Услуги и работы')
+        ordering = ['category', 'name']
+
+    def __str__(self):
+        return f'{self.name} ({self.sale_price} ₽/{self.unit})'
+
+    @property
+    def margin_percent(self):
+        if self.cost_price and self.cost_price > 0:
+            return round((self.sale_price - self.cost_price) / self.cost_price * 100, 1)
+        return 0
+
+
+class CommercialEstimate(models.Model):
+    """Смета / Коммерческое предложение"""
+    STATUS_CHOICES = [
+        ('draft', _('Черновик')),
+        ('sent', _('Отправлено клиенту')),
+        ('approved', _('Согласовано')),
+        ('rejected', _('Отклонено')),
+        ('in_work', _('В работе')),
+        ('completed', _('Завершено')),
+    ]
+    TAX_CHOICES = [
+        ('usn', _('УСН (доходы)')),
+        ('usn_dr', _('УСН (доходы-расходы)')),
+        ('osno', _('ОСНО (с НДС)')),
+        ('patent', _('Патент')),
+        ('none', _('Без налога')),
+    ]
+    DELIVERY_CHOICES = [
+        ('client', _('Самовывоз')),
+        ('our', _('Наша доставка')),
+        ('tc', _('Транспортная компания')),
+        ('none', _('Не требуется')),
+    ]
+
+    number = models.CharField(max_length=30, unique=True, verbose_name=_('Номер сметы'))
+    name = models.CharField(max_length=300, verbose_name=_('Название'))
+    client = models.ForeignKey('Client', on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates', verbose_name=_('Клиент (контрагент)'))
+    legal_entity = models.ForeignKey(LegalEntity, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Юрлицо (наша компания)'))
+    order = models.ForeignKey('Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates', verbose_name=_('Связанная заявка'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name=_('Статус'))
+
+    # Скидки и наценки
+    discount = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Скидка общая (%)'))
+    commission = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Комиссионные (%)'))
+    dealer_fee = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Дилерская наценка (%)'))
+    unexpected_costs = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Непредвиденные расходы (₽)'))
+
+    # Доставка
+    delivery_type = models.CharField(max_length=10, choices=DELIVERY_CHOICES, default='client', verbose_name=_('Тип доставки'))
+    delivery_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Стоимость доставки (₽)'))
+
+    # Налог
+    tax_type = models.CharField(max_length=10, choices=TAX_CHOICES, default='usn', verbose_name=_('Система налогообложения'))
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=6, verbose_name=_('Ставка налога (%)'))
+
+    # Сотрудник (кто составил / ответственный)
+    employee = models.CharField(max_length=200, blank=True, verbose_name=_('Ответственный сотрудник'))
+    employee_phone = models.CharField(max_length=50, blank=True, verbose_name=_('Телефон сотрудника'))
+
+    # Итоги (вычисляемые)
+    total_materials = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Итого материалы'))
+    total_services = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Итого услуги'))
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Подытог'))
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Итого'))
+    total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Итого себестоимость'))
+    profit = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Прибыль'))
+
+    note = models.TextField(blank=True, verbose_name=_('Примечание'))
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_estimates', verbose_name=_('Создал'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Смета/КП')
+        verbose_name_plural = _('Сметы и КП')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Смета №{self.number}: {self.total} ₽ ({self.get_status_display()})'
+
+    def recalculate(self):
+        """Пересчёт итогов по позициям"""
+        items = self.items.all()
+        total_materials = sum(i.total_price for i in items if i.item_type == 'material')
+        total_services = sum(i.total_price for i in items if i.item_type in ('service', 'custom_service'))
+        subtotal = total_materials + total_services
+
+        # Скидка
+        discount_amount = subtotal * self.discount / 100
+        after_discount = subtotal - discount_amount
+
+        # Комиссионные и дилерская наценка
+        commission_amount = after_discount * self.commission / 100
+        dealer_amount = after_discount * self.dealer_fee / 100
+
+        total = after_discount + commission_amount + dealer_amount + self.unexpected_costs + self.delivery_cost
+
+        # Себестоимость
+        total_cost = sum(
+            (i.cost_price or 0) * i.quantity
+            for i in items
+        )
+
+        self.total_materials = total_materials
+        self.total_services = total_services
+        self.subtotal = subtotal
+        self.total = total
+        self.total_cost = total_cost
+        self.profit = total - total_cost - self.unexpected_costs - self.delivery_cost
+        self.save(update_fields=[
+            'total_materials', 'total_services', 'subtotal',
+            'total', 'total_cost', 'profit', 'updated_at'
+        ])
+
+    def save(self, *args, **kwargs):
+        if not self.number:
+            from datetime import datetime
+            prefix = 'КП' if self.client else 'СМ'
+            self.number = f'{prefix}-{datetime.now().strftime("%y%m%d")}-{CommercialEstimate.objects.filter(created_at__date=datetime.now().date()).count() + 1:03d}'
+            while CommercialEstimate.objects.filter(number=self.number).exists():
+                self.number = f'{prefix}-{datetime.now().strftime("%y%m%d")}-{CommercialEstimate.objects.filter(created_at__date=datetime.now().date()).count() + 2:03d}'
+        super().save(*args, **kwargs)
+
+
+class EstimateItem(models.Model):
+    """Позиция в смете"""
+    ITEM_TYPES = [
+        ('material', _('Материал со склада')),
+        ('service', _('Услуга из справочника')),
+        ('custom_material', _('Произвольный материал')),
+        ('custom_service', _('Произвольная услуга/работа')),
+    ]
+
+    estimate = models.ForeignKey(CommercialEstimate, on_delete=models.CASCADE, related_name='items', verbose_name=_('Смета'))
+    item_type = models.CharField(max_length=20, choices=ITEM_TYPES, verbose_name=_('Тип позиции'))
+
+    # Ссылки на справочники (опционально)
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Позиция склада'))
+    service = models.ForeignKey(EstimateService, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Услуга'))
+
+    # Поля позиции
+    name = models.CharField(max_length=300, verbose_name=_('Наименование'))
+    unit = models.CharField(max_length=30, default='шт', verbose_name=_('Ед. изм.'))
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1, verbose_name=_('Количество'))
+    cost_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Себестоимость за ед.'))
+    sale_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Цена за ед.'))
+    discount = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Скидка на позицию (%)'))
+    total_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Сумма'))
+    installer_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('ЗП монтажникам'))
+
+    # Сортировка
+    order_num = models.PositiveIntegerField(default=0, verbose_name=_('Порядок'))
+
+    class Meta:
+        verbose_name = _('Позиция сметы')
+        verbose_name_plural = _('Позиции сметы')
+        ordering = ['order_num', 'id']
+
+    def __str__(self):
+        return f'{self.name} x{self.quantity} = {self.total_price} ₽'
+
+    def save(self, *args, **kwargs):
+        # Авторасчёт суммы с учётом скидки
+        amount = self.sale_price * self.quantity
+        if self.discount:
+            amount = amount * (1 - self.discount / 100)
+        self.total_price = amount
+        super().save(*args, **kwargs)

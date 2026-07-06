@@ -4,7 +4,7 @@ import {
   DashboardOutlined, OrderedListOutlined, UsergroupAddOutlined,
   AppstoreOutlined, TeamOutlined, EnvironmentOutlined,
   BarChartOutlined, SettingOutlined, ShopOutlined, DollarOutlined,
-  HomeOutlined, CalendarOutlined, MessageOutlined,
+  HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined,
   UserOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -98,6 +98,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/messages',
       icon: <MessageOutlined />,
       label: 'Сообщения',
+    },
+    {
+      key: '/estimates',
+      icon: <CalculatorOutlined />,
+      label: 'Сметы и КП',
     },
     {
       key: '/reports',

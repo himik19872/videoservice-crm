@@ -32,6 +32,9 @@ import FinancePage from './pages/reports/FinancePage';
 import InventoryPage from './pages/equipment/InventoryPage';
 import CalendarPage from './pages/CalendarPage';
 import MessagesPage from './pages/MessagesPage';
+import EstimatesPage from './pages/estimates/EstimatesPage';
+import EstimateDetailPage from './pages/estimates/EstimateDetailPage';
+import EstimateServicesPage from './pages/estimates/EstimateServicesPage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
@@ -127,6 +130,9 @@ function AppContent() {
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/messages" element={<MessagesPage />} />
+          <Route path="/estimates" element={<EstimatesPage />} />
+          <Route path="/estimates/:id" element={<EstimateDetailPage />} />
+          <Route path="/estimate-services" element={<EstimateServicesPage />} />
           {user?.role === 'accountant' && <Route path="/settings/admin" element={<AdminSettingsPage />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -155,6 +161,9 @@ function AppContent() {
           <Route path="/buildings/:id" element={<BuildingDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/estimates" element={<EstimatesPage />} />
+          <Route path="/estimates/:id" element={<EstimateDetailPage />} />
+          <Route path="/estimate-services" element={<EstimateServicesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AdminLayout>
@@ -193,6 +202,9 @@ function AppContent() {
         <Route path="/finance" element={<FinancePage />} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/messages" element={<MessagesPage />} />
+        <Route path="/estimates" element={<EstimatesPage />} />
+        <Route path="/estimates/:id" element={<EstimateDetailPage />} />
+        <Route path="/estimate-services" element={<EstimateServicesPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>

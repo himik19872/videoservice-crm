@@ -12,6 +12,7 @@ from .models import Region, Master, Client, Equipment, Order, OrderHistory, Repo
 from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial, Message
+from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -21,6 +22,7 @@ from .serializers import (
     SystemSettingsSerializer, UserProfileSerializer, WorkShiftSerializer, OrderMediaSerializer, PushTokenSerializer
 )
 from .serializers import InventoryItemSerializer, InventoryMovementSerializer, PaymentSerializer, MasterSalarySerializer, MessageSerializer
+from .serializers import LegalEntitySerializer, EstimateServiceSerializer, CommercialEstimateSerializer, EstimateItemSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -1585,3 +1587,136 @@ class MessageViewSet(viewsets.ModelViewSet):
             'username': u['username'],
             'full_name': f"{u['first_name']} {u['last_name']}".strip() or u['username']
         } for u in users])
+
+
+# ══════════════════════════════════════════════════════════════════
+# Сметы и КП — viewsets
+# ══════════════════════════════════════════════════════════════════
+
+class LegalEntityViewSet(viewsets.ModelViewSet):
+    """Юрлица компании"""
+    queryset = LegalEntity.objects.all()
+    serializer_class = LegalEntitySerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'short_name', 'inn']
+
+
+class EstimateServiceViewSet(viewsets.ModelViewSet):
+    """Справочник услуг и работ для смет"""
+    queryset = EstimateService.objects.all()
+    serializer_class = EstimateServiceSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['category', 'is_active']
+    search_fields = ['name']
+    ordering_fields = ['name', 'category', 'sale_price', 'cost_price']
+
+
+class CommercialEstimateViewSet(viewsets.ModelViewSet):
+    """Сметы и коммерческие предложения"""
+    queryset = CommercialEstimate.objects.all()
+    serializer_class = CommercialEstimateSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'client', 'legal_entity', 'order']
+    search_fields = ['number', 'name', 'client__name']
+    ordering_fields = ['created_at', 'total', 'status', 'number']
+
+    def perform_create(self, serializer):
+        obj = serializer.save(created_by=self.request.user)
+        obj.recalculate()
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        obj.recalculate()
+
+    @action(detail=True, methods=['post'])
+    def add_item(self, request, pk=None):
+        """Добавить позицию в смету"""
+        estimate = self.get_object()
+        data = request.data.copy()
+        data['estimate'] = estimate.id
+
+        # Если материал со склада
+        if data.get('item_type') == 'material' and data.get('inventory_item_id'):
+            try:
+                inv = InventoryItem.objects.get(id=data['inventory_item_id'])
+                data['name'] = inv.name
+                data['unit'] = inv.unit
+                data['cost_price'] = inv.cost_price or 0
+                data['sale_price'] = inv.sale_price or 0
+            except InventoryItem.DoesNotExist:
+                pass
+
+        # Если услуга из справочника
+        if data.get('item_type') == 'service' and data.get('service_id'):
+            try:
+                svc = EstimateService.objects.get(id=data['service_id'])
+                data['name'] = svc.name
+                data['unit'] = svc.unit
+                data['cost_price'] = svc.cost_price
+                data['sale_price'] = svc.sale_price
+                data['installer_salary'] = svc.installer_salary
+            except EstimateService.DoesNotExist:
+                pass
+
+        serializer = EstimateItemSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        estimate.recalculate()
+        return Response(CommercialEstimateSerializer(estimate).data, status=201)
+
+    @action(detail=True, methods=['post'])
+    def remove_item(self, request, pk=None):
+        """Удалить позицию из сметы"""
+        estimate = self.get_object()
+        item_id = request.data.get('item_id')
+        if not item_id:
+            return Response({'error': 'item_id обязателен'}, status=400)
+        try:
+            item = estimate.items.get(id=item_id)
+            item.delete()
+            estimate.recalculate()
+            return Response(CommercialEstimateSerializer(estimate).data)
+        except EstimateItem.DoesNotExist:
+            return Response({'error': 'Позиция не найдена'}, status=404)
+
+    @action(detail=True, methods=['post'])
+    def update_item(self, request, pk=None):
+        """Обновить позицию сметы"""
+        estimate = self.get_object()
+        item_id = request.data.pop('item_id', None)
+        if not item_id:
+            return Response({'error': 'item_id обязателен'}, status=400)
+        try:
+            item = estimate.items.get(id=item_id)
+            for key, value in request.data.items():
+                setattr(item, key, value)
+            item.save()
+            estimate.recalculate()
+            return Response(CommercialEstimateSerializer(estimate).data)
+        except EstimateItem.DoesNotExist:
+            return Response({'error': 'Позиция не найдена'}, status=404)
+
+    @action(detail=True, methods=['post'])
+    def recalc(self, request, pk=None):
+        """Принудительный пересчёт сметы"""
+        estimate = self.get_object()
+        estimate.recalculate()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Генерация PDF сметы (заглушка — будет позже)"""
+        estimate = self.get_object()
+        # TODO: генерировать PDF через WeasyPrint или ReportLab
+        return Response({
+            'message': 'PDF генерация будет добавлена',
+            'estimate': CommercialEstimateSerializer(estimate).data
+        })
+
+
+class EstimateItemViewSet(viewsets.ModelViewSet):
+    """Позиции сметы (для прямого редактирования)"""
+    queryset = EstimateItem.objects.all()
+    serializer_class = EstimateItemSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['estimate', 'item_type']

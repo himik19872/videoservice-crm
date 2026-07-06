@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, OrderMedia, UserProfile, WorkShift, PushToken
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary, Message
+from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -629,3 +630,68 @@ class MessageSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             return request.user not in obj.read_by.all()
         return False
+
+
+# ══════════════════════════════════════════════════════════════════
+# Сметы и КП — сериализаторы
+# ══════════════════════════════════════════════════════════════════
+
+class LegalEntitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LegalEntity
+        fields = '__all__'
+
+
+class EstimateServiceSerializer(serializers.ModelSerializer):
+    margin_percent = serializers.ReadOnlyField()
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+
+    class Meta:
+        model = EstimateService
+        fields = ['id', 'name', 'category', 'category_display', 'unit', 'cost_price',
+                  'sale_price', 'installer_salary', 'margin_percent', 'notes', 'is_active',
+                  'created_at', 'updated_at']
+
+
+class EstimateItemSerializer(serializers.ModelSerializer):
+    item_type_display = serializers.CharField(source='get_item_type_display', read_only=True)
+
+    class Meta:
+        model = EstimateItem
+        fields = ['id', 'estimate', 'item_type', 'item_type_display', 'inventory_item',
+                  'service', 'name', 'unit', 'quantity', 'cost_price', 'sale_price',
+                  'discount', 'total_price', 'installer_salary', 'order_num']
+
+
+class CommercialEstimateSerializer(serializers.ModelSerializer):
+    items = EstimateItemSerializer(many=True, read_only=True)
+    client_name = serializers.SerializerMethodField()
+    legal_entity_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CommercialEstimate
+        fields = ['id', 'number', 'name', 'client', 'client_name', 'legal_entity',
+                  'legal_entity_name', 'order', 'status', 'status_display', 'discount',
+                  'commission', 'dealer_fee', 'unexpected_costs', 'delivery_type',
+                  'delivery_cost', 'tax_type', 'tax_rate', 'employee', 'employee_phone',
+                  'total_materials', 'total_services', 'subtotal', 'total', 'total_cost',
+                  'profit', 'note', 'items', 'created_by', 'created_by_name',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'number', 'created_by', 'created_at', 'updated_at']
+
+    def get_client_name(self, obj):
+        if obj.client:
+            return obj.client.name
+        return None
+
+    def get_legal_entity_name(self, obj):
+        if obj.legal_entity:
+            return obj.legal_entity.short_name or obj.legal_entity.name
+        return None
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return None
