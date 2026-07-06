@@ -5,3 +5,4 @@ psycopg2-binary==2.9.9
 python-decouple==3.8
 django-filter==23.3
 requests==2.31.0
+weasyprint==60.1

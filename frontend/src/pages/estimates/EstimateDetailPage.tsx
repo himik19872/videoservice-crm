@@ -176,6 +176,10 @@ const EstimateDetailPage: React.FC = () => {
     } catch (e) { message.error('Ошибка пересчёта'); }
   };
 
+  const handlePrintPdf = () => {
+    window.open(`/api/estimates/${id}/pdf/`, '_blank');
+  };
+
   if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>;
   if (!estimate) return null;
 
@@ -212,6 +216,7 @@ const EstimateDetailPage: React.FC = () => {
         </Space>
         <Space>
           <Button onClick={() => setSettingsOpen(true)}>⚙️ Параметры</Button>
+          <Button onClick={handlePrintPdf}>🖨️ Печать PDF</Button>
           <Button icon={<CalculatorOutlined />} onClick={recalc}>🔄 Пересчитать</Button>
         </Space>
       </div>

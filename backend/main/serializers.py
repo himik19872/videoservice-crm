@@ -129,8 +129,9 @@ class ClientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Client
         fields = [
-            'id', 'full_name', 'phone', 'email', 'address', 
-            'region', 'region_id', 'created_at', 'notes'
+            'id', 'full_name', 'phone', 'email', 'address',
+            'region', 'region_id', 'is_legal', 'inn', 'kpp', 'ogrn',
+            'legal_address', 'director_name', 'created_at', 'notes'
         ]
         read_only_fields = ['id', 'created_at']
 
@@ -427,6 +428,15 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
         model = SystemSettings
         fields = '__all__'
         read_only_fields = ['id', 'updated_at']
+
+
+class SystemSettingsPublicSerializer(serializers.ModelSerializer):
+    """Публичные настройки (без секретов) для шаблона КП"""
+    class Meta:
+        model = SystemSettings
+        fields = ['cp_logo_url', 'cp_header_text', 'cp_footer_text',
+                  'cp_signature_name', 'cp_signature_title', 'cp_validity_days',
+                  'cp_color', 'cp_show_logo']
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

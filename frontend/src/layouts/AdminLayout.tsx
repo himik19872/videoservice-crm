@@ -4,7 +4,7 @@ import {
   DashboardOutlined, OrderedListOutlined, UsergroupAddOutlined,
   AppstoreOutlined, TeamOutlined, EnvironmentOutlined,
   BarChartOutlined, SettingOutlined, ShopOutlined, DollarOutlined,
-  HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined,
+  HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined, ToolOutlined, BankOutlined, FileTextOutlined,
   UserOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -103,6 +103,21 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/estimates',
       icon: <CalculatorOutlined />,
       label: 'Сметы и КП',
+    },
+    {
+      key: '/estimate-services',
+      icon: <ToolOutlined />,
+      label: 'Услуги',
+    },
+    {
+      key: '/settings/legal-entities',
+      icon: <BankOutlined />,
+      label: 'Юрлица',
+    },
+    {
+      key: '/settings/estimate-template',
+      icon: <FileTextOutlined />,
+      label: 'Шаблон КП',
     },
     {
       key: '/reports',

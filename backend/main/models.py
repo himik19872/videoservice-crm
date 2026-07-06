@@ -139,6 +139,13 @@ class Client(models.Model):
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, related_name='clients', verbose_name=_('Район'))
     max_user_id = models.CharField(max_length=100, blank=True, verbose_name=_('Max user ID'))
     max_linked_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Max привязан'))
+    # Юридическое лицо клиента (для смет и КП)
+    is_legal = models.BooleanField(default=False, verbose_name=_('Юридическое лицо'))
+    inn = models.CharField(max_length=12, blank=True, verbose_name=_('ИНН'))
+    kpp = models.CharField(max_length=9, blank=True, verbose_name=_('КПП'))
+    ogrn = models.CharField(max_length=15, blank=True, verbose_name=_('ОГРН'))
+    legal_address = models.CharField(max_length=500, blank=True, verbose_name=_('Юридический адрес'))
+    director_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО руководителя'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
 
@@ -448,6 +455,16 @@ class SystemSettings(models.Model):
     traccar_user = models.CharField(max_length=100, blank=True, verbose_name=_('Traccar логин'))
     traccar_pass = models.CharField(max_length=100, blank=True, verbose_name=_('Traccar пароль'))
     traccar_active = models.BooleanField(default=False, verbose_name=_('Traccar активен'))
+
+    # Шаблон КП (коммерческого предложения)
+    cp_logo_url = models.CharField(max_length=500, blank=True, verbose_name=_('Логотип для КП (URL)'))
+    cp_header_text = models.CharField(max_length=300, default='Коммерческое предложение', blank=True, verbose_name=_('Заголовок КП'))
+    cp_footer_text = models.CharField(max_length=500, default='С уважением, команда Видео Сервис', blank=True, verbose_name=_('Текст в подвале КП'))
+    cp_signature_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО подписанта'))
+    cp_signature_title = models.CharField(max_length=200, blank=True, verbose_name=_('Должность подписанта'))
+    cp_validity_days = models.PositiveIntegerField(default=7, verbose_name=_('Срок действия КП (дней)'))
+    cp_color = models.CharField(max_length=20, default='#1a3e60', verbose_name=_('Цвет шапки КП (hex)'))
+    cp_show_logo = models.BooleanField(default=True, verbose_name=_('Показывать логотип'))
 
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
 

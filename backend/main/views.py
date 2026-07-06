@@ -1705,13 +1705,156 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
-        """Генерация PDF сметы (заглушка — будет позже)"""
+        """Генерация PDF коммерческого предложения"""
         estimate = self.get_object()
-        # TODO: генерировать PDF через WeasyPrint или ReportLab
-        return Response({
-            'message': 'PDF генерация будет добавлена',
-            'estimate': CommercialEstimateSerializer(estimate).data
-        })
+        settings_qs = SystemSettings.objects.first()
+        settings_data = {}
+        if settings_qs:
+            from .serializers import SystemSettingsPublicSerializer
+            settings_data = SystemSettingsPublicSerializer(settings_qs).data
+
+        # Собираем данные для шаблона
+        le = estimate.legal_entity
+        le_data = None
+        if le:
+            le_data = {
+                'name': le.name,
+                'short_name': le.short_name or le.name,
+                'inn': le.inn, 'kpp': le.kpp, 'ogrn': le.ogrn,
+                'legal_address': le.legal_address,
+                'phone': le.phone, 'email': le.email,
+                'bank_name': le.bank_name, 'bik': le.bik,
+                'corr_account': le.corr_account,
+                'settlement_account': le.settlement_account,
+                'director': le.director,
+            }
+
+        client = estimate.client
+        client_data = None
+        if client:
+            client_data = {
+                'name': client.name,
+                'phone': client.phone,
+                'email': client.email,
+                'inn': getattr(client, 'inn', ''),
+                'kpp': getattr(client, 'kpp', ''),
+                'legal_address': getattr(client, 'legal_address', ''),
+                'director_name': getattr(client, 'director_name', ''),
+            }
+
+        items = estimate.items.all()
+        from datetime import date, timedelta
+        validity_date = (date.today() + timedelta(days=settings_data.get('cp_validity_days', 7))).strftime('%d.%m.%Y')
+
+        # Формируем HTML
+        color = settings_data.get('cp_color', '#1a3e60')
+        logo_tag = ''
+        if settings_data.get('cp_show_logo') and settings_data.get('cp_logo_url'):
+            logo_tag = f'<img src="{settings_data["cp_logo_url"]}" style="max-height:60px;" />'
+
+        items_html = ''
+        for idx, item in enumerate(items, 1):
+            items_html += f'''
+            <tr>
+                <td style="text-align:center;">{idx}</td>
+                <td>{item.name}</td>
+                <td style="text-align:center;">{item.unit}</td>
+                <td style="text-align:center;">{item.quantity:.1f}</td>
+                <td style="text-align:right;">{item.sale_price:,.2f} ₽</td>
+                <td style="text-align:right;">{item.total_price:,.2f} ₽</td>
+            </tr>'''
+
+        html = f'''<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="utf-8"><title>КП №{estimate.number}</title>
+<style>
+@page {{ size: A4; margin: 20mm 15mm; }}
+body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #333; }}
+.header {{ background: {color}; color: #fff; padding: 15px 20px; border-radius: 6px; margin-bottom: 20px; }}
+.header h1 {{ margin: 0; font-size: 18pt; }}
+.header .sub {{ font-size: 10pt; opacity: .85; margin-top: 5px; }}
+.company-info {{ margin-bottom: 20px; }}
+.company-info table {{ width: 100%; border-collapse: collapse; }}
+.company-info td {{ vertical-align: top; padding: 8px; font-size: 10pt; }}
+.company-info .label {{ color: #888; font-size: 9pt; }}
+.client-info {{ margin-bottom: 20px; border: 1px solid #ddd; padding: 12px; border-radius: 6px; }}
+.client-info h3 {{ margin: 0 0 10px; color: {color}; }}
+.items-table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
+.items-table th {{ background: {color}; color: #fff; padding: 8px; font-size: 10pt; }}
+.items-table td {{ padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 10pt; }}
+.items-table tr:nth-child(even) {{ background: #f9f9f9; }}
+.totals {{ float: right; width: 300px; margin-top: 15px; }}
+.totals table {{ width: 100%; border-collapse: collapse; }}
+.totals td {{ padding: 4px 8px; font-size: 10pt; }}
+.totals .total {{ font-weight: bold; font-size: 14pt; color: {color}; border-top: 2px solid {color}; }}
+.footer {{ margin-top: 40px; font-size: 10pt; color: #666; }}
+.validity {{ margin-top: 15px; font-size: 10pt; color: #888; }}
+</style></head>
+<body>
+<div class="header">
+    {logo_tag}
+    <h1>{settings_data.get('cp_header_text', 'Коммерческое предложение')} №{estimate.number}</h1>
+    <div class="sub">от {estimate.created_at.strftime('%d.%m.%Y')}</div>
+</div>
+
+<div class="company-info">
+    <table>
+        <tr>
+            <td width="50%">
+                <div class="label">Исполнитель:</div>
+                <strong>{le_data['short_name'] or le_data['name'] if le_data else 'Наша компания'}</strong><br>
+                {'ИНН ' + le_data['inn'] + '<br>' if le_data and le_data.get('inn') else ''}
+                {'КПП ' + le_data['kpp'] + '<br>' if le_data and le_data.get('kpp') else ''}
+                {le_data['legal_address'] + '<br>' if le_data and le_data.get('legal_address') else ''}
+                {'📞 ' + le_data['phone'] + '<br>' if le_data and le_data.get('phone') else ''}
+            </td>
+            <td width="50%">
+                <div class="label">Заказчик:</div>
+                <strong>{client_data['name'] if client_data else '—'}</strong><br>
+                {'ИНН ' + client_data['inn'] + '<br>' if client_data and client_data.get('inn') else ''}
+                {'📞 ' + client_data['phone'] + '<br>' if client_data and client_data.get('phone') else ''}
+            </td>
+        </tr>
+    </table>
+</div>
+
+<table class="items-table">
+    <tr><th>№</th><th>Наименование</th><th>Ед.</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr>
+    {items_html}
+</table>
+
+<div class="totals">
+    <table>
+        <tr><td>Материалы:</td><td style="text-align:right;">{estimate.total_materials:,.2f} ₽</td></tr>
+        <tr><td>Услуги:</td><td style="text-align:right;">{estimate.total_services:,.2f} ₽</td></tr>
+        <tr><td>Подытог:</td><td style="text-align:right;">{estimate.subtotal:,.2f} ₽</td></tr>
+        {f'<tr><td>Скидка:</td><td style="text-align:right;">-{estimate.discount}%</td></tr>' if estimate.discount and estimate.discount > 0 else ''}
+        {f'<tr><td>Доставка:</td><td style="text-align:right;">{estimate.delivery_cost:,.2f} ₽</td></tr>' if estimate.delivery_cost and estimate.delivery_cost > 0 else ''}
+        <tr class="total"><td>ИТОГО:</td><td style="text-align:right;">{estimate.total:,.2f} ₽</td></tr>
+    </table>
+</div>
+
+<div style="clear:both;"></div>
+
+<div class="validity">
+    💡 Предложение действительно до: <strong>{validity_date}</strong>
+</div>
+
+<div class="footer">
+    <p>{settings_data.get('cp_footer_text', 'С уважением, команда Видео Сервис')}</p>
+    {f'<p>_________________ {settings_data.get("cp_signature_name", "")}<br><em>{settings_data.get("cp_signature_title", "")}</em></p>' if settings_data.get('cp_signature_name') else ''}
+</div>
+</body></html>'''
+
+        try:
+            from weasyprint import HTML as WHTML
+            pdf_bytes = WHTML(string=html).write_pdf()
+            from django.http import HttpResponse
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="KP_{estimate.number}.pdf"'
+            return response
+        except Exception as e:
+            return Response({'error': f'PDF error: {str(e)}'}, status=500)
 
 
 class EstimateItemViewSet(viewsets.ModelViewSet):

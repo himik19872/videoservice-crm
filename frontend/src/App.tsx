@@ -35,6 +35,8 @@ import MessagesPage from './pages/MessagesPage';
 import EstimatesPage from './pages/estimates/EstimatesPage';
 import EstimateDetailPage from './pages/estimates/EstimateDetailPage';
 import EstimateServicesPage from './pages/estimates/EstimateServicesPage';
+import LegalEntitiesPage from './pages/settings/LegalEntitiesPage';
+import EstimateSettingsPage from './pages/settings/EstimateSettingsPage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
@@ -195,6 +197,8 @@ function AppContent() {
         <Route path="/settings/traccar" element={<TraccarIntegrationPage />} />
         <Route path="/settings/max" element={<MaxSettingsPage />} />
         <Route path="/settings/system" element={<SystemSettingsPage />} />
+        <Route path="/settings/legal-entities" element={<LegalEntitiesPage />} />
+        <Route path="/settings/estimate-template" element={<EstimateSettingsPage />} />
         <Route path="/settings/admin" element={<AdminSettingsPage />} />
         <Route path="/dispatchers" element={<DispatchersPage />} />
         <Route path="/reports" element={<ReportsPage />} />
