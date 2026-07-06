@@ -1300,7 +1300,9 @@ class PushTokenViewSet(viewsets.ModelViewSet):
 def send_push_notification(user_id, title, body, data=None):
     """Отправить уведомление: сначала Max, затем Expo Push"""
     from .max_service import send_notification_to_user
-    send_notification_to_user(user_id, title, body)
+    print(f'[Push] Sending to user_id={user_id}: title="{title}"')
+    result = send_notification_to_user(user_id, title, body)
+    print(f'[Push] Result for user_id={user_id}: via_max={result}')
 
 
 # ==================== Auth endpoints ====================

@@ -149,13 +149,15 @@ def _send_expo_push(user_id, title, body):
     import requests as req
     tokens = PushToken.objects.filter(user_id=user_id, is_active=True).values_list('token', flat=True)
     if not tokens:
+        print(f'[Push] No tokens for user_id={user_id}')
         return
     try:
-        req.post('https://exp.host/--/api/v2/push/send', json=[
+        resp = req.post('https://exp.host/--/api/v2/push/send', json=[
             {'to': t, 'title': title, 'body': body, 'sound': 'default'} for t in tokens
-        ], timeout=10, verify=CA_BUNDLE)
+        ], timeout=10)  # без CA_BUNDLE — exp.host использует стандартный Let's Encrypt
+        print(f'[Push] Expo response for user_id={user_id}: {resp.status_code} {resp.text[:200]}')
     except Exception as e:
-        print(f'Expo push error: {e}')
+        print(f'[Push] Expo push error for user_id={user_id}: {e}')
 
 
 def link_max_user(user, max_user_id, phone=''):

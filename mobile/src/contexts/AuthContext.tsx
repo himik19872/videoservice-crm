@@ -42,10 +42,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const notificationListener = useRef<any>(null);
   const responseListener = useRef<any>(null);
+  const notifReady = useRef(false);
 
   useEffect(() => {
-    restoreSession();
-    setupNotifications();
+    initApp();
     return () => {
       if (Notifications && notificationListener.current) {
         try { Notifications.removeNotificationSubscription(notificationListener.current); } catch {}
@@ -56,20 +56,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Последовательная инициализация: сначала нотификации, потом сессия
+  const initApp = async () => {
+    await setupNotifications();
+    await restoreSession();
+  };
+
   const setupNotifications = async () => {
     const ok = await loadNotifications();
-    if (!ok) return;
-    if (!Device.isDevice) return;
-    try {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') return;
-    } catch { return; }
+    if (!ok) {
+      console.log('[Push] expo-notifications not available');
+      return;
+    }
 
+    // Проверяем, что это физическое устройство (не эмулятор/Expo Go)
     try {
-      notificationListener.current = Notifications.addNotificationReceivedListener((_event: any) => {});
-      responseListener.current = Notifications.addNotificationResponseReceivedListener((_event: any) => {});
-    } catch {}
+      if (!Device.isDevice) {
+        console.log('[Push] Not a physical device, skipping push setup');
+        return;
+      }
+    } catch (e) {
+      console.log('[Push] Device check failed:', e);
+      return;
+    }
 
+    // Запрашиваем разрешение на уведомления
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        const { status: newStatus } = await Notifications.requestPermissionsAsync();
+        if (newStatus !== 'granted') {
+          console.log('[Push] Permission denied');
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('[Push] Permission error:', e);
+      return;
+    }
+
+    // Настраиваем канал для Android
     if (Platform.OS === 'android') {
       try {
         await Notifications.setNotificationChannelAsync('orders', {
@@ -78,17 +104,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           sound: 'default',
           vibrationPattern: [0, 250, 250, 250],
         });
-      } catch {}
+      } catch (e) {
+        console.log('[Push] Channel error:', e);
+      }
     }
+
+    // Слушатели уведомлений
+    try {
+      notificationListener.current = Notifications.addNotificationReceivedListener(
+        (notification: any) => {
+          console.log('[Push] Received:', notification?.request?.content?.title);
+        }
+      );
+      responseListener.current = Notifications.addNotificationResponseReceivedListener(
+        (response: any) => {
+          console.log('[Push] Tapped:', response?.notification?.request?.content?.title);
+        }
+      );
+    } catch (e) {
+      console.log('[Push] Listener error:', e);
+    }
+
+    notifReady.current = true;
+    console.log('[Push] Setup complete, ready to register token');
   };
 
   const registerPushToken = async () => {
-    if (!Notifications) return;
+    if (!notifReady.current || !Notifications) {
+      console.log('[Push] Not ready, skipping token registration');
+      return;
+    }
     try {
-      const token = (await Notifications.getExpoPushTokenAsync()).data;
+      const expoPushToken = await Notifications.getExpoPushTokenAsync();
+      const token = expoPushToken.data;
+      console.log('[Push] Token obtained:', token.slice(0, 20) + '...');
       await api.post('/push-tokens/', { token, platform: Platform.OS });
-    } catch (e) {
-      console.log('Push register error (ignored in Expo Go):', e);
+      console.log('[Push] Token registered on server');
+    } catch (e: any) {
+      console.log('[Push] Register error:', e?.message || e);
     }
   };
 
@@ -98,6 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const res = await api.get('/users/me/');
         setUser(res.data);
+        // Теперь notifReady гарантированно true — setupNotifications уже завершился
         await registerPushToken();
       } catch {
         await AsyncStorage.removeItem('token');
@@ -111,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { token, user: userData } = res.data;
     await AsyncStorage.setItem('token', token);
     setUser(userData);
+    // При входе тоже регистрируем токен (setup уже должен быть готов)
     await registerPushToken();
   };
 
