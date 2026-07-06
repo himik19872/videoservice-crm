@@ -20,10 +20,6 @@ services:
     restart: always
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py loaddata regions.json &&
-             python manage.py loaddata users.json &&
-             python manage.py loaddata masters.json &&
-             python manage.py loaddata user_profiles.json &&
              python manage.py runserver 0.0.0.0:8000"
     environment:
       - DB_NAME=crm
