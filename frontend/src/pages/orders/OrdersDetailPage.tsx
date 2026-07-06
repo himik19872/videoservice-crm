@@ -29,6 +29,8 @@ const OrdersDetailPage: React.FC = () => {
   }, [id]);
 
   const fetchMasters = async () => {
+    // Только для staff — мастера не могут назначать других мастеров
+    if (!isStaff) return;
     try {
       const response = await api.get('/masters/?is_available=true');
       setMasters(response.data.results || response.data);
