@@ -455,7 +455,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
         user.is_superuser = (role == 'admin')
         user.is_staff = (role in ['admin', 'dispatcher'])
         user.save()
-        return UserProfile.objects.create(user=user, **validated_data)
+        profile = UserProfile.objects.create(user=user, **validated_data)
+        # Авто-создание Master для ролей master/installer
+        if role in ('master', 'installer') and not hasattr(user, 'master_profile'):
+            from .models import Master, Region
+            region = Region.objects.first()
+            Master.objects.create(user=user, phone=validated_data.get('phone', ''), region=region)
+        return profile
 
     def update(self, instance, validated_data):
         username = validated_data.pop('username', None)

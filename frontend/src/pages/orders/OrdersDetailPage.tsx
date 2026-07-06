@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col } from 'antd';
+import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
@@ -18,24 +18,30 @@ const OrdersDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [masters, setMasters] = useState<Master[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);  // Все сотрудники для назначения
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [selectedMasterId, setSelectedMasterId] = useState<number | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [gpsHistory, setGpsHistory] = useState<any>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
 
   useEffect(() => {
     fetchOrder();
-    fetchMasters();
+    fetchAssignableUsers();
   }, [id]);
 
-  const fetchMasters = async () => {
-    // Только для staff — мастера не могут назначать других мастеров
+  const fetchAssignableUsers = async () => {
     if (!isStaff) return;
     try {
-      const response = await api.get('/masters/?is_available=true');
-      setMasters(response.data.results || response.data);
+      // Загружаем и мастеров, и всех пользователей
+      const [mastersRes, usersRes] = await Promise.all([
+        api.get('/masters/?page_size=100'),
+        api.get('/users/?page_size=200'),
+      ]);
+      setMasters(mastersRes.data.results || mastersRes.data || []);
+      setAllUsers(usersRes.data.results || usersRes.data || []);
     } catch (error) {
-      console.error('Ошибка загрузки мастеров:', error);
+      console.error('Ошибка загрузки:', error);
     }
   };
 
@@ -94,16 +100,26 @@ const OrdersDetailPage: React.FC = () => {
   };
 
   const handleAssignMaster = async () => {
-    if (!order || !selectedMasterId) return;
+    if (!order) return;
+    const payload: any = {};
+    if (selectedUserId) {
+      payload.user_id = selectedUserId;
+    } else if (selectedMasterId) {
+      payload.master_id = selectedMasterId;
+    } else {
+      message.warning('Выберите сотрудника');
+      return;
+    }
     setUpdating(true);
     try {
-      const response = await api.post(`/orders/${order.id}/assign/`, { master_id: selectedMasterId });
+      const response = await api.post(`/orders/${order.id}/assign/`, payload);
       setOrder(response.data);
       setAssignModalOpen(false);
       setSelectedMasterId(null);
-      message.success('Мастер назначен');
+      setSelectedUserId(null);
+      message.success('Сотрудник назначен');
     } catch (error) {
-      message.error('Ошибка назначения мастера');
+      message.error('Ошибка назначения');
     } finally {
       setUpdating(false);
     }
@@ -111,6 +127,7 @@ const OrdersDetailPage: React.FC = () => {
 
   const openAssignModal = () => {
     setSelectedMasterId(null);
+    setSelectedUserId(null);
     setAssignModalOpen(true);
   };
 
@@ -151,12 +168,15 @@ const OrdersDetailPage: React.FC = () => {
   };
   const handleAccept = () => handleStatusChange('accepted', 'Заявка принята');
   const handleStart = () => handleStatusChange('in_progress', 'Начато выполнение');
-  const handleComplete = () => handleStatusChange('completed', 'Заявка выполнена');
-  const handleCancel = () => handleStatusChange('cancelled', 'Заявка отменена');
-  const handleNeedHelp = () => {
-    const notes = prompt('Опишите, какая требуется помощь:');
-    if (notes) handleStatusChange('need_help', notes);
+  const handleComplete = () => {
+    const notes = prompt('Опишите, что сделано по заявке (обязательно):');
+    if (!notes || !notes.trim()) {
+      message.warning('Необходимо описать проделанную работу');
+      return;
+    }
+    handleStatusChange('completed', notes);
   };
+  const handleCancel = () => handleStatusChange('cancelled', 'Заявка отменена');
   const handlePause = () => {
     const notes = prompt('Укажите причину паузы (обязательно):');
     if (notes) handleStatusChange('paused', notes);
@@ -484,32 +504,59 @@ const OrdersDetailPage: React.FC = () => {
       </div>
 
       <Modal
-        title="Назначить мастера"
+        title="Назначить сотрудника"
         open={assignModalOpen}
         onOk={handleAssignMaster}
         onCancel={() => setAssignModalOpen(false)}
         confirmLoading={updating}
         okText="Назначить"
         cancelText="Отмена"
-        okButtonProps={{ disabled: !selectedMasterId }}
+        okButtonProps={{ disabled: !selectedMasterId && !selectedUserId }}
+        width={450}
       >
-        <Select
-          style={{ width: '100%' }}
-          placeholder="Выберите мастера"
-          value={selectedMasterId}
-          onChange={setSelectedMasterId}
-          showSearch
-          optionFilterProp="label"
-          options={masters
-            .filter(m => {
-              // Показываем мастеров, у которых регион совпадает с регионом заявки (или любой, если регион не задан)
-              if (order?.region_id && m.region?.id && m.region.id !== order.region_id) return false;
-              return true;
-            })
-            .map(m => ({
-              value: m.id,
-              label: `${m.full_name || m.user?.first_name} — ${m.region?.name || 'без района'} (${m.phone})`,
-            }))}
+        <Tabs
+          items={[
+            {
+              key: 'masters',
+              label: '👨‍🔧 Мастера',
+              children: (
+                <Select
+                  style={{ width: '100%' }}
+                  placeholder="Выберите мастера"
+                  value={selectedMasterId}
+                  onChange={(v) => { setSelectedMasterId(v); setSelectedUserId(null); }}
+                  showSearch
+                  optionFilterProp="label"
+                  options={masters
+                    .filter(m => true) // все мастера
+                    .map(m => ({
+                      value: m.id,
+                      label: `${m.full_name || m.user?.first_name} — ${m.region?.name || 'без района'} (${m.phone})`,
+                    }))}
+                />
+              ),
+            },
+            {
+              key: 'all',
+              label: '👥 Все сотрудники',
+              children: (
+                <Select
+                  style={{ width: '100%' }}
+                  placeholder="Любой сотрудник (инженер, монтажник...)"
+                  value={selectedUserId}
+                  onChange={(v) => { setSelectedUserId(v); setSelectedMasterId(null); }}
+                  showSearch
+                  optionFilterProp="label"
+                  options={allUsers
+                    .filter(u => u.user?.id && u.role) // все с ролью
+                    .map(u => ({
+                      value: u.user.id,
+                      label: `${u.user.first_name} ${u.user.last_name} (${u.user.username}) — ${u.role}`,
+                    }))}
+                />
+              ),
+            },
+          ]}
         />
       </Modal>
     </Card>

@@ -38,7 +38,14 @@ app.use('/admin', proxyRequest);
 app.use('/media', proxyRequest);
 
 const buildPath = path.join(__dirname, '..', 'frontend', 'build');
-app.use(express.static(buildPath));
+app.use(express.static(buildPath, {
+  setHeaders: (res) => {
+    // Отключаем кеширование для index.html и JS/CSS файлов
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+}));
 app.get('*', (req, res) => res.sendFile(path.join(buildPath, 'index.html')));
 
 app.listen(PORT, '0.0.0.0', () => console.log('CRM on 0.0.0.0:' + PORT));

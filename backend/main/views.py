@@ -410,10 +410,15 @@ class OrderViewSet(viewsets.ModelViewSet):
             if field and not getattr(order, field):
                 setattr(order, field, now)
 
-            # Если на паузе — обязательный комментарий
+            # Если на паузе или завершена — обязательный комментарий
             if order.status == 'paused' and not notes:
                 return Response(
                     {'error': 'Для статуса "На паузе" обязательно укажите причину (notes)'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if order.status == 'completed' and not notes:
+                return Response(
+                    {'error': 'Для завершения заявки обязательно оставьте комментарий о проделанной работе'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -463,18 +468,35 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def assign(self, request, pk=None):
-        """Назначить заявку мастеру (сразу или на конкретную дату)"""
+        """Назначить заявку сотруднику (мастер, монтажник, инженер и др.)"""
         order = self.get_object()
-        master_id = request.data.get('master_id')
-        scheduled_at = request.data.get('scheduled_at')  # Отложенное назначение
+        master_id = request.data.get('master_id')  # старый параметр
+        user_id = request.data.get('user_id')  # новый параметр — любой сотрудник
+        scheduled_at = request.data.get('scheduled_at')
 
-        if not master_id:
-            return Response({'error': 'Не указан ID мастера'}, status=400)
+        master = None
+        assigned_name = 'Неизвестный'
 
-        try:
-            master = Master.objects.get(id=master_id)
-        except Master.DoesNotExist:
-            return Response({'error': 'Мастер не найден'}, status=404)
+        # Поддержка user_id (любой сотрудник)
+        if user_id:
+            try:
+                assigned_user = User.objects.get(id=user_id)
+                # Ищем или создаём Master для этого пользователя
+                master, _ = Master.objects.get_or_create(
+                    user=assigned_user,
+                    defaults={'phone': getattr(assigned_user.profile, 'phone', ''), 'region': Region.objects.first()}
+                )
+                assigned_name = assigned_user.get_full_name() or assigned_user.username
+            except User.DoesNotExist:
+                return Response({'error': 'Сотрудник не найден'}, status=404)
+        elif master_id:
+            try:
+                master = Master.objects.get(id=master_id)
+                assigned_name = str(master)
+            except Master.DoesNotExist:
+                return Response({'error': 'Мастер не найден'}, status=404)
+        else:
+            return Response({'error': 'Не указан ID сотрудника (user_id или master_id)'}, status=400)
 
         old_status = order.status
         order.master = master
@@ -488,15 +510,15 @@ class OrderViewSet(viewsets.ModelViewSet):
         OrderHistory.objects.create(
             order=order, changed_by=request.user,
             old_status=old_status, new_status=order.status,
-            notes=f'Заявка назначена мастеру: {master}'
+            notes=f'Заявка назначена: {assigned_name}'
         )
 
-        # Уведомление мастеру
-        send_push_notification(master.user_id,
-            'Новая заявка',
-            f'#{order.number} — {order.get_order_type_display()}, {order.address}')
+        # Уведомление сотруднику
+        if master:
+            send_push_notification(master.user_id,
+                'Новая заявка',
+                f'#{order.number} — {order.get_order_type_display()}, {order.address}')
 
-        # Max-уведомление клиенту: назначен мастер
         if order.client:
             try:
                 from .max_service import notify_client_order_assigned
@@ -505,8 +527,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                     order_number=order.number,
                     order_type=order.get_order_type_display(),
                     address=order.full_address,
-                    master_name=master.user.get_full_name() or master.user.username,
-                    master_phone=master.phone or 'не указан',
+                    master_name=assigned_name,
+                    master_phone=master.phone if master else 'не указан',
                 )
             except Exception:
                 pass

@@ -151,7 +151,7 @@ const AdminSettingsPage: React.FC = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const resp = await api.get('/users/');
+      const resp = await api.get('/users/?page_size=200');
       const data = resp.data.results || resp.data;
       setUsers(data.map((p: any) => ({
         id: p.id,
