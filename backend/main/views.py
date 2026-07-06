@@ -335,6 +335,21 @@ class OrderViewSet(viewsets.ModelViewSet):
             new_status=order.status
         )
 
+        # Уведомляем диспетчеров и админов о новой заявке
+        from django.contrib.auth.models import User
+        staff_users = User.objects.filter(
+            profile__role__in=['admin', 'dispatcher', 'secretary', 'operator']
+        ).exclude(id=request.user.id)
+        for u in staff_users:
+            try:
+                send_push_notification(
+                    u.id,
+                    '🆕 Новая заявка',
+                    f'#{order.number} — {order.get_order_type_display()}, {order.address or order.full_address}'
+                )
+            except Exception:
+                pass
+
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):

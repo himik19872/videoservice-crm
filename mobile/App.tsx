@@ -17,6 +17,7 @@ import InventoryScreen from './src/screens/InventoryScreen';
 import InventoryDetailScreen from './src/screens/InventoryDetailScreen';
 import PaymentsScreen from './src/screens/PaymentsScreen';
 import AddPaymentScreen from './src/screens/AddPaymentScreen';
+import MessagesScreen from './src/screens/MessagesScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -151,6 +152,17 @@ function AppStack() {
         component={InventoryDetailScreen}
         options={{
           title: 'Детали оборудования',
+          headerStyle,
+          headerTintColor,
+        }}
+      />
+
+      {/* Сообщения */}
+      <Stack.Screen
+        name="Messages"
+        component={MessagesScreen}
+        options={{
+          title: '💬 Сообщения',
           headerStyle,
           headerTintColor,
         }}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, Linking, Image,
+  ActivityIndicator, Alert, Linking, Image, Modal, TextInput,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -35,6 +35,11 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [media, setMedia] = useState<any[]>([]);
+
+  // Состояние для модального окна комментария
+  const [commentModal, setCommentModal] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [pendingStatus, setPendingStatus] = useState('');
 
   useEffect(() => {
     fetchOrder();
@@ -94,7 +99,20 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   };
 
   const changeStatus = async (status: string, notes = '') => {
+    // Если закрываем заявку (completed) — требуем комментарий
+    if (status === 'completed' && (!notes || !notes.trim())) {
+      setPendingStatus('completed');
+      setCommentText('');
+      setCommentModal(true);
+      return;
+    }
+
+    await doChangeStatus(status, notes.trim());
+  };
+
+  const doChangeStatus = async (status: string, notes: string) => {
     setUpdating(true);
+    setCommentModal(false);
     try {
       let gps: any = {};
       try {
@@ -106,7 +124,6 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       } catch (e) {}
 
       if (!isOnline) {
-        // Офлайн — сохраняем в очередь
         await addPendingAction({
           method: 'PATCH',
           url: `/orders/${id}/`,
@@ -114,14 +131,16 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           description: `Смена статуса на "${statusLabels[status]}" для заявки ${order?.number}`,
         });
         Alert.alert('Сохранено офлайн', 'Изменение будет отправлено при восстановлении связи');
-        // Оптимистично обновляем локально
         setOrder((prev) => prev ? { ...prev, status } : prev);
       } else {
-        const res = await api.patch(`/orders/${id}/`, { status, notes, ...gps });
+        const payload: any = { status, ...gps };
+        if (notes) payload.notes = notes;
+        const res = await api.patch(`/orders/${id}/`, payload);
         setOrder(res.data);
       }
     } catch (error: any) {
-      Alert.alert('Ошибка', error?.response?.data?.error || 'Не удалось изменить статус');
+      const errMsg = error?.response?.data?.error || 'Не удалось изменить статус';
+      Alert.alert('Ошибка', errMsg);
     } finally {
       setUpdating(false);
     }
@@ -283,6 +302,58 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={[styles.doneText, { color: theme.success }]}>✅ Заявка {statusLabels[order.status].toLowerCase()}</Text>
         </View>
       )}
+
+      {/* Модальное окно для комментария при закрытии заявки */}
+      <Modal
+        visible={commentModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCommentModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>📝 Комментарий обязателен</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
+              Опишите выполненные работы для заявки #{order?.number}
+            </Text>
+            <TextInput
+              style={[styles.modalInput, {
+                backgroundColor: theme.inputBg,
+                borderColor: theme.border,
+                color: theme.text,
+              }]}
+              placeholder="Что было сделано, какие материалы использованы..."
+              placeholderTextColor={theme.textTertiary}
+              value={commentText}
+              onChangeText={setCommentText}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              autoFocus
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: theme.border }]}
+                onPress={() => { setCommentModal(false); setCommentText(''); }}
+              >
+                <Text style={[styles.modalBtnText, { color: theme.text }]}>Отмена</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: '#52c41a', opacity: commentText.trim() ? 1 : 0.5 }]}
+                onPress={() => {
+                  if (commentText.trim()) {
+                    doChangeStatus(pendingStatus, commentText.trim());
+                    setCommentText('');
+                  }
+                }}
+                disabled={!commentText.trim()}
+              >
+                <Text style={styles.modalBtnTextWhite}>✅ Завершить</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -323,6 +394,28 @@ const styles = StyleSheet.create({
   btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   doneBlock: { padding: 20, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
   doneText: { fontSize: 16, fontWeight: '600' },
+  // Modal styles
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    width: '100%', borderRadius: 14, padding: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25, shadowRadius: 10, elevation: 10,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  modalSubtitle: { fontSize: 13, marginBottom: 16 },
+  modalInput: {
+    borderWidth: 1, borderRadius: 10,
+    padding: 12, fontSize: 15,
+    minHeight: 100, marginBottom: 16,
+  },
+  modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  modalBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  modalBtnText: { fontSize: 14, fontWeight: '600' },
+  modalBtnTextWhite: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });
 
 export default OrderDetailScreen;
