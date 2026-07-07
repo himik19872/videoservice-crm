@@ -176,8 +176,19 @@ const EstimateDetailPage: React.FC = () => {
     } catch (e) { message.error('Ошибка пересчёта'); }
   };
 
-  const handlePrintPdf = () => {
-    window.open(`/api/estimates/${id}/pdf/`, '_blank');
+  const handlePrintPdf = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/estimates/${id}/pdf/`, {
+        headers: { 'Authorization': `Token ${token}` },
+      });
+      if (!response.ok) throw new Error('PDF error');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (e) {
+      message.error('Ошибка генерации PDF');
+    }
   };
 
   if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>;

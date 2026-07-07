@@ -18,8 +18,6 @@ const EstimateServicesPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-
-  const [form] = Modal.useForm ? undefined : undefined;
   const [formData, setFormData] = useState({
     name: '', category: 'installation', unit: 'шт',
     cost_price: 0, sale_price: 0, installer_salary: 0, notes: '',
