@@ -1705,7 +1705,7 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
-        """Генерация PDF коммерческого предложения"""
+        """Генерация PDF/печатной формы коммерческого предложения"""
         estimate = self.get_object()
         settings_qs = SystemSettings.objects.first()
         settings_data = {}
@@ -1713,13 +1713,11 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
             from .serializers import SystemSettingsPublicSerializer
             settings_data = SystemSettingsPublicSerializer(settings_qs).data
 
-        # Собираем данные для шаблона
         le = estimate.legal_entity
         le_data = None
         if le:
             le_data = {
-                'name': le.name,
-                'short_name': le.short_name or le.name,
+                'name': le.name, 'short_name': le.short_name or le.name,
                 'inn': le.inn, 'kpp': le.kpp, 'ogrn': le.ogrn,
                 'legal_address': le.legal_address,
                 'phone': le.phone, 'email': le.email,
@@ -1733,11 +1731,8 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
         client_data = None
         if client:
             client_data = {
-                'name': client.name,
-                'phone': client.phone,
-                'email': client.email,
+                'name': client.name, 'phone': client.phone, 'email': client.email,
                 'inn': getattr(client, 'inn', ''),
-                'kpp': getattr(client, 'kpp', ''),
                 'legal_address': getattr(client, 'legal_address', ''),
                 'director_name': getattr(client, 'director_name', ''),
             }
@@ -1746,7 +1741,6 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
         from datetime import date, timedelta
         validity_date = (date.today() + timedelta(days=settings_data.get('cp_validity_days', 7))).strftime('%d.%m.%Y')
 
-        # Формируем HTML
         color = settings_data.get('cp_color', '#1a3e60')
         logo_tag = ''
         if settings_data.get('cp_show_logo') and settings_data.get('cp_logo_url'):
@@ -1768,7 +1762,12 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
 <html lang="ru">
 <head><meta charset="utf-8"><title>КП №{estimate.number}</title>
 <style>
-@page {{ size: A4; margin: 20mm 15mm; }}
+@page {{ size: A4; margin: 15mm; }}
+@page :first {{ margin-top: 25mm; }}
+@media print {{
+  body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  .no-print {{ display: none !important; }}
+}}
 body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #333; }}
 .header {{ background: {color}; color: #fff; padding: 15px 20px; border-radius: 6px; margin-bottom: 20px; }}
 .header h1 {{ margin: 0; font-size: 18pt; }}
@@ -1789,8 +1788,12 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 .totals .total {{ font-weight: bold; font-size: 14pt; color: {color}; border-top: 2px solid {color}; }}
 .footer {{ margin-top: 40px; font-size: 10pt; color: #666; }}
 .validity {{ margin-top: 15px; font-size: 10pt; color: #888; }}
+.print-btn {{ position: fixed; top: 10px; right: 10px; padding: 10px 20px; background: {color}; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; z-index: 999; }}
+.print-btn:hover {{ opacity: .9; }}
 </style></head>
 <body>
+<button class="print-btn no-print" onclick="window.print()">🖨️ Печать / Сохранить PDF</button>
+
 <div class="header">
     {logo_tag}
     <h1>{settings_data.get('cp_header_text', 'Коммерческое предложение')} №{estimate.number}</h1>
@@ -1846,15 +1849,8 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 </div>
 </body></html>'''
 
-        try:
-            from weasyprint import HTML as WHTML
-            pdf_bytes = WHTML(string=html).write_pdf()
-            from django.http import HttpResponse
-            response = HttpResponse(pdf_bytes, content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="KP_{estimate.number}.pdf"'
-            return response
-        except Exception as e:
-            return Response({'error': f'PDF error: {str(e)}'}, status=500)
+        from django.http import HttpResponse
+        return HttpResponse(html, content_type='text/html; charset=utf-8')
 
 
 class EstimateItemViewSet(viewsets.ModelViewSet):

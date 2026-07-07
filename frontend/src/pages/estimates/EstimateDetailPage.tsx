@@ -182,12 +182,15 @@ const EstimateDetailPage: React.FC = () => {
       const response = await fetch(`/api/estimates/${id}/pdf/`, {
         headers: { 'Authorization': `Token ${token}` },
       });
-      if (!response.ok) throw new Error('PDF error');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      if (!response.ok) throw new Error('Ошибка загрузки');
+      const html = await response.text();
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+      }
     } catch (e) {
-      message.error('Ошибка генерации PDF');
+      message.error('Ошибка генерации печатной формы');
     }
   };
 
