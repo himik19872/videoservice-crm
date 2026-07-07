@@ -29,6 +29,7 @@ services:
       - DB_PORT=5432
     volumes:
       - ./backend:/app
+      - ./.git:/app/.git
     ports:
       - "8000:8000"
     depends_on:

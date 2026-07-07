@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Form, Input, Button, Switch, Typography, message, Spin, Tabs, Tag, InputNumber,
-  Divider, Row, Col,
+  Divider, Row, Col, Alert, Space,
 } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import {
   SettingOutlined, GlobalOutlined, ApiOutlined, SafetyOutlined,
-  EnvironmentOutlined, MessageOutlined, AimOutlined,
+  EnvironmentOutlined, MessageOutlined, AimOutlined, CloudDownloadOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 
@@ -13,6 +14,7 @@ const { Title, Text } = Typography;
 const { TabPane } = Tabs;
 
 const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<any>({});
@@ -51,6 +53,20 @@ const SettingsPage: React.FC = () => {
 
   return (
     <Card>
+      <Alert
+        type="info"
+        showIcon
+        icon={<CloudDownloadOutlined />}
+        message={
+          <Space>
+            <span>Обновление системы и управление версиями</span>
+            <Button type="link" size="small" onClick={() => navigate('/settings/update')} style={{ padding: 0 }}>
+              Открыть обновления →
+            </Button>
+          </Space>
+        }
+        style={{ marginBottom: 16 }}
+      />
       <Title level={3}><SettingOutlined /> Настройки системы</Title>
 
       <Form form={form} layout="vertical" onFinish={onFinish} style={{ maxWidth: 700 }}>

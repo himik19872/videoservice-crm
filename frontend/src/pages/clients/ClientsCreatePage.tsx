@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Button, Select, Typography, Card, message } from 'antd';
+import { Form, Input, Button, Select, Typography, Card, message, Checkbox, Row, Col } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import InnSuggest from '../../components/InnSuggest';
 import type { ClientFormValues } from '../../types';
 
 const { Title } = Typography;
@@ -23,6 +24,19 @@ const ClientsCreatePage: React.FC = () => {
     } catch (error) {
       console.error('Ошибка загрузки районов:', error);
     }
+  };
+
+  const handleInnFound = (company: any) => {
+    // Заполняем поля юрлица
+    form.setFieldsValue({
+      full_name: company.name || company.short_name,
+      inn: company.inn,
+      kpp: company.kpp,
+      ogrn: company.ogrn,
+      legal_address: company.legal_address,
+      director_name: company.director,
+    });
+    message.success(company.short_name || company.name);
   };
 
   const onFinish = async (values: ClientFormValues) => {
@@ -78,6 +92,36 @@ const ClientsCreatePage: React.FC = () => {
         >
           <Input placeholder="Введите адрес" />
         </Form.Item>
+
+        {/* Блок для юридического лица */}
+        <Card title="🏢 Юридическое лицо (если клиент — организация)" size="small" style={{ marginBottom: 16 }}>
+          <Form.Item name="is_legal" valuePropName="checked" style={{ marginBottom: 8 }}>
+            <Checkbox>Клиент является юридическим лицом</Checkbox>
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.is_legal !== cur.is_legal}>
+            {({ getFieldValue }) => {
+              const isLegal = getFieldValue('is_legal');
+              if (!isLegal) return null;
+              return (
+                <>
+                  <Form.Item name="inn" label="ИНН" style={{ marginBottom: 8 }}>
+                    <InnSuggest onFound={handleInnFound} placeholder="ИНН для автозаполнения реквизитов" />
+                  </Form.Item>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Item name="kpp" label="КПП"><Input maxLength={9} /></Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item name="ogrn" label="ОГРН"><Input maxLength={15} /></Form.Item>
+                    </Col>
+                  </Row>
+                  <Form.Item name="legal_address" label="Юридический адрес"><Input /></Form.Item>
+                  <Form.Item name="director_name" label="ФИО руководителя"><Input /></Form.Item>
+                </>
+              );
+            }}
+          </Form.Item>
+        </Card>
 
         <Form.Item
           name="region_id"

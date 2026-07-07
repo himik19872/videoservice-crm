@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Select, Typography, Card, message, Divider, Row, Col, InputNumber } from 'antd';
+import { Form, Input, Button, Select, Typography, Card, message, Divider, Row, Col, InputNumber, Radio, Tabs } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import AddressSuggest from '../../components/AddressSuggest';
+import InnSuggest from '../../components/InnSuggest';
 import type { OrderFormValues } from '../../types';
 
 const { Title } = Typography;
@@ -14,6 +15,13 @@ const OrdersCreatePage: React.FC = () => {
   const [clients, setClients] = useState([]);
   const [users, setUsers] = useState([]);
   const [form] = Form.useForm();
+
+  // Тип выбора клиента: existing — из списка, new — быстрое создание
+  const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing');
+  // Тип клиента: individual — физлицо, legal — юрлицо
+  const [clientType, setClientType] = useState<'individual' | 'legal'>('individual');
+  // Создаём нового клиента
+  const [creatingClient, setCreatingClient] = useState(false);
 
   React.useEffect(() => {
     fetchRegions();
@@ -48,16 +56,83 @@ const OrdersCreatePage: React.FC = () => {
     }
   };
 
-  const onFinish = async (values: OrderFormValues) => {
+  // Автозаполнение юрлица по ИНН при быстром создании
+  const handleInnFound = (company: any) => {
+    form.setFieldsValue({
+      new_client_name: company.name || company.short_name,
+      new_client_inn: company.inn,
+      new_client_kpp: company.kpp,
+      new_client_ogrn: company.ogrn,
+      new_client_address: company.legal_address,
+      new_client_director: company.director,
+    });
+    message.success(company.short_name || company.name);
+  };
+
+  // Фильтрация клиентов по типу (физлицо / юрлицо)
+  const filteredClients = clients.filter((c: any) => {
+    if (clientType === 'legal') return c.is_legal;
+    return !c.is_legal;
+  });
+
+  const onFinish = async (values: any) => {
     setLoading(true);
     try {
-      const response = await api.post('/orders/', values);
+      let clientId = values.client_id;
+
+      // Если создаём нового клиента
+      if (clientMode === 'new') {
+        setCreatingClient(true);
+        const clientPayload: any = {
+          full_name: values.new_client_name,
+          phone: values.new_client_phone,
+          address: values.new_client_address || '',
+          region_id: values.region_id,
+          is_legal: clientType === 'legal',
+        };
+        if (clientType === 'legal') {
+          clientPayload.inn = values.new_client_inn || '';
+          clientPayload.kpp = values.new_client_kpp || '';
+          clientPayload.ogrn = values.new_client_ogrn || '';
+          clientPayload.legal_address = values.new_client_address || '';
+          clientPayload.director_name = values.new_client_director || '';
+        }
+        const clientRes = await api.post('/clients/', clientPayload);
+        clientId = clientRes.data.id;
+        message.success(`Клиент «${clientPayload.name}» создан`);
+        setCreatingClient(false);
+      }
+
+      // Создаём заявку
+      const orderPayload: any = {
+        client_id: clientId,
+        region_id: values.region_id,
+        order_type: values.order_type,
+        description: values.description,
+        priority: values.priority || 'medium',
+        city: values.city || '',
+        street_name: values.street_name || '',
+        house_number: values.house_number || '',
+        building_number: values.building_number || '',
+        apartment: values.apartment || '',
+        entrance: values.entrance || '',
+        cost: values.cost || undefined,
+        payment_type: values.payment_type || undefined,
+        is_warranty: values.is_warranty ?? false,
+        photo_report_required: values.photo_report_required ?? false,
+        helper_ids: values.helper_ids || [],
+        scheduled_at: values.scheduled_at || undefined,
+        deadline: values.deadline || undefined,
+      };
+
+      await api.post('/orders/', orderPayload);
       message.success('Заявка создана успешно');
       navigate('/orders');
-    } catch (error) {
-      message.error('Ошибка создания заявки');
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || error.response?.data?.error || 'Ошибка создания заявки');
     } finally {
       setLoading(false);
+      setCreatingClient(false);
     }
   };
 
@@ -69,26 +144,111 @@ const OrdersCreatePage: React.FC = () => {
         form={form}
         layout="vertical"
         onFinish={onFinish}
-        style={{ maxWidth: 600 }}
+        style={{ maxWidth: 700 }}
+        initialValues={{ clientMode: 'existing', clientType: 'individual', priority: 'medium' }}
       >
-        <Form.Item
-          name="client_id"
-          label="Клиент"
-          rules={[{ required: true, message: 'Выберите клиента' }]}
-        >
-          <Select
-            showSearch
-            placeholder="Выберите клиента"
-            optionFilterProp="children"
-            filterOption={(input, option) =>
-              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-            }
-            options={clients.map((client: any) => ({
-              value: client.id,
-              label: `${client.full_name} (${client.phone})`,
-            }))}
-          />
+
+        <Divider>👤 Клиент</Divider>
+
+        {/* Тип клиента: физлицо / юрлицо */}
+        <Form.Item label="Тип клиента">
+          <Radio.Group
+            value={clientType}
+            onChange={e => {
+              setClientType(e.target.value);
+              form.setFieldValue('client_id', undefined);
+            }}
+          >
+            <Radio.Button value="individual">👤 Частное лицо</Radio.Button>
+            <Radio.Button value="legal">🏢 Юридическое лицо</Radio.Button>
+          </Radio.Group>
         </Form.Item>
+
+        {/* Режим: выбрать существующего или создать нового */}
+        <Form.Item label="Клиент">
+          <Radio.Group
+            value={clientMode}
+            onChange={e => {
+              setClientMode(e.target.value);
+              form.setFieldValue('client_id', undefined);
+            }}
+            style={{ marginBottom: 12 }}
+          >
+            <Radio.Button value="existing">Из списка</Radio.Button>
+            <Radio.Button value="new">➕ Быстрое создание</Radio.Button>
+          </Radio.Group>
+        </Form.Item>
+
+        {clientMode === 'existing' ? (
+          /* Выбор существующего клиента */
+          <Form.Item
+            name="client_id"
+            rules={[{ required: true, message: 'Выберите клиента' }]}
+          >
+            <Select
+              showSearch
+              placeholder={clientType === 'legal' ? 'Выберите организацию' : 'Выберите клиента'}
+              optionFilterProp="children"
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={filteredClients.map((client: any) => ({
+                value: client.id,
+                label: client.is_legal
+                  ? `${client.name} (ИНН: ${client.inn || '—'})`
+                  : `${client.name} (${client.phone})`,
+              }))}
+              notFoundContent={
+                <span>
+                  Нет подходящих клиентов.{' '}
+                  <Button type="link" size="small" onClick={() => setClientMode('new')}>
+                    Создать нового
+                  </Button>
+                </span>
+              }
+            />
+          </Form.Item>
+        ) : (
+          /* Быстрое создание клиента */
+          <Card size="small" title={clientType === 'legal' ? 'Новое юридическое лицо' : 'Новый клиент'} style={{ marginBottom: 16 }}>
+            <Form.Item
+              name="new_client_name"
+              label={clientType === 'legal' ? 'Название организации' : 'ФИО'}
+              rules={[{ required: true, message: 'Введите название / ФИО' }]}
+            >
+              <Input placeholder={clientType === 'legal' ? 'ООО «Компания»' : 'Иванов Иван Иванович'} />
+            </Form.Item>
+
+            <Form.Item
+              name="new_client_phone"
+              label="Телефон"
+              rules={[{ required: true, message: 'Введите телефон' }]}
+            >
+              <Input placeholder="+7 (999) 123-45-67" />
+            </Form.Item>
+
+            {clientType === 'legal' && (
+              <>
+                <Form.Item name="new_client_inn" label="ИНН" style={{ marginBottom: 8 }}>
+                  <InnSuggest onFound={handleInnFound} placeholder="ИНН для автозаполнения" />
+                </Form.Item>
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <Form.Item name="new_client_kpp" label="КПП"><Input maxLength={9} /></Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item name="new_client_ogrn" label="ОГРН"><Input maxLength={15} /></Form.Item>
+                  </Col>
+                </Row>
+                <Form.Item name="new_client_director" label="Руководитель"><Input placeholder="ФИО директора" /></Form.Item>
+              </>
+            )}
+
+            <Form.Item name="new_client_address" label="Адрес">
+              <Input placeholder="г. Москва, ул. Тверская, д. 1" />
+            </Form.Item>
+          </Card>
+        )}
 
         <Form.Item
           name="region_id"
@@ -213,15 +373,16 @@ const OrdersCreatePage: React.FC = () => {
             </Form.Item>
           </Col>
           <Col span={8}>
-            <Form.Item name="is_warranty" label="Гарантия" valuePropName="checked"><Select placeholder="Нет"><Select.Option value={false}>Нет</Select.Option><Select.Option value={true}>Да (бесплатно)</Select.Option></Select></Form.Item>
+            <Form.Item name="is_warranty" label="Гарантия">
+              <Select placeholder="Нет">
+                <Select.Option value={false}>Нет</Select.Option>
+                <Select.Option value={true}>Да (бесплатно)</Select.Option>
+              </Select>
+            </Form.Item>
           </Col>
         </Row>
 
-        <Form.Item
-          name="photo_report_required"
-          label="Требуется фото/видео отчёт"
-          valuePropName="checked"
-        >
+        <Form.Item name="photo_report_required" label="Требуется фото/видео отчёт">
           <Select placeholder="Обязательность отчёта">
             <Select.Option value={false}>Не требуется</Select.Option>
             <Select.Option value={true}>Обязателен</Select.Option>
@@ -229,8 +390,8 @@ const OrdersCreatePage: React.FC = () => {
         </Form.Item>
 
         <Form.Item>
-          <Button type="primary" htmlType="submit" loading={loading} block>
-            Создать заявку
+          <Button type="primary" htmlType="submit" loading={loading || creatingClient} block>
+            {creatingClient ? 'Создаю клиента...' : 'Создать заявку'}
           </Button>
         </Form.Item>
 

@@ -91,6 +91,31 @@ export interface Order {
   history?: OrderHistory[];
   media?: OrderMedia[];
   helpers?: { id: number; username: string; full_name: string }[];
+  issue_orders?: IssueOrderInfo[];
+}
+
+export interface IssueOrderInfo {
+  id: number;
+  master_name: string;
+  status: string;
+  status_display: string;
+  notes: string;
+  issued_at: string;
+  received_at: string | null;
+  items: IssueOrderItemInfo[];
+}
+
+export interface IssueOrderItemInfo {
+  id: number;
+  item_name: string;
+  barcode: string;
+  quantity_issued: number;
+  quantity_used: number;
+  quantity_returned: number;
+  remaining: number;
+  need_return_old: boolean;
+  old_item_description: string;
+  old_item_returned: boolean;
 }
 
 export interface OrderMedia {
@@ -297,6 +322,7 @@ export interface InventoryItem {
   item_type_display: string;
   serial_number: string;
   model_name: string;
+  barcode: string | null;
   quantity: number;
   unit: string;
   cost_price: number | null;
@@ -320,12 +346,63 @@ export interface InventoryMovement {
   master_name: string;
   order_number: string;
   performed_by_name: string;
+  supply_invoice_info: { id: number; invoice_number: string; supplier_name: string } | null;
   quantity: number;
   notes: string;
   created_at: string;
   item: number;
   master: number | null;
   order: number | null;
+  supply_invoice: number | null;
+}
+
+// Склад v2: Поставщики и накладные
+export interface Supplier {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  contact_person: string;
+  inn: string;
+  kpp: string;
+  legal_address: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface SupplyInvoiceItem {
+  id: number;
+  invoice: number;
+  inventory_item: number;
+  item_name: string;
+  item_barcode: string;
+  item_type_display: string;
+  quantity_ordered: number;
+  quantity_received: number;
+  unit_price: number;
+  shortage: number;
+  ordered_total: number;
+  received_total: number;
+  notes: string;
+}
+
+export interface SupplyInvoice {
+  id: number;
+  supplier: number;
+  supplier_name: string;
+  invoice_number: string;
+  invoice_date: string;
+  status: string;
+  status_display: string;
+  received_by: number | null;
+  received_by_name: string;
+  received_at: string | null;
+  total_ordered: number;
+  total_received: number;
+  notes: string;
+  items: SupplyInvoiceItem[];
+  created_at: string;
+  updated_at: string;
 }
 
 // Финансы
@@ -360,4 +437,65 @@ export interface MasterSalary {
   status_display: string;
   notes: string;
   created_at: string;
+}
+
+// Склад v3: Расходные ордера и заявки на закупку
+export interface IssueOrderItem {
+  id: number;
+  issue_order: number;
+  inventory_item: number;
+  item_name: string;
+  item_barcode: string | null;
+  quantity_issued: number;
+  quantity_used: number;
+  quantity_returned: number;
+  remaining: number;
+  need_return_old: boolean;
+  old_item_description: string;
+  old_item_returned: boolean;
+  notes: string;
+}
+
+export interface IssueOrder {
+  id: number;
+  order: number;
+  order_number: string;
+  master: number;
+  master_name: string;
+  issued_by: number;
+  issued_by_name: string;
+  status: 'pending' | 'received' | 'partially_used' | 'fully_used' | 'returned';
+  status_display: string;
+  notes: string;
+  items: IssueOrderItem[];
+  issued_at: string;
+  received_at: string | null;
+  completed_at: string | null;
+}
+
+export interface PurchaseRequestItem {
+  id: number;
+  purchase_request: number;
+  inventory_item: number | null;
+  name: string;
+  quantity: number;
+  unit: string;
+  estimated_price: number | null;
+  supplier: number | null;
+  notes: string;
+}
+
+export interface PurchaseRequest {
+  id: number;
+  number: string;
+  status: 'draft' | 'pending' | 'ordered' | 'received' | 'cancelled';
+  status_display: string;
+  estimate: number | null;
+  order: number | null;
+  created_by: number;
+  created_by_name: string;
+  notes: string;
+  items: PurchaseRequestItem[];
+  created_at: string;
+  updated_at: string;
 }

@@ -4,6 +4,9 @@ from django.contrib.auth import authenticate
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, OrderMedia, UserProfile, WorkShift, PushToken
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary, Message
 from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem
+from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
+from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
+from .models import OrderComment
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -208,6 +211,7 @@ class OrderSerializer(serializers.ModelSerializer):
     helpers = serializers.SerializerMethodField()
     history = OrderHistorySerializer(many=True, read_only=True)
     media = OrderMediaSerializer(many=True, read_only=True)
+    issue_orders = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -221,12 +225,12 @@ class OrderSerializer(serializers.ModelSerializer):
             'photo_report_required', 'deadline',
             'assigned_at', 'scheduled_at', 'accepted_at', 'started_at', 'paused_at',
             'completed_at', 'confirmed_at', 'confirmed_by',
-            'helpers', 'history', 'media', 'created_at', 'updated_at'
+            'helpers', 'history', 'media', 'issue_orders', 'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'number', 'assigned_at', 'scheduled_at', 'accepted_at', 'started_at',
             'paused_at', 'completed_at', 'confirmed_at', 'confirmed_by',
-            'created_at', 'updated_at', 'helpers', 'history', 'media'
+            'created_at', 'updated_at', 'helpers', 'history', 'media', 'issue_orders'
         ]
 
     def get_client_info(self, obj):
@@ -269,6 +273,33 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_helpers(self, obj):
         return [{'id': u.id, 'username': u.username, 'full_name': u.get_full_name() or u.username} for u in obj.helpers.all()]
+
+    def get_issue_orders(self, obj):
+        issue_orders = obj.issue_orders.prefetch_related('items__inventory_item').all()
+        result = []
+        for io in issue_orders:
+            result.append({
+                'id': io.id,
+                'master_name': io.master.user.get_full_name() or io.master.user.username if io.master else '',
+                'status': io.status,
+                'status_display': io.get_status_display(),
+                'notes': io.notes,
+                'issued_at': io.issued_at.isoformat() if io.issued_at else None,
+                'received_at': io.received_at.isoformat() if io.received_at else None,
+                'items': [{
+                    'id': item.id,
+                    'item_name': str(item.inventory_item),
+                    'barcode': item.inventory_item.barcode,
+                    'quantity_issued': item.quantity_issued,
+                    'quantity_used': item.quantity_used,
+                    'quantity_returned': item.quantity_returned,
+                    'remaining': item.remaining,
+                    'need_return_old': item.need_return_old,
+                    'old_item_description': item.old_item_description,
+                    'old_item_returned': item.old_item_returned,
+                } for item in io.items.all()],
+            })
+        return result
 
 
 class ReportSerializer(serializers.ModelSerializer):
@@ -544,6 +575,7 @@ class InventoryMovementSerializer(serializers.ModelSerializer):
     master_name = serializers.SerializerMethodField()
     order_number = serializers.SerializerMethodField()
     performed_by_name = serializers.SerializerMethodField()
+    supply_invoice_info = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryMovement
@@ -568,6 +600,15 @@ class InventoryMovementSerializer(serializers.ModelSerializer):
         if obj.performed_by:
             return obj.performed_by.get_full_name() or obj.performed_by.username
         return ''
+
+    def get_supply_invoice_info(self, obj):
+        if obj.supply_invoice:
+            return {
+                'id': obj.supply_invoice.id,
+                'invoice_number': obj.supply_invoice.invoice_number,
+                'supplier_name': obj.supply_invoice.supplier.name,
+            }
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -705,3 +746,191 @@ class CommercialEstimateSerializer(serializers.ModelSerializer):
         if obj.created_by:
             return obj.created_by.get_full_name() or obj.created_by.username
         return None
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад v2: Поставщики, Накладные, Штрих-коды
+# ══════════════════════════════════════════════════════════════════
+
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+
+class SupplyInvoiceItemSerializer(serializers.ModelSerializer):
+    item_name = serializers.SerializerMethodField()
+    item_barcode = serializers.SerializerMethodField()
+    item_type_display = serializers.SerializerMethodField()
+    shortage = serializers.SerializerMethodField()
+    ordered_total = serializers.SerializerMethodField()
+    received_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupplyInvoiceItem
+        fields = ['id', 'invoice', 'inventory_item', 'item_name', 'item_barcode',
+                  'item_type_display', 'quantity_ordered', 'quantity_received',
+                  'unit_price', 'shortage', 'ordered_total', 'received_total', 'notes']
+        read_only_fields = ['id']
+
+    def get_item_name(self, obj):
+        return str(obj.inventory_item) if obj.inventory_item else ''
+
+    def get_item_barcode(self, obj):
+        return obj.inventory_item.barcode if obj.inventory_item else ''
+
+    def get_item_type_display(self, obj):
+        return obj.inventory_item.get_item_type_display() if obj.inventory_item else ''
+
+    def get_shortage(self, obj):
+        return obj.shortage
+
+    def get_ordered_total(self, obj):
+        return obj.ordered_total
+
+    def get_received_total(self, obj):
+        return obj.received_total
+
+
+class SupplyInvoiceSerializer(serializers.ModelSerializer):
+    items = SupplyInvoiceItemSerializer(many=True, read_only=True)
+    supplier_name = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    received_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupplyInvoice
+        fields = ['id', 'supplier', 'supplier_name', 'invoice_number', 'invoice_date',
+                  'status', 'status_display', 'received_by', 'received_by_name',
+                  'received_at', 'total_ordered', 'total_received', 'notes',
+                  'items', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_supplier_name(self, obj):
+        return obj.supplier.name if obj.supplier else ''
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    def get_received_by_name(self, obj):
+        if obj.received_by:
+            return obj.received_by.get_full_name() or obj.received_by.username
+        return ''
+
+
+class SupplyInvoiceCreateSerializer(serializers.Serializer):
+    """Для создания накладной с позициями одним запросом"""
+    supplier_id = serializers.IntegerField()
+    invoice_number = serializers.CharField()
+    invoice_date = serializers.DateField()
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+    items = serializers.ListField(child=serializers.DictField())
+
+
+class SupplyInvoiceReceiveSerializer(serializers.Serializer):
+    """Для приёмки товара: обновление quantity_received по позициям"""
+    items = serializers.ListField(child=serializers.DictField())
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад v3: Расходный ордер, заявка на закупку
+# ══════════════════════════════════════════════════════════════════
+
+class IssueOrderItemSerializer(serializers.ModelSerializer):
+    item_name = serializers.SerializerMethodField()
+    item_barcode = serializers.SerializerMethodField()
+    remaining = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IssueOrderItem
+        fields = '__all__'
+        read_only_fields = ['id']
+
+    def get_item_name(self, obj):
+        return str(obj.inventory_item) if obj.inventory_item else ''
+
+    def get_item_barcode(self, obj):
+        return obj.inventory_item.barcode if obj.inventory_item else ''
+
+    def get_remaining(self, obj):
+        return obj.remaining
+
+
+class IssueOrderSerializer(serializers.ModelSerializer):
+    items = IssueOrderItemSerializer(many=True, read_only=True)
+    master_name = serializers.SerializerMethodField()
+    issued_by_name = serializers.SerializerMethodField()
+    order_number = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IssueOrder
+        fields = '__all__'
+        read_only_fields = ['id', 'issued_at', 'received_at', 'completed_at', 'issued_by']
+
+    def get_master_name(self, obj):
+        if obj.master:
+            return obj.master.user.get_full_name() or obj.master.user.username
+        return ''
+
+    def get_issued_by_name(self, obj):
+        if obj.issued_by:
+            return obj.issued_by.get_full_name() or obj.issued_by.username
+        return ''
+
+    def get_order_number(self, obj):
+        return obj.order.number if obj.order else ''
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+
+class IssueOrderCreateSerializer(serializers.Serializer):
+    """Создание расходного ордера с позициями"""
+    order_id = serializers.IntegerField()
+    master_id = serializers.IntegerField()
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+    items = serializers.ListField(child=serializers.DictField())
+
+
+class PurchaseRequestItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PurchaseRequestItem
+        fields = '__all__'
+        read_only_fields = ['id']
+
+
+class PurchaseRequestSerializer(serializers.ModelSerializer):
+    items = PurchaseRequestItemSerializer(many=True, read_only=True)
+    status_display = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseRequest
+        fields = '__all__'
+        read_only_fields = ['id', 'number', 'created_at', 'updated_at']
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return ''
+
+
+# ══════════════════════════════════════════════════════════════════
+# Комментарии к заявкам (диалоги)
+# ══════════════════════════════════════════════════════════════════
+
+class OrderCommentSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderComment
+        fields = ['id', 'order', 'author', 'author_name', 'text', 'event_type', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def get_author_name(self, obj):
+        return obj.author.get_full_name() or obj.author.username

@@ -30,6 +30,10 @@ import SystemSettingsPage from './pages/settings/SystemSettingsPage';
 import ReportsPage from './pages/reports/ReportsPage';
 import FinancePage from './pages/reports/FinancePage';
 import InventoryPage from './pages/equipment/InventoryPage';
+import SuppliersPage from './pages/equipment/SuppliersPage';
+import SupplyInvoicesPage from './pages/equipment/SupplyInvoicesPage';
+import IssueOrdersPage from './pages/equipment/IssueOrdersPage';
+import PurchaseRequestsPage from './pages/equipment/PurchaseRequestsPage';
 import CalendarPage from './pages/CalendarPage';
 import MessagesPage from './pages/MessagesPage';
 import EstimatesPage from './pages/estimates/EstimatesPage';
@@ -37,6 +41,7 @@ import EstimateDetailPage from './pages/estimates/EstimateDetailPage';
 import EstimateServicesPage from './pages/estimates/EstimateServicesPage';
 import LegalEntitiesPage from './pages/settings/LegalEntitiesPage';
 import EstimateSettingsPage from './pages/settings/EstimateSettingsPage';
+import UpdatePage from './pages/settings/UpdatePage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
@@ -89,6 +94,11 @@ function AppContent() {
           <Route path="/buildings" element={<BuildingsPage />} />
           <Route path="/buildings/:id" element={<BuildingDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
+          <Route path="/supply-invoices" element={<SupplyInvoicesPage />} />
+          <Route path="/issue-orders" element={<IssueOrdersPage />} />
+          <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -163,6 +173,10 @@ function AppContent() {
           <Route path="/buildings/:id" element={<BuildingDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
+          <Route path="/supply-invoices" element={<SupplyInvoicesPage />} />
+          <Route path="/issue-orders" element={<IssueOrdersPage />} />
+          <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
           <Route path="/estimates" element={<EstimatesPage />} />
           <Route path="/estimates/:id" element={<EstimateDetailPage />} />
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
@@ -197,12 +211,17 @@ function AppContent() {
         <Route path="/settings/traccar" element={<TraccarIntegrationPage />} />
         <Route path="/settings/max" element={<MaxSettingsPage />} />
         <Route path="/settings/system" element={<SystemSettingsPage />} />
+        <Route path="/settings/update" element={<UpdatePage />} />
         <Route path="/settings/legal-entities" element={<LegalEntitiesPage />} />
         <Route path="/settings/estimate-template" element={<EstimateSettingsPage />} />
         <Route path="/settings/admin" element={<AdminSettingsPage />} />
         <Route path="/dispatchers" element={<DispatchersPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/suppliers" element={<SuppliersPage />} />
+        <Route path="/supply-invoices" element={<SupplyInvoicesPage />} />
+        <Route path="/issue-orders" element={<IssueOrdersPage />} />
+        <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
         <Route path="/finance" element={<FinancePage />} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/messages" element={<MessagesPage />} />

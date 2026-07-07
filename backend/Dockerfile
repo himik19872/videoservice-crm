@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     libpangoft2-1.0-0 \
     libffi-dev \
     shared-mime-info \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies

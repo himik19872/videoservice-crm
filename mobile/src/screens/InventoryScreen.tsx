@@ -14,6 +14,7 @@ interface InventoryItem {
   item_type_display: string;
   serial_number: string;
   model_name: string;
+  barcode: string | null;
   quantity: number;
   unit: string;
   cost_price: number | null;
@@ -62,7 +63,8 @@ const InventoryScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     .filter((i) => statusFilter === 'all' || i.status === statusFilter)
     .filter((i) =>
       i.name?.toLowerCase().includes(search.toLowerCase()) ||
-      i.serial_number?.toLowerCase().includes(search.toLowerCase())
+      i.serial_number?.toLowerCase().includes(search.toLowerCase()) ||
+      i.barcode?.toLowerCase().includes(search.toLowerCase())
     );
 
   const statuses = [
@@ -86,6 +88,9 @@ const InventoryScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       <Text style={[styles.itemMeta, { color: theme.textSecondary }]}>
         {item.item_type_display}{item.model_name ? ` · ${item.model_name}` : ''}
       </Text>
+      {item.barcode ? (
+        <Text style={[styles.barcode, { color: theme.primary }]}>🏷 {item.barcode}</Text>
+      ) : null}
       {item.serial_number ? (
         <Text style={[styles.serial, { color: theme.textTertiary }]}>S/N: {item.serial_number}</Text>
       ) : null}

@@ -466,6 +466,15 @@ class SystemSettings(models.Model):
     cp_color = models.CharField(max_length=20, default='#1a3e60', verbose_name=_('Цвет шапки КП (hex)'))
     cp_show_logo = models.BooleanField(default=True, verbose_name=_('Показывать логотип'))
 
+    # Обновление с GitHub
+    git_repo_url = models.CharField(max_length=500, default='https://github.com/himik19872/videoservice-crm.git', blank=True, verbose_name=_('GitHub репозиторий'))
+    git_branch = models.CharField(max_length=100, default='main', verbose_name=_('Ветка'))
+    git_token = models.CharField(max_length=255, blank=True, verbose_name=_('GitHub токен (для приватных репо)'))
+    auto_update_enabled = models.BooleanField(default=False, verbose_name=_('Автообновление'))
+    last_update_check = models.DateTimeField(null=True, blank=True, verbose_name=_('Последняя проверка'))
+    current_version = models.CharField(max_length=50, default='1.0.0', verbose_name=_('Текущая версия'))
+    latest_commit = models.CharField(max_length=40, blank=True, verbose_name=_('Последний коммит'))
+
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
 
     class Meta:
@@ -592,6 +601,7 @@ class InventoryItem(models.Model):
     item_type = models.CharField(max_length=20, choices=ITEM_TYPES, verbose_name=_('Тип'))
     serial_number = models.CharField(max_length=100, blank=True, verbose_name=_('Серийный номер'))
     model_name = models.CharField(max_length=100, blank=True, verbose_name=_('Модель'))
+    barcode = models.CharField(max_length=100, blank=True, unique=True, null=True, verbose_name=_('Штрих-код (SKU)'), help_text=_('Сканируется с упаковки товара'))
     quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
     unit = models.CharField(max_length=20, default='шт.', verbose_name=_('Ед. изм.'))
     cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Закупочная цена'))
@@ -632,6 +642,7 @@ class InventoryMovement(models.Model):
     master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, blank=True, related_name='inventory_movements', verbose_name=_('Мастер'))
     order = models.ForeignKey('Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='inventory_movements', verbose_name=_('Заявка'))
     client = models.ForeignKey('Client', on_delete=models.SET_NULL, null=True, blank=True, related_name='inventory_movements', verbose_name=_('Клиент'))
+    supply_invoice = models.ForeignKey('SupplyInvoice', on_delete=models.SET_NULL, null=True, blank=True, related_name='movements', verbose_name=_('Накладная'))
     performed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, verbose_name=_('Выполнил'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата операции'))
@@ -668,6 +679,121 @@ class InventoryMovement(models.Model):
 
 
 # ══════════════════════════════════════════════════════════════════
+# Склад v2: Поставщики, Накладные, Штрих-коды
+# ══════════════════════════════════════════════════════════════════
+
+class Supplier(models.Model):
+    """Поставщик оборудования"""
+    name = models.CharField(max_length=200, verbose_name=_('Название'))
+    phone = models.CharField(max_length=50, blank=True, verbose_name=_('Телефон'))
+    email = models.EmailField(blank=True, verbose_name=_('Email'))
+    contact_person = models.CharField(max_length=150, blank=True, verbose_name=_('Контактное лицо'))
+    inn = models.CharField(max_length=12, blank=True, verbose_name=_('ИНН'))
+    kpp = models.CharField(max_length=9, blank=True, verbose_name=_('КПП'))
+    legal_address = models.CharField(max_length=500, blank=True, verbose_name=_('Юр. адрес'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Добавлен'))
+
+    class Meta:
+        verbose_name = _('Поставщик')
+        verbose_name_plural = _('Поставщики')
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class SupplyInvoice(models.Model):
+    """Накладная от поставщика (документ прихода)"""
+    STATUS_CHOICES = [
+        ('draft', _('Черновик')),
+        ('received', _('Принято полностью')),
+        ('partial', _('Принято частично')),
+        ('cancelled', _('Отменена')),
+    ]
+
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='invoices', verbose_name=_('Поставщик'))
+    invoice_number = models.CharField(max_length=100, verbose_name=_('Номер накладной'))
+    invoice_date = models.DateField(verbose_name=_('Дата накладной'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name=_('Статус'))
+    received_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Принял'))
+    received_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата приёмки'))
+    total_ordered = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Заказано на сумму'))
+    total_received = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Принято на сумму'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлена'))
+
+    class Meta:
+        verbose_name = _('Накладная поставщика')
+        verbose_name_plural = _('Накладные поставщиков')
+        ordering = ['-invoice_date', '-created_at']
+
+    def __str__(self):
+        return f'Накладная №{self.invoice_number} от {self.supplier} ({self.invoice_date})'
+
+    def recalculate_totals(self):
+        """Пересчитать итоги по позициям накладной"""
+        items = self.items.all()
+        self.total_ordered = sum((i.unit_price or 0) * (i.quantity_ordered or 0) for i in items)
+        self.total_received = sum((i.unit_price or 0) * (i.quantity_received or 0) for i in items)
+        self.save(update_fields=['total_ordered', 'total_received', 'updated_at'])
+
+    def apply_received(self, user):
+        """Оприходовать принятые позиции на склад"""
+        from django.utils import timezone
+        for item in self.items.filter(quantity_received__gt=0):
+            inv_item = item.inventory_item
+            # Создаём движение прихода
+            InventoryMovement.objects.create(
+                item=inv_item,
+                movement_type='in',
+                quantity=item.quantity_received,
+                supply_invoice=self,
+                performed_by=user,
+                notes=f'Приход по накладной №{self.invoice_number} от {self.invoice_date}'
+            )
+        # Определяем статус накладной
+        has_partial = self.items.filter(quantity_received__gt=0, quantity_received__lt=models.F('quantity_ordered')).exists()
+        all_received = not self.items.filter(quantity_received__lt=models.F('quantity_ordered')).exists()
+        if all_received:
+            self.status = 'received'
+        elif has_partial:
+            self.status = 'partial'
+        self.received_at = timezone.now()
+        self.received_by = user
+        self.save()
+
+
+class SupplyInvoiceItem(models.Model):
+    """Товарная позиция в накладной поставщика"""
+    invoice = models.ForeignKey(SupplyInvoice, on_delete=models.CASCADE, related_name='items', verbose_name=_('Накладная'))
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name='supply_items', verbose_name=_('Номенклатура'))
+    quantity_ordered = models.PositiveIntegerField(default=0, verbose_name=_('Заказано'))
+    quantity_received = models.PositiveIntegerField(default=0, verbose_name=_('Принято'))
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Цена за ед.'))
+    notes = models.CharField(max_length=300, blank=True, verbose_name=_('Примечание'))
+
+    class Meta:
+        verbose_name = _('Позиция накладной')
+        verbose_name_plural = _('Позиции накладной')
+        unique_together = ['invoice', 'inventory_item']
+
+    def __str__(self):
+        return f'{self.inventory_item.name}: заказано {self.quantity_ordered}, принято {self.quantity_received}'
+
+    @property
+    def shortage(self):
+        """Недопоставка"""
+        return max(0, self.quantity_ordered - self.quantity_received)
+
+    @property
+    def ordered_total(self):
+        return (self.unit_price or 0) * (self.quantity_ordered or 0)
+
+    @property
+    def received_total(self):
+        return (self.unit_price or 0) * (self.quantity_received or 0)
 # Финансы
 # ══════════════════════════════════════════════════════════════════
 
@@ -832,6 +958,23 @@ class Message(models.Model):
 
     def __str__(self):
         return f'{self.sender.username}: {self.text[:50]}'
+
+
+class OrderComment(models.Model):
+    """Обсуждение внутри заявки — диалог сотрудников по заявке"""
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='comments', verbose_name=_('Заявка'))
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='order_comments', verbose_name=_('Автор'))
+    text = models.TextField(verbose_name=_('Текст'))
+    event_type = models.CharField(max_length=30, default='comment', verbose_name=_('Тип события'), help_text='comment/payment/material_assigned/estimate_linked/purchase_created/status_changed')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+
+    class Meta:
+        verbose_name = _('Комментарий к заявке')
+        verbose_name_plural = _('Комментарии к заявкам')
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.author.username}: {self.text[:50]} → #{self.order.number}'
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1066,3 +1209,115 @@ class EstimateItem(models.Model):
             amount = amount * (1 - self.discount / 100)
         self.total_price = amount
         super().save(*args, **kwargs)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад v3: Расходный ордер, заявка на закупку, подтверждение материалов
+# ══════════════════════════════════════════════════════════════════
+
+class IssueOrder(models.Model):
+    """Расходный ордер — документ выдачи материалов со склада сотруднику под заявку"""
+    STATUS_CHOICES = [
+        ('pending', _('Ожидает получения')),
+        ('received', _('Получено сотрудником')),
+        ('partially_used', _('Частично использовано')),
+        ('fully_used', _('Полностью использовано')),
+        ('returned', _('Возвращено на склад')),
+    ]
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='issue_orders', verbose_name=_('Заявка'))
+    master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, related_name='issue_orders', verbose_name=_('Сотрудник'))
+    issued_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='issued_orders', verbose_name=_('Выдал'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name=_('Статус'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    issued_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата выдачи'))
+    received_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата получения'))
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата закрытия'))
+
+    class Meta:
+        verbose_name = _('Расходный ордер')
+        verbose_name_plural = _('Расходные ордера')
+        ordering = ['-issued_at']
+
+    def __str__(self):
+        return f'Ордер №{self.id}: {self.master} → заявка {self.order.number}'
+
+
+class IssueOrderItem(models.Model):
+    """Позиция в расходном ордере: что выдано, что использовано, что возвращено"""
+    issue_order = models.ForeignKey(IssueOrder, on_delete=models.CASCADE, related_name='items', verbose_name=_('Ордер'))
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name='issue_items', verbose_name=_('Номенклатура'))
+    quantity_issued = models.PositiveIntegerField(default=0, verbose_name=_('Выдано'))
+    quantity_used = models.PositiveIntegerField(default=0, verbose_name=_('Использовано (установлено)'))
+    quantity_returned = models.PositiveIntegerField(default=0, verbose_name=_('Возвращено'))
+    need_return_old = models.BooleanField(default=False, verbose_name=_('Требуется возврат старого'))
+    old_item_description = models.CharField(max_length=300, blank=True, verbose_name=_('Что нужно вернуть (старое)'))
+    old_item_returned = models.BooleanField(default=False, verbose_name=_('Старое возвращено'))
+    notes = models.CharField(max_length=300, blank=True, verbose_name=_('Примечание'))
+
+    class Meta:
+        verbose_name = _('Позиция ордера')
+        verbose_name_plural = _('Позиции ордера')
+
+    def __str__(self):
+        return f'{self.inventory_item.name}: выдано {self.quantity_issued}, исп. {self.quantity_used}, возвр. {self.quantity_returned}'
+
+    @property
+    def remaining(self):
+        """Осталось у мастера (не использовано и не возвращено)"""
+        return max(0, self.quantity_issued - self.quantity_used - self.quantity_returned)
+
+
+class PurchaseRequest(models.Model):
+    """Заявка на закупку материалов (когда позиции нет на складе или закончились)"""
+    STATUS_CHOICES = [
+        ('draft', _('Черновик')),
+        ('pending', _('Ожидает закупки')),
+        ('ordered', _('Заказано поставщику')),
+        ('received', _('Получено')),
+        ('cancelled', _('Отменено')),
+    ]
+
+    number = models.CharField(max_length=30, unique=True, verbose_name=_('Номер заявки'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name=_('Статус'))
+    estimate = models.ForeignKey('CommercialEstimate', on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_requests', verbose_name=_('Основание (КП/смета)'))
+    order = models.ForeignKey('Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_requests', verbose_name=_('Основание (заявка)'))
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='purchase_requests', verbose_name=_('Создал'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлена'))
+
+    class Meta:
+        verbose_name = _('Заявка на закупку')
+        verbose_name_plural = _('Заявки на закупку')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Заявка на закупку №{self.number} ({self.get_status_display()})'
+
+    def save(self, *args, **kwargs):
+        if not self.number:
+            from datetime import datetime
+            self.number = f'ЗАКУП-{datetime.now().strftime("%y%m%d")}-{PurchaseRequest.objects.filter(created_at__date=datetime.now().date()).count() + 1:03d}'
+            while PurchaseRequest.objects.filter(number=self.number).exists():
+                self.number = f'ЗАКУП-{datetime.now().strftime("%y%m%d")}-{PurchaseRequest.objects.filter(created_at__date=datetime.now().date()).count() + 2:03d}'
+        super().save(*args, **kwargs)
+
+
+class PurchaseRequestItem(models.Model):
+    """Позиция в заявке на закупку"""
+    purchase_request = models.ForeignKey(PurchaseRequest, on_delete=models.CASCADE, related_name='items', verbose_name=_('Заявка на закупку'))
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_items', verbose_name=_('Номенклатура (если есть в каталоге)'))
+    name = models.CharField(max_length=300, verbose_name=_('Название'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    unit = models.CharField(max_length=20, default='шт.', verbose_name=_('Ед. изм.'))
+    estimated_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Ожидаемая цена'))
+    supplier = models.ForeignKey('Supplier', on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Поставщик'))
+    notes = models.CharField(max_length=300, blank=True, verbose_name=_('Примечание'))
+
+    class Meta:
+        verbose_name = _('Позиция заявки на закупку')
+        verbose_name_plural = _('Позиции заявок на закупку')
+
+    def __str__(self):
+        return f'{self.name} x{self.quantity}'

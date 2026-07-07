@@ -5,14 +5,19 @@ from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth import authenticate
+from django.contrib.auth.models import User
 from django.db.models import Sum
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 from datetime import timedelta
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, UserProfile, WorkShift, OrderMedia, PushToken
 from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial, Message
 from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem
+from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
+from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
+from .models import OrderComment
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -23,6 +28,11 @@ from .serializers import (
 )
 from .serializers import InventoryItemSerializer, InventoryMovementSerializer, PaymentSerializer, MasterSalarySerializer, MessageSerializer
 from .serializers import LegalEntitySerializer, EstimateServiceSerializer, CommercialEstimateSerializer, EstimateItemSerializer
+from .serializers import SupplierSerializer, SupplyInvoiceSerializer, SupplyInvoiceCreateSerializer, SupplyInvoiceReceiveSerializer
+from .serializers import SupplyInvoiceItemSerializer
+from .serializers import IssueOrderSerializer, IssueOrderCreateSerializer, IssueOrderItemSerializer
+from .serializers import PurchaseRequestSerializer, PurchaseRequestItemSerializer
+from .serializers import OrderCommentSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -783,6 +793,53 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response({'history': result, 'current': current})
 
+    @action(detail=True, methods=['get', 'post'])
+    def comments(self, request, pk=None):
+        """Комментарии/диалог внутри заявки"""
+        order = self.get_object()
+
+        if request.method == 'GET':
+            qs = order.comments.select_related('author').order_by('created_at')
+            return Response(OrderCommentSerializer(qs, many=True).data)
+
+        # POST — добавить комментарий
+        text = request.data.get('text', '').strip()
+        if not text:
+            return Response({'error': 'Текст комментария обязателен'}, status=status.HTTP_400_BAD_REQUEST)
+
+        event_type = request.data.get('event_type', 'comment')
+        comment = OrderComment.objects.create(
+            order=order,
+            author=request.user,
+            text=text,
+            event_type=event_type
+        )
+
+        # Уведомляем всех, кто вовлечён в заявку (кроме автора)
+        recipients = set()
+        if order.master and order.master.user_id != request.user.id:
+            recipients.add(order.master.user_id)
+        for h in order.helpers.exclude(id=request.user.id):
+            recipients.add(h.id)
+        # Диспетчеры и админы тоже получают уведомление
+        from django.contrib.auth.models import User as AuthUser
+        staff = AuthUser.objects.filter(
+            profile__role__in=['admin', 'dispatcher']
+        ).exclude(id=request.user.id).values_list('id', flat=True)
+        recipients.update(staff)
+
+        for uid in recipients:
+            try:
+                send_push_notification(
+                    uid,
+                    f'💬 Заявка #{order.number}',
+                    f'{request.user.get_full_name() or request.user.username}: {text[:100]}'
+                )
+            except Exception:
+                pass
+
+        return Response(OrderCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
+
 
 class ReportViewSet(viewsets.ModelViewSet):
     queryset = Report.objects.all()
@@ -1132,6 +1189,199 @@ class SystemSettingsViewSet(viewsets.ViewSet):
         serializer.save()
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'])
+    def lookup_company_by_inn(self, request):
+        """Поиск компании по ИНН через DaData API"""
+        import requests
+        inn = request.query_params.get('inn', '').strip()
+        if not inn or len(inn) < 10:
+            return Response({'error': 'Укажите ИНН (10 или 12 цифр)'}, status=400)
+
+        settings = SystemSettings.objects.first()
+        token = settings.dadata_token if settings else ''
+        if not token:
+            return Response({'error': 'Не настроен DaData API токен в системных настройках'}, status=400)
+
+        try:
+            resp = requests.post(
+                'https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party',
+                json={'query': inn},
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Authorization': f'Token {token}'
+                },
+                timeout=10
+            )
+            data = resp.json()
+            suggestions = data.get('suggestions', [])
+            if not suggestions:
+                return Response({'found': False, 'message': 'Компания не найдена'})
+
+            s = suggestions[0]
+            d = s.get('data', {})
+            return Response({
+                'found': True,
+                'name': d.get('name', {}).get('full_with_opf', '') or s.get('value', ''),
+                'short_name': d.get('name', {}).get('short_with_opf', ''),
+                'inn': d.get('inn', inn),
+                'kpp': d.get('kpp', ''),
+                'ogrn': d.get('ogrn', ''),
+                'legal_address': d.get('address', {}).get('unrestricted_value', '') or d.get('address', {}).get('value', ''),
+                'director': d.get('management', {}).get('name', ''),
+                'director_post': d.get('management', {}).get('post', ''),
+                'status': d.get('state', {}).get('status', ''),
+            })
+        except Exception as e:
+            return Response({'error': f'Ошибка запроса к DaData: {str(e)}'}, status=500)
+
+    @action(detail=False, methods=['get'])
+    def check_update(self, request):
+        """Проверить наличие обновлений на GitHub"""
+        import requests, re, os
+        settings = SystemSettings.objects.first()
+        if not settings or not settings.git_repo_url:
+            return Response({'has_update': False, 'error': 'Не настроен GitHub репозиторий'})
+
+        repo_url = settings.git_repo_url.rstrip('/').replace('.git', '')
+        branch = settings.git_branch or 'main'
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+        if settings.git_token:
+            headers['Authorization'] = f'Bearer {settings.git_token}'
+
+        m = re.search(r'github\.com[:/]([^/]+)/([^/\s]+)', repo_url)
+        if not m:
+            return Response({'has_update': False, 'error': 'Неверный формат URL репозитория'})
+        owner, repo = m.group(1), m.group(2)
+
+        try:
+            # Получаем последний коммит из GitHub API
+            api_url = f'https://api.github.com/repos/{owner}/{repo}/commits/{branch}'
+            resp = requests.get(api_url, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                return Response({'has_update': False, 'error': f'GitHub API: {resp.status_code} {resp.json().get("message", "")}'})
+            remote_sha = resp.json().get('sha', '')[:7]
+            remote_full = resp.json().get('sha', '')
+
+            # Читаем локальный HEAD из .git
+            head_path = '/app/.git/refs/heads/' + branch
+            local_sha = ''
+            if os.path.exists(head_path):
+                with open(head_path) as f:
+                    local_sha = f.read().strip()[:7]
+            else:
+                # Пробуем HEAD или packed-refs
+                head_file = '/app/.git/HEAD'
+                if os.path.exists(head_file):
+                    with open(head_file) as f:
+                        ref = f.read().strip()
+                    if ref.startswith('ref: '):
+                        ref_path = '/app/.git/' + ref[5:]
+                        if os.path.exists(ref_path):
+                            with open(ref_path) as f:
+                                local_sha = f.read().strip()[:7]
+
+            has_update = bool(remote_full and local_sha and remote_full[:7] != local_sha[:7])
+            settings.last_update_check = timezone.now()
+            settings.latest_commit = local_sha or ''
+            settings.save(update_fields=['last_update_check', 'latest_commit'])
+            return Response({
+                'has_update': has_update,
+                'local': local_sha[:7] if local_sha else '?',
+                'remote': remote_sha,
+                'checked_at': settings.last_update_check.isoformat(),
+            })
+        except Exception as e:
+            return Response({'has_update': False, 'error': str(e)})
+
+    @action(detail=False, methods=['post'])
+    def update_now(self, request):
+        """Обновить CRM из GitHub (скачивание архива репозитория)"""
+        import requests, re, tempfile, shutil, os, subprocess
+        settings = SystemSettings.objects.first()
+        if not settings or not settings.git_repo_url:
+            return Response({'ok': False, 'error': 'Не настроен GitHub репозиторий'})
+
+        repo_url = settings.git_repo_url.rstrip('/').replace('.git', '')
+        branch = settings.git_branch or 'main'
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+        if settings.git_token:
+            headers['Authorization'] = f'Bearer {settings.git_token}'
+
+        m = re.search(r'github\.com[:/]([^/]+)/([^/\s]+)', repo_url)
+        if not m:
+            return Response({'ok': False, 'error': 'Неверный формат URL репозитория'})
+        owner, repo = m.group(1), m.group(2)
+
+        try:
+            # 1. Бэкап текущего backend
+            backup_dir = '/app_backup_' + timezone.now().strftime('%Y%m%d_%H%M%S')
+            shutil.copytree('/app', backup_dir, dirs_exist_ok=True, symlinks=True)
+            settings.backup_path = backup_dir
+            settings.save(update_fields=['backup_path'])
+
+            # 2. Скачиваем архив
+            archive_url = f'https://api.github.com/repos/{owner}/{repo}/zipball/{branch}'
+            resp = requests.get(archive_url, headers=headers, timeout=120, stream=True)
+            if resp.status_code != 200:
+                return Response({'ok': False, 'error': f'GitHub API: {resp.status_code}'})
+
+            tmp_zip = '/tmp/repo.zip'
+            with open(tmp_zip, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # 3. Распаковываем
+            extract_dir = '/tmp/repo_extracted'
+            if os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir)
+            os.makedirs(extract_dir)
+            subprocess.run(['unzip', '-q', tmp_zip, '-d', extract_dir], timeout=30)
+            os.remove(tmp_zip)
+
+            # 4. Копируем backend из архива
+            src = extract_dir
+            dirs = os.listdir(src)
+            if dirs:
+                src = os.path.join(src, dirs[0])  # GitHub вкладывает в папку owner-repo-hash
+
+            backend_src = os.path.join(src, 'backend')
+            if not os.path.exists(backend_src):
+                return Response({'ok': False, 'error': 'В архиве нет папки backend'})
+
+            # Копируем все кроме models.py (чтобы не затереть данные)
+            for item in os.listdir(backend_src):
+                s = os.path.join(backend_src, item)
+                d = os.path.join('/app', item)
+                if os.path.isdir(s):
+                    if item == 'migrations':
+                        continue  # Не заменяем миграции
+                    if os.path.exists(d):
+                        shutil.rmtree(d)
+                    shutil.copytree(s, d)
+                else:
+                    shutil.copy2(s, d)
+
+            # Очистка
+            shutil.rmtree(extract_dir)
+
+            # 5. Собираем фронтенд если есть node
+            if os.path.exists('/app/../frontend/package.json'):
+                subprocess.run(
+                    'cd /app/.. && npm install && npm run build',
+                    shell=True, timeout=120, capture_output=True
+                )
+
+            # 6. Перезапускаем Django
+            subprocess.run(['touch', '/app/main/wsgi.py'], timeout=5)
+
+            settings.last_update_check = timezone.now()
+            settings.latest_commit = ''
+            settings.save(update_fields=['last_update_check', 'latest_commit'])
+            return Response({'ok': True, 'message': 'CRM обновлена! Бэкенд перезапущен.', 'backup': backup_dir})
+        except Exception as e:
+            return Response({'ok': False, 'error': str(e)})
+
     @action(detail=False, methods=['post'])
     def backup_db(self, request):
         """Ручной бэкап базы данных"""
@@ -1360,7 +1610,19 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     serializer_class = InventoryItemSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['item_type', 'status']
-    search_fields = ['name', 'serial_number', 'model_name', 'supplier']
+    search_fields = ['name', 'serial_number', 'model_name', 'supplier', 'barcode']
+
+    @action(detail=False, methods=['get'])
+    def by_barcode(self, request):
+        """Поиск товара по штрих-коду (для сканера)"""
+        barcode = request.query_params.get('code', '').strip()
+        if not barcode:
+            return Response({'error': 'Передайте ?code=ШТРИХКОД'}, status=400)
+        try:
+            item = InventoryItem.objects.get(barcode=barcode)
+            return Response(InventoryItemSerializer(item).data)
+        except InventoryItem.DoesNotExist:
+            return Response({'error': 'Товар с таким штрих-кодом не найден', 'barcode': barcode}, status=404)
 
     @action(detail=False, methods=['get'])
     def summary(self, request):
@@ -1388,7 +1650,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_stock(self, request, pk=None):
-        """Приход на склад"""
+        """Приход на склад (простой, без накладной)"""
         item = self.get_object()
         qty = int(request.data.get('quantity', 0))
         if qty <= 0:
@@ -1424,7 +1686,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
 class InventoryMovementViewSet(viewsets.ReadOnlyModelViewSet):
     """Движения оборудования (только чтение)"""
-    queryset = InventoryMovement.objects.select_related('item', 'master', 'master__user', 'order', 'performed_by')
+    queryset = InventoryMovement.objects.select_related('item', 'master', 'master__user', 'order', 'performed_by', 'supply_invoice', 'supply_invoice__supplier')
     serializer_class = InventoryMovementSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['movement_type', 'master', 'item']
@@ -1435,6 +1697,253 @@ class InventoryMovementViewSet(viewsets.ReadOnlyModelViewSet):
         if master_id:
             qs = qs.filter(master_id=master_id)
         return qs
+
+
+# ══════════════════════════════════════════════════════════════════
+# Поставщики и накладные
+# ══════════════════════════════════════════════════════════════════
+
+class SupplierViewSet(viewsets.ModelViewSet):
+    """Поставщики оборудования"""
+    queryset = Supplier.objects.all()
+    serializer_class = SupplierSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'inn', 'phone', 'email']
+
+
+class SupplyInvoiceViewSet(viewsets.ModelViewSet):
+    """Накладные поставщиков"""
+    queryset = SupplyInvoice.objects.select_related('supplier', 'received_by').prefetch_related('items__inventory_item')
+    serializer_class = SupplyInvoiceSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['status', 'supplier']
+    search_fields = ['invoice_number', 'supplier__name']
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return SupplyInvoiceCreateSerializer
+        if self.action in ('receive', 'partial_update'):
+            return SupplyInvoiceReceiveSerializer
+        return SupplyInvoiceSerializer
+
+    def create(self, request, *args, **kwargs):
+        """Создать накладную с позициями одним запросом"""
+        serializer = SupplyInvoiceCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        supplier = get_object_or_404(Supplier, id=data['supplier_id'])
+
+        invoice = SupplyInvoice.objects.create(
+            supplier=supplier,
+            invoice_number=data['invoice_number'],
+            invoice_date=data['invoice_date'],
+            notes=data.get('notes', ''),
+            status='draft'
+        )
+
+        items_data = data.get('items', [])
+        for item_data in items_data:
+            inv_item = get_object_or_404(InventoryItem, id=item_data['inventory_item_id'])
+            SupplyInvoiceItem.objects.create(
+                invoice=invoice,
+                inventory_item=inv_item,
+                quantity_ordered=item_data.get('quantity_ordered', 0),
+                quantity_received=item_data.get('quantity_received', 0),
+                unit_price=item_data.get('unit_price', inv_item.cost_price or 0),
+                notes=item_data.get('notes', ''),
+            )
+        invoice.recalculate_totals()
+
+        # Если все позиции уже приняты — сразу применяем
+        if invoice.items.filter(quantity_received__gt=0).exists():
+            invoice.apply_received(request.user)
+            invoice.refresh_from_db()
+
+        return Response(SupplyInvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def receive(self, request, pk=None):
+        """Принять товар по накладной: обновить quantity_received и оприходовать"""
+        invoice = self.get_object()
+        if invoice.status == 'cancelled':
+            return Response({'error': 'Накладная отменена'}, status=400)
+
+        serializer = SupplyInvoiceReceiveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        items_data = {it['inventory_item_id']: it for it in serializer.validated_data['items']}
+
+        for item in invoice.items.all():
+            if item.inventory_item_id in items_data:
+                new_qty = items_data[item.inventory_item_id].get('quantity_received', item.quantity_received)
+                item.quantity_received = min(new_qty, item.quantity_ordered)  # не больше заказанного
+                item.save(update_fields=['quantity_received'])
+
+        invoice.apply_received(request.user)
+        invoice.recalculate_totals()
+        invoice.refresh_from_db()
+
+        return Response(SupplyInvoiceSerializer(invoice).data)
+
+    @action(detail=True, methods=['post'])
+    def add_item(self, request, pk=None):
+        """Добавить позицию в существующую накладную"""
+        invoice = self.get_object()
+        if invoice.status in ('received', 'cancelled'):
+            return Response({'error': 'Нельзя редактировать принятую/отменённую накладную'}, status=400)
+
+        inv_item = get_object_or_404(InventoryItem, id=request.data.get('inventory_item_id'))
+        item, created = SupplyInvoiceItem.objects.update_or_create(
+            invoice=invoice,
+            inventory_item=inv_item,
+            defaults={
+                'quantity_ordered': request.data.get('quantity_ordered', 1),
+                'quantity_received': request.data.get('quantity_received', 0),
+                'unit_price': request.data.get('unit_price', inv_item.cost_price or 0),
+                'notes': request.data.get('notes', ''),
+            }
+        )
+        invoice.recalculate_totals()
+        return Response(SupplyInvoiceSerializer(invoice).data)
+
+    @action(detail=True, methods=['post'])
+    def remove_item(self, request, pk=None):
+        """Удалить позицию из накладной"""
+        invoice = self.get_object()
+        if invoice.status in ('received', 'cancelled'):
+            return Response({'error': 'Нельзя редактировать принятую/отменённую накладную'}, status=400)
+
+        item_id = request.data.get('item_id')
+        SupplyInvoiceItem.objects.filter(id=item_id, invoice=invoice).delete()
+        invoice.recalculate_totals()
+        return Response(SupplyInvoiceSerializer(invoice).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Отменить накладную"""
+        invoice = self.get_object()
+        if invoice.status == 'received':
+            return Response({'error': 'Нельзя отменить уже принятую накладную'}, status=400)
+        invoice.status = 'cancelled'
+        invoice.save()
+        return Response(SupplyInvoiceSerializer(invoice).data)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад v3: Расходные ордера и заявки на закупку
+# ══════════════════════════════════════════════════════════════════
+
+class IssueOrderViewSet(viewsets.ModelViewSet):
+    """Расходные ордера — выдача материалов со склада под заявку"""
+    queryset = IssueOrder.objects.select_related('order', 'master__user', 'issued_by').prefetch_related('items__inventory_item')
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['order', 'master', 'status']
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return IssueOrderCreateSerializer
+        return IssueOrderSerializer
+
+    def create(self, request):
+        serializer = IssueOrderCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        order = get_object_or_404(Order, id=data['order_id'])
+        master = get_object_or_404(Master, id=data['master_id'])
+        issue_order = IssueOrder.objects.create(order=order, master=master, issued_by=request.user, notes=data.get('notes', ''))
+        for item_data in data.get('items', []):
+            inv_item = get_object_or_404(InventoryItem, id=item_data['inventory_item_id'])
+            qty = item_data.get('quantity_issued', 1)
+            IssueOrderItem.objects.create(
+                issue_order=issue_order, inventory_item=inv_item,
+                quantity_issued=qty,
+                need_return_old=item_data.get('need_return_old', False),
+                old_item_description=item_data.get('old_item_description', ''),
+                notes=item_data.get('notes', ''),
+            )
+            InventoryMovement.objects.create(item=inv_item, movement_type='out_to_master', quantity=qty, master=master, order=order, performed_by=request.user, notes=f'Ордер №{issue_order.id}')
+        return Response(IssueOrderSerializer(issue_order).data, status=201)
+
+    @action(detail=True, methods=['post'])
+    def receive(self, request, pk=None):
+        """Сотрудник подтверждает получение материалов"""
+        issue_order = self.get_object()
+        if issue_order.status != 'pending':
+            return Response({'error': 'Ордер уже получен или закрыт'}, status=400)
+        issue_order.status = 'received'
+        issue_order.received_at = timezone.now()
+        issue_order.save()
+        return Response(IssueOrderSerializer(issue_order).data)
+
+    @action(detail=True, methods=['post'])
+    def report_usage(self, request, pk=None):
+        """Сотрудник отчитывается: сколько использовал, сколько вернул"""
+        issue_order = self.get_object()
+        items_data = {it['item_id']: it for it in request.data.get('items', [])}
+        for item in issue_order.items.all():
+            if item.inventory_item_id in items_data:
+                d = items_data[item.inventory_item_id]
+                item.quantity_used = d.get('quantity_used', item.quantity_used)
+                item.quantity_returned = d.get('quantity_returned', item.quantity_returned)
+                item.old_item_returned = d.get('old_item_returned', item.old_item_returned)
+                item.save()
+                if item.quantity_returned > 0:
+                    inv_item = item.inventory_item
+                    inv_item.quantity += item.quantity_returned
+                    inv_item.status = 'in_stock'
+                    inv_item.save()
+                    InventoryMovement.objects.create(item=inv_item, movement_type='return_from_master', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'Возврат по ордеру №{issue_order.id}')
+        from django.db.models import F as _F
+        all_used = not issue_order.items.filter(quantity_issued__gt=_F('quantity_used') + _F('quantity_returned')).exists()
+        issue_order.status = 'fully_used' if all_used else 'partially_used'
+        issue_order.completed_at = timezone.now()
+        issue_order.save()
+        return Response(IssueOrderSerializer(issue_order).data)
+
+
+class PurchaseRequestViewSet(viewsets.ModelViewSet):
+    """Заявки на закупку"""
+    queryset = PurchaseRequest.objects.select_related('estimate', 'order', 'created_by').prefetch_related('items')
+    serializer_class = PurchaseRequestSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['status']
+
+    def create(self, request):
+        data = request.data
+        pr = PurchaseRequest.objects.create(
+            estimate_id=data.get('estimate_id'),
+            order_id=data.get('order_id'),
+            created_by=request.user,
+            notes=data.get('notes', ''),
+            status='pending',
+        )
+        for item_data in data.get('items', []):
+            PurchaseRequestItem.objects.create(
+                purchase_request=pr,
+                inventory_item_id=item_data.get('inventory_item_id'),
+                name=item_data.get('name', 'Без названия'),
+                quantity=item_data.get('quantity', 1),
+                unit=item_data.get('unit', 'шт.'),
+                estimated_price=item_data.get('estimated_price'),
+                supplier_id=item_data.get('supplier_id'),
+                notes=item_data.get('notes', ''),
+            )
+        return Response(PurchaseRequestSerializer(pr).data, status=201)
+
+    @action(detail=True, methods=['post'])
+    def mark_ordered(self, request, pk=None):
+        pr = self.get_object()
+        pr.status = 'ordered'
+        pr.save()
+        return Response(PurchaseRequestSerializer(pr).data)
+
+    @action(detail=True, methods=['post'])
+    def mark_received(self, request, pk=None):
+        pr = self.get_object()
+        pr.status = 'received'
+        pr.save()
+        return Response(PurchaseRequestSerializer(pr).data)
 
 
 # ══════════════════════════════════════════════════════════════════

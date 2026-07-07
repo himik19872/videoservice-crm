@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic, Form, Input } from 'antd';
-import { PlusOutlined, ReloadOutlined, ExportOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, ExportOutlined, BarcodeOutlined, ShopOutlined, FileTextOutlined, SendOutlined, ShoppingCartOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import BarcodeScanner from '../../components/BarcodeScanner';
 import type { InventoryItem, InventoryMovement } from '../../types';
 
 const { Title } = Typography;
@@ -22,9 +24,11 @@ const InventoryPage: React.FC = () => {
   const [issueModal, setIssueModal] = useState(false);
   const [addModal, setAddModal] = useState(false);
   const [createModal, setCreateModal] = useState(false);
+  const [scannerVisible, setScannerVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [tab, setTab] = useState<'items' | 'movements'>('items');
   const [createForm] = Form.useForm();
+  const navigate = useNavigate();
 
   const statusColors: Record<string, string> = {
     in_stock: 'green', with_master: 'blue', installed: 'purple',
@@ -37,15 +41,26 @@ const InventoryPage: React.FC = () => {
     setLoading(true);
     try {
       const [itemsRes, summaryRes, movRes] = await Promise.all([
-        api.get('/inventory/'),
+        api.get('/inventory/?page_size=200'),
         api.get('/inventory/summary/'),
-        api.get('/inventory-movements/'),
+        api.get('/inventory-movements/?page_size=100'),
       ]);
       setItems(itemsRes.data.results || itemsRes.data);
       setSummary(summaryRes.data);
       setMovements(movRes.data.results || movRes.data);
     } catch (e) { message.error('Ошибка загрузки склада'); }
     finally { setLoading(false); }
+  };
+
+  const handleBarcodeScanned = async (barcode: string) => {
+    try {
+      const res = await api.get(`/inventory/by_barcode/?code=${encodeURIComponent(barcode)}`);
+      const item = res.data;
+      message.success(`Найдено: ${item.name} (${item.quantity} шт.)`);
+      setSelectedItem(item);
+    } catch (e: any) {
+      message.error(`Штрих-код «${barcode}» не найден на складе`);
+    }
   };
 
   const handleAddStock = async (qty: number) => {
@@ -80,6 +95,7 @@ const InventoryPage: React.FC = () => {
 
   const columns = [
     { title: 'Название', dataIndex: 'name', key: 'name', width: 250 },
+    { title: 'Штрих-код', dataIndex: 'barcode', key: 'barcode', width: 130, render: (v: string | null) => v ? <Tag color="geekblue">{v}</Tag> : <Tag color="default">—</Tag> },
     { title: 'Тип', dataIndex: 'item_type_display', key: 'type', width: 130 },
     { title: 'S/N', dataIndex: 'serial_number', key: 'sn', width: 140 },
     { title: 'Модель', dataIndex: 'model_name', key: 'model', width: 120 },
@@ -101,9 +117,12 @@ const InventoryPage: React.FC = () => {
   const movColumns = [
     { title: 'Дата', dataIndex: 'created_at', key: 'date', width: 160, render: (v: string) => new Date(v).toLocaleString('ru') },
     { title: 'Тип', dataIndex: 'movement_type_display', key: 'type', width: 130 },
-    { title: 'Оборудование', dataIndex: 'item_name', key: 'item', width: 300, ellipsis: true },
+    { title: 'Оборудование', dataIndex: 'item_name', key: 'item', width: 280, ellipsis: true },
     { title: 'Кол-во', dataIndex: 'quantity', key: 'qty', width: 60 },
     { title: 'Мастер', dataIndex: 'master_name', key: 'master', width: 130 },
+    { title: 'Накладная', key: 'invoice', width: 120, render: (_: any, r: InventoryMovement) =>
+      r.supply_invoice_info ? <Tag color="blue">{r.supply_invoice_info.invoice_number}</Tag> : '—'
+    },
     { title: 'Кто выдал', dataIndex: 'performed_by_name', key: 'by', width: 130 },
   ];
 
@@ -118,11 +137,16 @@ const InventoryPage: React.FC = () => {
         <Col span={6}><Card><Statistic title="Стоимость" value={summary.total_value || 0} suffix="₽" /></Card></Col>
       </Row>
 
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Button type={tab === 'items' ? 'primary' : 'default'} onClick={() => setTab('items')}>Оборудование</Button>
         <Button type={tab === 'movements' ? 'primary' : 'default'} onClick={() => setTab('movements')}>Движения</Button>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); setCreateModal(true); }}>Новая позиция</Button>
+        <Button icon={<BarcodeOutlined />} onClick={() => setScannerVisible(true)}>Сканер</Button>
         <Button icon={<ReloadOutlined />} onClick={fetchAll}>Обновить</Button>
+        <Button icon={<ShopOutlined />} onClick={() => navigate('/suppliers')}>Поставщики</Button>
+        <Button icon={<FileTextOutlined />} onClick={() => navigate('/supply-invoices')}>Накладные</Button>
+        <Button icon={<SendOutlined />} onClick={() => navigate('/issue-orders')}>Расходные ордера</Button>
+        <Button icon={<ShoppingCartOutlined />} onClick={() => navigate('/purchase-requests')}>Заявки на закупку</Button>
       </Space>
 
       {tab === 'items' ? (
@@ -145,6 +169,9 @@ const InventoryPage: React.FC = () => {
           <Form.Item name="item_type" label="Тип" rules={[{ required: true }]}>
             <Select options={ITEM_TYPES} />
           </Form.Item>
+          <Form.Item name="barcode" label="Штрих-код (SKU)">
+            <Input placeholder="Штрих-код с упаковки товара" prefix={<BarcodeOutlined />} />
+          </Form.Item>
           <Form.Item name="serial_number" label="Серийный номер"><Input /></Form.Item>
           <Form.Item name="model_name" label="Модель"><Input /></Form.Item>
           <Row gutter={12}>
@@ -157,6 +184,12 @@ const InventoryPage: React.FC = () => {
           <Button type="primary" htmlType="submit" block>Создать</Button>
         </Form>
       </Modal>
+
+      <BarcodeScanner
+        visible={scannerVisible}
+        onClose={() => setScannerVisible(false)}
+        onScanned={handleBarcodeScanned}
+      />
     </div>
   );
 };

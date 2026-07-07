@@ -13,6 +13,7 @@ interface InventoryItem {
   item_type_display: string;
   serial_number: string;
   model_name: string;
+  barcode: string | null;
   quantity: number;
   unit: string;
   cost_price: number | null;
@@ -87,6 +88,7 @@ const InventoryDetailScreen: React.FC<{ route: any; navigation: any }> = ({ rout
         <Text style={[styles.name, { color: theme.text }]}>{item.name}</Text>
 
         <View style={styles.infoGrid}>
+          <InfoRow label="Штрих-код" value={item.barcode || '—'} theme={theme} />
           <InfoRow label="Модель" value={item.model_name || '—'} theme={theme} />
           <InfoRow label="S/N" value={item.serial_number || '—'} theme={theme} />
           <InfoRow label="Количество" value={`${item.quantity} ${item.unit}`} theme={theme} />

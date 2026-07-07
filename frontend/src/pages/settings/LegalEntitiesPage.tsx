@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Input, Space, Popconfirm, message, Row, Col, Checkbox } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import api from '../../services/api';
+import InnSuggest from '../../components/InnSuggest';
 
 const LegalEntitiesPage: React.FC = () => {
   const [entities, setEntities] = useState<any[]>([]);
@@ -30,6 +31,20 @@ const LegalEntitiesPage: React.FC = () => {
     setEditing(null);
     setForm({ name: '', short_name: '', inn: '', kpp: '', ogrn: '', legal_address: '', actual_address: '', phone: '', email: '', bank_name: '', bik: '', corr_account: '', settlement_account: '', director: '', is_default: false });
     setModalOpen(true);
+  };
+
+  const handleInnFound = (company: any) => {
+    setForm(prev => ({
+      ...prev,
+      name: company.name || company.short_name || prev.name,
+      short_name: company.short_name || prev.short_name,
+      inn: company.inn,
+      kpp: company.kpp,
+      ogrn: company.ogrn,
+      legal_address: company.legal_address,
+      director: company.director || prev.director,
+    }));
+    message.success(company.short_name || company.name);
   };
 
   const openEdit = (rec: any) => {
@@ -91,7 +106,7 @@ const LegalEntitiesPage: React.FC = () => {
             <Col span={12}><label>Краткое название</label><Input value={form.short_name} onChange={e => setForm({ ...form, short_name: e.target.value })} placeholder="Видео Сервис" /></Col>
           </Row>
           <Row gutter={12}>
-            <Col span={8}><label>ИНН</label><Input value={form.inn} onChange={e => setForm({ ...form, inn: e.target.value })} maxLength={12} /></Col>
+            <Col span={8}><label>ИНН</label><InnSuggest value={form.inn} onChange={v => setForm({ ...form, inn: v })} onFound={handleInnFound} /></Col>
             <Col span={8}><label>КПП</label><Input value={form.kpp} onChange={e => setForm({ ...form, kpp: e.target.value })} maxLength={9} /></Col>
             <Col span={8}><label>ОГРН</label><Input value={form.ogrn} onChange={e => setForm({ ...form, ogrn: e.target.value })} maxLength={15} /></Col>
           </Row>

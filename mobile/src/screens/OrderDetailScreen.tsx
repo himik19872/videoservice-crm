@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Linking, Image, Modal, TextInput,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -35,6 +36,10 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [media, setMedia] = useState<any[]>([]);
+  const [issueOrders, setIssueOrders] = useState<any[]>([]);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentInput, setCommentInput] = useState('');
+  const [sendingComment, setSendingComment] = useState(false);
 
   // Состояние для модального окна комментария
   const [commentModal, setCommentModal] = useState(false);
@@ -44,6 +49,8 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     fetchOrder();
     fetchMedia();
+    fetchIssueOrders();
+    fetchComments();
   }, [id]);
 
   const fetchOrder = async () => {
@@ -63,6 +70,56 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       const res = await api.get(`/order-media/?order=${id}`);
       setMedia(res.data.results || res.data);
     } catch (e) {}
+  };
+
+  const fetchIssueOrders = async () => {
+    try {
+      const res = await api.get(`/issue-orders/?order=${id}`);
+      setIssueOrders(res.data.results || res.data || []);
+    } catch (e) {}
+  };
+
+  const fetchComments = async () => {
+    try {
+      const res = await api.get(`/orders/${id}/comments/`);
+      setComments(res.data || []);
+    } catch (e) {}
+  };
+
+  const sendComment = async () => {
+    if (!commentInput.trim()) return;
+    setSendingComment(true);
+    try {
+      await api.post(`/orders/${id}/comments/`, { text: commentInput.trim() });
+      setCommentInput('');
+      fetchComments();
+    } catch (e: any) {
+      Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось отправить');
+    } finally {
+      setSendingComment(false);
+    }
+  };
+
+  const receiveMaterials = async (issueOrderId: number) => {
+    Alert.alert(
+      'Подтверждение',
+      'Вы подтверждаете получение материалов?',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: '✅ Подтверждаю',
+          onPress: async () => {
+            try {
+              await api.post(`/issue-orders/${issueOrderId}/receive/`);
+              Alert.alert('Готово', 'Материалы получены');
+              fetchIssueOrders();
+            } catch (e: any) {
+              Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
+            }
+          },
+        },
+      ],
+    );
   };
 
   const takePhoto = async () => {
@@ -153,7 +210,16 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const canAct = !['completed', 'confirmed', 'cancelled'].includes(s);
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.background }]}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={{ paddingBottom: 40 }}
+    >
       {!isOnline && (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineBannerText}>📴 Офлайн-режим — изменения сохранятся локально</Text>
@@ -231,6 +297,85 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           ))}
         </View>
       )}
+
+      {/* Материалы со склада */}
+      {issueOrders.length > 0 && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.primary }]}>📦 Материалы со склада</Text>
+          {issueOrders.map((io: any) => (
+            <View key={io.id} style={[styles.materialCard, { backgroundColor: theme.card }]}>
+              <View style={styles.materialCardHeader}>
+                <Text style={[styles.materialCardTitle, { color: theme.text }]}>
+                  Ордер №{io.id}
+                </Text>
+                <View style={[styles.miniBadge, { backgroundColor: io.status === 'pending' ? '#fa8c16' : io.status === 'received' ? '#13c2c2' : '#52c41a' }]}>
+                  <Text style={styles.miniBadgeText}>{io.status_display}</Text>
+                </View>
+              </View>
+              <Text style={[styles.materialMaster, { color: theme.textSecondary }]}>
+                {io.master_name} · {new Date(io.issued_at).toLocaleDateString('ru-RU')}
+              </Text>
+              {io.items.map((item: any) => (
+                <View key={item.id} style={[styles.materialItem, { borderBottomColor: theme.border }]}>
+                  <Text style={[styles.materialItemName, { color: theme.text }]}>{item.item_name}</Text>
+                  <View style={styles.materialItemRow}>
+                    <Text style={[styles.materialQty, { color: theme.textSecondary }]}>Выдано: {item.quantity_issued}</Text>
+                    <Text style={[styles.materialQty, { color: theme.textSecondary }]}>Остаток: {item.remaining}</Text>
+                  </View>
+                  {item.barcode ? <Text style={[styles.materialBarcode, { color: theme.textTertiary }]}>🏷️ {item.barcode}</Text> : null}
+                </View>
+              ))}
+              {io.status === 'pending' && (
+                <TouchableOpacity
+                  style={[styles.receiveBtn, { backgroundColor: theme.primary }]}
+                  onPress={() => receiveMaterials(io.id)}
+                >
+                  <Text style={styles.receiveBtnText}>✅ Подтвердить получение</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Комментарии / диалог */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.primary }]}>💬 Обсуждение</Text>
+        {comments.length === 0 ? (
+          <Text style={[styles.emptyText, { color: theme.textTertiary }]}>Пока нет комментариев</Text>
+        ) : (
+          comments.slice(-20).map((c: any) => (
+            <View key={c.id} style={[styles.commentItem, { backgroundColor: theme.card }]}>
+              <View style={styles.commentHeader}>
+                <Text style={[styles.commentAuthor, { color: theme.primary }]}>{c.author_name}</Text>
+                <Text style={[styles.commentTime, { color: theme.textTertiary }]}>
+                  {new Date(c.created_at).toLocaleString('ru-RU')}
+                </Text>
+              </View>
+              <Text style={[styles.commentText, { color: theme.text }]}>{c.text}</Text>
+            </View>
+          ))
+        )}
+        <View style={styles.commentInputRow}>
+          <TextInput
+            style={[styles.commentInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+            placeholder="Комментарий..."
+            placeholderTextColor={theme.textTertiary}
+            value={commentInput}
+            onChangeText={setCommentInput}
+            multiline
+            returnKeyType="send"
+            onSubmitEditing={sendComment}
+          />
+          <TouchableOpacity
+            style={[styles.commentSendBtn, { backgroundColor: theme.primary, opacity: commentInput.trim() ? 1 : 0.5 }]}
+            onPress={sendComment}
+            disabled={!commentInput.trim() || sendingComment}
+          >
+            <Text style={styles.commentSendText}>➤</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <View style={styles.toolbar}>
         <TouchableOpacity style={[styles.toolBtn, { backgroundColor: theme.card }]} onPress={takePhoto}>
@@ -355,6 +500,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -416,6 +562,33 @@ const styles = StyleSheet.create({
   modalBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
   modalBtnText: { fontSize: 14, fontWeight: '600' },
   modalBtnTextWhite: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  // Материалы
+  section: { marginBottom: 16 },
+  sectionTitle: { fontWeight: '700', fontSize: 15, marginBottom: 8 },
+  emptyText: { fontSize: 13, fontStyle: 'italic' },
+  materialCard: { borderRadius: 10, padding: 12, marginBottom: 8, elevation: 1 },
+  materialCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  materialCardTitle: { fontWeight: '700', fontSize: 14 },
+  miniBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  miniBadgeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  materialMaster: { fontSize: 12, marginBottom: 8 },
+  materialItem: { paddingVertical: 6, borderBottomWidth: 1 },
+  materialItemName: { fontSize: 13, fontWeight: '600' },
+  materialItemRow: { flexDirection: 'row', gap: 16, marginTop: 2 },
+  materialQty: { fontSize: 12 },
+  materialBarcode: { fontSize: 11 },
+  receiveBtn: { marginTop: 10, padding: 10, borderRadius: 8, alignItems: 'center' },
+  receiveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  // Комментарии
+  commentItem: { borderRadius: 8, padding: 10, marginBottom: 6 },
+  commentHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  commentAuthor: { fontWeight: '700', fontSize: 13 },
+  commentTime: { fontSize: 10 },
+  commentText: { fontSize: 14, lineHeight: 20 },
+  commentInputRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 8, gap: 8 },
+  commentInput: { flex: 1, borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 14, maxHeight: 80 },
+  commentSendBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  commentSendText: { color: '#fff', fontSize: 18, fontWeight: '700' },
 });
 
 export default OrderDetailScreen;

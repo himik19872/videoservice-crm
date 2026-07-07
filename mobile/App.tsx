@@ -12,7 +12,6 @@ import LoginScreen from './src/screens/LoginScreen';
 import OrdersListScreen from './src/screens/OrdersListScreen';
 import OrderDetailScreen from './src/screens/OrderDetailScreen';
 import SignatureScreen from './src/screens/SignatureScreen';
-import MasterMapScreen from './src/screens/MasterMapScreen';
 import InventoryScreen from './src/screens/InventoryScreen';
 import InventoryDetailScreen from './src/screens/InventoryDetailScreen';
 import PaymentsScreen from './src/screens/PaymentsScreen';
@@ -124,38 +123,29 @@ function AppStack() {
         }}
       />
 
-      {/* Карта мастеров (только для staff) */}
+      {/* Склад (только staff) */}
       {isStaff && (
-        <Stack.Screen
-          name="Map"
-          component={MasterMapScreen}
-          options={{
-            title: 'Карта мастеров',
-            headerStyle,
-            headerTintColor,
-          }}
-        />
+        <>
+          <Stack.Screen
+            name="Inventory"
+            component={InventoryScreen}
+            options={{
+              title: '📦 Склад',
+              headerStyle,
+              headerTintColor,
+            }}
+          />
+          <Stack.Screen
+            name="InventoryDetail"
+            component={InventoryDetailScreen}
+            options={{
+              title: 'Детали оборудования',
+              headerStyle,
+              headerTintColor,
+            }}
+          />
+        </>
       )}
-
-      {/* Склад */}
-      <Stack.Screen
-        name="Inventory"
-        component={InventoryScreen}
-        options={{
-          title: '📦 Склад',
-          headerStyle,
-          headerTintColor,
-        }}
-      />
-      <Stack.Screen
-        name="InventoryDetail"
-        component={InventoryDetailScreen}
-        options={{
-          title: 'Детали оборудования',
-          headerStyle,
-          headerTintColor,
-        }}
-      />
 
       {/* Сообщения */}
       <Stack.Screen
@@ -168,16 +158,18 @@ function AppStack() {
         }}
       />
 
-      {/* Оплаты */}
-      <Stack.Screen
-        name="Payments"
-        component={PaymentsScreen}
-        options={{
-          title: '💰 Оплаты',
-          headerStyle,
-          headerTintColor,
-        }}
-      />
+      {/* Оплаты (только staff) */}
+      {isStaff && (
+        <Stack.Screen
+          name="Payments"
+          component={PaymentsScreen}
+          options={{
+            title: '💰 Оплаты',
+            headerStyle,
+            headerTintColor,
+          }}
+        />
+      )}
 
       {/* Подпись */}
       <Stack.Screen

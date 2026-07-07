@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined } from '@ant-design/icons';
+import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -24,11 +24,22 @@ const OrdersDetailPage: React.FC = () => {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [gpsHistory, setGpsHistory] = useState<any>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentText, setCommentText] = useState('');
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [materialModalOpen, setMaterialModalOpen] = useState(false);
+  const [inventoryItems, setInventoryItems] = useState<any[]>([]);
+  const [materialForm, setMaterialForm] = useState<Record<number, { qty: number; needReturn: boolean; oldDesc: string }>>({});
+  const [materialSaving, setMaterialSaving] = useState(false);
 
   useEffect(() => {
     fetchOrder();
     fetchAssignableUsers();
   }, [id]);
+
+  useEffect(() => {
+    if (order) fetchComments();
+  }, [order?.id]);
 
   const fetchAssignableUsers = async () => {
     if (!isStaff) return;
@@ -140,6 +151,81 @@ const OrdersDetailPage: React.FC = () => {
     handleStatusChange('in_progress', notes);
   };
 
+  const fetchComments = async () => {
+    if (!order) return;
+    setCommentsLoading(true);
+    try {
+      const res = await api.get(`/orders/${order.id}/comments/`);
+      setComments(res.data);
+    } catch (e) { /* ignore */ }
+    finally { setCommentsLoading(false); }
+  };
+
+  const handleSendComment = async () => {
+    if (!order || !commentText.trim()) return;
+    try {
+      await api.post(`/orders/${order.id}/comments/`, { text: commentText.trim() });
+      setCommentText('');
+      fetchComments();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка отправки');
+    }
+  };
+
+  const openMaterialModal = async () => {
+    setMaterialModalOpen(true);
+    setMaterialForm({});
+    try {
+      const res = await api.get('/inventory/?page_size=500&status=in_stock');
+      setInventoryItems(res.data.results || res.data || []);
+    } catch (e) {
+      setInventoryItems([]);
+    }
+  };
+
+  const handleIssueMaterials = async () => {
+    if (!order) return;
+    const items = Object.entries(materialForm)
+      .filter(([, v]) => v.qty > 0)
+      .map(([invId, v]) => ({
+        inventory_item_id: parseInt(invId),
+        quantity_issued: v.qty,
+        need_return_old: v.needReturn,
+        old_item_description: v.oldDesc,
+      }));
+    if (items.length === 0) { message.warning('Выберите хотя бы один материал'); return; }
+
+    // Ищем мастера — либо назначенный, либо текущий сотрудник
+    let masterId = order.master?.id;
+    if (!masterId) {
+      try {
+        const usersRes = await api.get('/masters/?page_size=100');
+        const mastersList = usersRes.data.results || usersRes.data || [];
+        // Ищем мастера текущего пользователя
+        const me = mastersList.find((m: any) => m.user?.id === user?.id);
+        if (me) masterId = me.id;
+      } catch (e) { /* ignore */ }
+    }
+    if (!masterId) { message.warning('У заявки нет исполнителя. Сначала назначьте сотрудника.'); return; }
+
+    setMaterialSaving(true);
+    try {
+      await api.post('/issue-orders/', {
+        order_id: order.id,
+        master_id: masterId,
+        notes: `Выдача материалов по заявке #${order.number}`,
+        items,
+      });
+      message.success('Материалы выданы!');
+      setMaterialModalOpen(false);
+      fetchOrder();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка выдачи материалов');
+    } finally {
+      setMaterialSaving(false);
+    }
+  };
+
   const fetchGpsHistory = async () => {
     if (!order) return;
     setGpsLoading(true);
@@ -180,6 +266,10 @@ const OrdersDetailPage: React.FC = () => {
   const handlePause = () => {
     const notes = prompt('Укажите причину паузы (обязательно):');
     if (notes) handleStatusChange('paused', notes);
+  };
+  const handleNeedHelp = () => {
+    const notes = prompt('Опишите, какая помощь требуется:');
+    if (notes) handleStatusChange('need_help', notes);
   };
 
   if (loading) {
@@ -279,13 +369,155 @@ const OrdersDetailPage: React.FC = () => {
         <Descriptions.Item label="Телефон клиента">{order.client_info?.phone || '-'}</Descriptions.Item>
         <Descriptions.Item label="Адрес">{order.address}</Descriptions.Item>
         <Descriptions.Item label="Район">{order.region_info?.name || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Мастер">{order.master_info?.full_name || 'Не назначен'}</Descriptions.Item>
+        <Descriptions.Item label="Исполнитель">{order.master_info?.full_name || 'Не назначен'}</Descriptions.Item>
         <Descriptions.Item label="Описание">{order.description}</Descriptions.Item>
         {order.cost != null && <Descriptions.Item label="Стоимость">{order.cost} ₽</Descriptions.Item>}
         {order.payment_type && <Descriptions.Item label="Тип оплаты">{order.payment_type_display}</Descriptions.Item>}
         {order.photo_report_required && <Descriptions.Item label="Фотоотчёт"><Tag color="orange">Требуется</Tag></Descriptions.Item>}
         {order.deadline && <Descriptions.Item label="Срок">{new Date(order.deadline).toLocaleDateString('ru-RU')}</Descriptions.Item>}
       </Descriptions>
+
+      {/* Диалог / комментарии внутри заявки */}
+      <Divider />
+      <Title level={5}>💬 Обсуждение заявки</Title>
+      <div style={{ maxHeight: 400, overflowY: 'auto', marginBottom: 12, background: '#fafafa', borderRadius: 8, padding: 12 }}>
+        {commentsLoading ? (
+          <Spin size="small" />
+        ) : comments.length === 0 ? (
+          <Text type="secondary">Пока нет комментариев. Начните обсуждение.</Text>
+        ) : (
+          <List
+            dataSource={comments}
+            renderItem={(c: any) => (
+              <List.Item style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                <List.Item.Meta
+                  avatar={<Avatar style={{ backgroundColor: c.event_type === 'status_changed' ? '#1677ff' : '#52c41a' }}>{c.author_name?.[0]?.toUpperCase()}</Avatar>}
+                  title={
+                    <Space>
+                      <Text strong>{c.author_name}</Text>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{new Date(c.created_at).toLocaleString('ru-RU')}</Text>
+                      {c.event_type !== 'comment' && <Tag color="blue" style={{ fontSize: 10 }}>{c.event_type}</Tag>}
+                    </Space>
+                  }
+                  description={<Text style={{ whiteSpace: 'pre-wrap' }}>{c.text}</Text>}
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </div>
+      <Space.Compact style={{ width: '100%' }}>
+        <Input
+          placeholder="Напишите комментарий..."
+          value={commentText}
+          onChange={(e) => setCommentText(e.target.value)}
+          onPressEnter={handleSendComment}
+        />
+        <Button type="primary" icon={<SendOutlined />} onClick={handleSendComment} loading={commentsLoading}>
+          Отправить
+        </Button>
+      </Space.Compact>
+
+      {/* Материалы со склада */}
+      <Divider />
+      <Space style={{ marginBottom: 8 }}>
+        <Title level={5} style={{ margin: 0 }}>📦 Материалы со склада</Title>
+        <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openMaterialModal}>
+          Выдать материалы
+        </Button>
+      </Space>
+      {order.issue_orders && order.issue_orders.length > 0 ? (
+        order.issue_orders.map((io: any) => (
+          <Card key={io.id} size="small" style={{ marginBottom: 8 }} title={
+            <Space>
+              <Text strong>Ордер №{io.id}</Text>
+              <Tag>{io.status_display}</Tag>
+              <Text type="secondary">{io.master_name} · {new Date(io.issued_at).toLocaleDateString('ru-RU')}</Text>
+            </Space>
+          }>
+            <Table
+              dataSource={io.items}
+              rowKey="id"
+              size="small"
+              pagination={false}
+              columns={[
+                { title: 'Материал', dataIndex: 'item_name', key: 'item_name' },
+                { title: 'Штрихкод', dataIndex: 'barcode', key: 'barcode', render: (v: string) => v || '—' },
+                { title: 'Выдано', dataIndex: 'quantity_issued', key: 'quantity_issued' },
+                { title: 'Исп.', dataIndex: 'quantity_used', key: 'quantity_used' },
+                { title: 'Возвр.', dataIndex: 'quantity_returned', key: 'quantity_returned' },
+                { title: 'Остаток', dataIndex: 'remaining', key: 'remaining', render: (v: number) => v > 0 ? <Tag color="orange">{v}</Tag> : <Tag color="green">0</Tag> },
+                { title: 'Возврат старого', dataIndex: 'old_item_description', key: 'old', render: (v: string, r: any) => r.need_return_old ? (r.old_item_returned ? <Tag color="green">✓ {v}</Tag> : <Tag color="red">Ожидает: {v || '?'}</Tag>) : '—' },
+              ]}
+            />
+          </Card>
+        ))
+      ) : (
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>Материалы ещё не выдавались</Text>
+      )}
+
+      {/* Модалка: выдать материалы со склада */}
+      <Modal
+        title="Выдать материалы со склада"
+        open={materialModalOpen}
+        onCancel={() => setMaterialModalOpen(false)}
+        onOk={handleIssueMaterials}
+        confirmLoading={materialSaving}
+        okText="Выдать"
+        cancelText="Отмена"
+        width={700}
+      >
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          {inventoryItems.length === 0 ? (
+            <Spin />
+          ) : (
+            <Table
+              dataSource={inventoryItems}
+              rowKey="id"
+              size="small"
+              pagination={false}
+              columns={[
+                { title: 'Материал', dataIndex: 'name', key: 'name' },
+                { title: 'Штрихкод', dataIndex: 'barcode', key: 'barcode', render: (v: string) => v || '—' },
+                { title: 'На складе', dataIndex: 'quantity', key: 'quantity', render: (v: number) => <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag> },
+                {
+                  title: 'Кол-во', key: 'qty', width: 80,
+                  render: (_: any, r: any) => (
+                    <InputNumber
+                      min={0}
+                      max={r.quantity}
+                      value={materialForm[r.id]?.qty || 0}
+                      onChange={(v) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], qty: v || 0 } }))}
+                      style={{ width: 60 }}
+                      size="small"
+                    />
+                  ),
+                },
+                {
+                  title: 'Возврат старого', key: 'needReturn', width: 140,
+                  render: (_: any, r: any) => (
+                    <Space size={4}>
+                      <Checkbox
+                        checked={materialForm[r.id]?.needReturn || false}
+                        onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], needReturn: e.target.checked } }))}
+                      />
+                      <Input
+                        size="small"
+                        placeholder="Что вернуть?"
+                        value={materialForm[r.id]?.oldDesc || ''}
+                        onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], oldDesc: e.target.value } }))}
+                        style={{ width: 110 }}
+                        disabled={!materialForm[r.id]?.needReturn}
+                      />
+                    </Space>
+                  ),
+                },
+                { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 50, render: (v: string) => v || 'шт.' },
+              ]}
+            />
+          )}
+        </div>
+      </Modal>
 
       {order.media && order.media.length > 0 && (
         <>
@@ -428,12 +660,12 @@ const OrdersDetailPage: React.FC = () => {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {order.status === 'new' && isStaff && (
           <Button type="primary" onClick={openAssignModal} loading={updating}>
-            Назначить мастера
+            Назначить сотрудника
           </Button>
         )}
         {['assigned', 'accepted', 'in_progress', 'paused', 'need_help'].includes(order.status) && isStaff && (
           <Button onClick={openAssignModal} loading={updating}>
-            Переназначить мастера
+            Переназначить сотрудника
           </Button>
         )}
         {order.status === 'assigned' && (

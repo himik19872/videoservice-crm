@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import api from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
 import { useOffline } from '../contexts/OfflineContext';
+import { useAuth } from '../contexts/AuthContext';
 import type { Order } from '../types';
 
 interface Props {
@@ -29,6 +30,8 @@ const statusLabels: Record<string, string> = {
 const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
   const { theme } = useTheme();
   const { isOnline } = useOffline();
+  const { user } = useAuth();
+  const isStaff = user?.role === 'admin' || user?.role === 'dispatcher';
   const [orders, setOrders] = useState<Order[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
@@ -116,34 +119,30 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Быстрая навигация: склад, оплаты, сообщения */}
+      {/* Быстрая навигация */}
       <View style={styles.navRow}>
-        <TouchableOpacity
-          style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
-          onPress={() => navigation.navigate('Inventory')}
-        >
-          <Text style={[styles.navChipText, { color: theme.textSecondary }]}>📦 Склад</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
-          onPress={() => navigation.navigate('Payments')}
-        >
-          <Text style={[styles.navChipText, { color: theme.textSecondary }]}>💰 Оплаты</Text>
-        </TouchableOpacity>
+        {isStaff && (
+          <>
+            <TouchableOpacity
+              style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
+              onPress={() => navigation.navigate('Inventory')}
+            >
+              <Text style={[styles.navChipText, { color: theme.textSecondary }]}>📦 Склад</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
+              onPress={() => navigation.navigate('Payments')}
+            >
+              <Text style={[styles.navChipText, { color: theme.textSecondary }]}>💰 Оплаты</Text>
+            </TouchableOpacity>
+          </>
+        )}
         <TouchableOpacity
           style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
           onPress={() => navigation.navigate('Messages')}
         >
           <Text style={[styles.navChipText, { color: theme.textSecondary }]}>💬 Чат</Text>
         </TouchableOpacity>
-        {isMaster !== false && (
-          <TouchableOpacity
-            style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
-            onPress={() => navigation.navigate('Map')}
-          >
-            <Text style={[styles.navChipText, { color: theme.textSecondary }]}>🗺️ Карта</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
       <FlatList
