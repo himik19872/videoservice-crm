@@ -365,7 +365,13 @@ const OrdersDetailPage: React.FC = () => {
 
       <Descriptions title="Информация о заявке" column={2} size="small">
         <Descriptions.Item label="Номер">{order.number}</Descriptions.Item>
-        <Descriptions.Item label="Клиент">{order.client_info?.full_name || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Клиент">
+          {order.client_id ? (
+            <a onClick={() => navigate(`/clients/${order.client_id}`)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>
+              {order.client_info?.full_name || '—'}
+            </a>
+          ) : (order.client_info?.full_name || '—')}
+        </Descriptions.Item>
         <Descriptions.Item label="Телефон клиента">{order.client_info?.phone || '-'}</Descriptions.Item>
         <Descriptions.Item label="Адрес">{order.address}</Descriptions.Item>
         <Descriptions.Item label="Район">{order.region_info?.name || '-'}</Descriptions.Item>
