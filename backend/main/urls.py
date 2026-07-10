@@ -12,12 +12,14 @@ from .views import (
     IssueOrderViewSet, PurchaseRequestViewSet,
     ErcAccountViewSet, ErcBillingRecordViewSet,
     StorageLocationViewSet,
+    OutgoingInvoiceViewSet,
     login_view, me_view, refresh_token_view,
     import_clients_excel_view, import_erc_excel_view, import_preview_view,
     system_stats_view, export_clients_excel_view, cleanup_media_view,
 )
+from .bitrix24_views import bitrix24_clients_to_bitrix_view, bitrix24_clients_from_bitrix_view
+from .bitrix24_views import bitrix24_products_to_bitrix_view, bitrix24_products_from_bitrix_view
 from .max_views import MaxSettingsViewSet, max_webhook_view
-from .inventory_views import issue_zip_to_master, master_inventory
 from .inventory_views import issue_zip_to_master, master_inventory
 
 router = DefaultRouter()
@@ -52,6 +54,7 @@ router.register(r'purchase-requests', PurchaseRequestViewSet, basename='purchase
 router.register(r'erc-accounts', ErcAccountViewSet, basename='erc-accounts')
 router.register(r'erc-billing', ErcBillingRecordViewSet, basename='erc-billing')
 router.register(r'storage-locations', StorageLocationViewSet, basename='storage-locations')
+router.register(r'outgoing-invoices', OutgoingInvoiceViewSet, basename='outgoing-invoices')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),
@@ -61,6 +64,11 @@ urlpatterns = [
     path('import/clients/', import_clients_excel_view, name='import-clients'),
     path('import/erc/', import_erc_excel_view, name='import-erc'),
     path('import/preview/', import_preview_view, name='import-preview'),
+    path('import/preview/', import_preview_view, name='import-preview'),
+    path('bitrix24/clients/to-bitrix/', bitrix24_clients_to_bitrix_view, name='bitrix24-clients-to'),
+    path('bitrix24/clients/from-bitrix/', bitrix24_clients_from_bitrix_view, name='bitrix24-clients-from'),
+    path('bitrix24/products/to-bitrix/', bitrix24_products_to_bitrix_view, name='bitrix24-products-to'),
+    path('bitrix24/products/from-bitrix/', bitrix24_products_from_bitrix_view, name='bitrix24-products-from'),
     path('system/stats/', system_stats_view, name='system-stats'),
     path('system/export-clients/', export_clients_excel_view, name='export-clients'),
     path('system/cleanup-media/', cleanup_media_view, name='cleanup-media'),

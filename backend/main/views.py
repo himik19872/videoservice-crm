@@ -21,6 +21,7 @@ from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequest
 from .models import OrderComment
 from .models import ErcAccount, ErcBillingRecord
 from .models import StorageLocation
+from .models import OutgoingInvoice, OutgoingInvoiceItem
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -38,6 +39,7 @@ from .serializers import PurchaseRequestSerializer, PurchaseRequestItemSerialize
 from .serializers import OrderCommentSerializer
 from .serializers import ErcAccountSerializer, ErcBillingRecordSerializer
 from .serializers import StorageLocationSerializer, StorageLocationDetailSerializer
+from .serializers import OutgoingInvoiceSerializer, OutgoingInvoiceCreateSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -254,8 +256,8 @@ class ClientViewSet(viewsets.ModelViewSet):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['region']
-    search_fields = ['name', 'phone', 'email', 'address']
+    filterset_fields = ['region', 'is_legal']
+    search_fields = ['name', 'phone', 'email', 'address', 'inn']
 
     def get_queryset(self):
         queryset = Client.objects.all()
@@ -2498,6 +2500,154 @@ class StorageLocationViewSet(viewsets.ModelViewSet):
             'confirmed_count': len(confirmed_set),
             'missing_item_ids': missing,
             'missing_count': len(missing),
+        })
+
+
+# ══════════════════════════════════════════════════════════════════
+# Исходящие накладные (УПД)
+# ══════════════════════════════════════════════════════════════════
+
+class OutgoingInvoiceViewSet(viewsets.ModelViewSet):
+    """Исходящие накладные (УПД) — выдача товаров со склада"""
+    queryset = OutgoingInvoice.objects.prefetch_related('items__inventory_item', 'from_legal', 'to_client')
+    serializer_class = OutgoingInvoiceSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['status', 'from_legal', 'to_client']
+    search_fields = ['number', 'to_client__name', 'from_legal__name', 'basis']
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return OutgoingInvoiceCreateSerializer
+        return OutgoingInvoiceSerializer
+
+    def create(self, request, *args, **kwargs):
+        """Создать УПД с позициями"""
+        serializer = OutgoingInvoiceCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({'error': f'Ошибка валидации: {serializer.errors}'}, status=400)
+        data = serializer.validated_data
+
+        from_legal_id = data.get('from_legal_id')
+        to_client_id = data.get('to_client_id')
+        items_data = data.get('items', [])
+
+        if not from_legal_id:
+            return Response({'error': 'Не указано отправитель (from_legal_id)'}, status=400)
+        if not to_client_id:
+            return Response({'error': 'Не указан получатель (to_client_id)'}, status=400)
+
+        from .models import LegalEntity, Client, InventoryItem
+
+        try:
+            from_legal = LegalEntity.objects.get(id=from_legal_id)
+        except LegalEntity.DoesNotExist:
+            return Response({'error': f'Юрлицо id={from_legal_id} не найдено'}, status=400)
+
+        try:
+            to_client = Client.objects.get(id=to_client_id)
+        except Client.DoesNotExist:
+            return Response({'error': f'Клиент id={to_client_id} не найден'}, status=400)
+
+        invoice = OutgoingInvoice.objects.create(
+            from_legal=from_legal,
+            to_client=to_client,
+            basis=data.get('basis', ''),
+            received_by_name=data.get('received_by_name', ''),
+            notes=data.get('notes', ''),
+        )
+
+        errors = []
+        for item_data in items_data:
+            item_id = item_data.get('inventory_item')
+            if not item_id:
+                errors.append('Пропущена позиция без inventory_item')
+                continue
+            try:
+                inv_item = InventoryItem.objects.get(id=item_id)
+                qty = item_data.get('quantity', 1)
+                price = item_data.get('unit_price', inv_item.sale_price or 0)
+                OutgoingInvoiceItem.objects.create(
+                    invoice=invoice,
+                    inventory_item=inv_item,
+                    quantity=qty,
+                    unit_price=price,
+                    vat_rate=item_data.get('vat_rate', '20%'),
+                    notes=item_data.get('notes', ''),
+                )
+            except InventoryItem.DoesNotExist:
+                errors.append(f"Товар id={item_id} не найден")
+
+        return Response({
+            'success': True,
+            'invoice': OutgoingInvoiceSerializer(invoice).data,
+            'errors': errors,
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def issue(self, request, pk=None):
+        """Провести выдачу: списать товары со склада"""
+        invoice = self.get_object()
+        if invoice.status != 'draft':
+            return Response({'error': 'Накладная уже проведена или аннулирована'}, status=400)
+        try:
+            invoice.issue(request.user)
+            return Response({'success': True, 'invoice': OutgoingInvoiceSerializer(invoice).data})
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Аннулировать накладную"""
+        invoice = self.get_object()
+        if invoice.status == 'cancelled':
+            return Response({'error': 'Уже аннулирована'}, status=400)
+        invoice.status = 'cancelled'
+        invoice.save()
+        return Response({'success': True, 'invoice': OutgoingInvoiceSerializer(invoice).data})
+
+    @action(detail=False, methods=['get'])
+    def print(self, request):
+        """Данные для печати УПД"""
+        invoice_id = request.query_params.get('id')
+        if not invoice_id:
+            return Response({'error': 'Укажите ?id=...'}, status=400)
+        try:
+            invoice = OutgoingInvoice.objects.prefetch_related(
+                'items__inventory_item', 'from_legal', 'to_client'
+            ).get(id=invoice_id)
+        except OutgoingInvoice.DoesNotExist:
+            return Response({'error': 'Накладная не найдена'}, status=404)
+
+        return Response({
+            'number': invoice.number,
+            'date': invoice.date.isoformat(),
+            'from_legal': {
+                'name': invoice.from_legal.name,
+                'short_name': invoice.from_legal.short_name,
+                'inn': invoice.from_legal.inn,
+                'kpp': invoice.from_legal.kpp,
+                'address': invoice.from_legal.legal_address,
+            },
+            'to_client': {
+                'name': invoice.to_client.name,
+                'phone': invoice.to_client.phone,
+                'address': invoice.to_client.address,
+                'inn': invoice.to_client.inn,
+                'is_legal': invoice.to_client.is_legal,
+            },
+            'basis': invoice.basis,
+            'received_by_name': invoice.received_by_name,
+            'total_amount': str(invoice.total_amount),
+            'total_vat': str(invoice.total_vat),
+            'items': [{
+                'name': item.inventory_item.name,
+                'barcode': item.inventory_item.barcode,
+                'unit': item.inventory_item.unit,
+                'quantity': item.quantity,
+                'unit_price': str(item.unit_price),
+                'amount': str(item.amount),
+                'vat_rate': item.vat_rate,
+            } for item in invoice.items.all()],
         })
 
 

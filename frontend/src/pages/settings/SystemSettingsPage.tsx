@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   SettingOutlined, GlobalOutlined, ApiOutlined, SafetyOutlined,
   EnvironmentOutlined, MessageOutlined, AimOutlined, CloudDownloadOutlined,
+  ExportOutlined, ImportOutlined, SyncOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 
@@ -17,6 +18,8 @@ const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [bxLoading, setBxLoading] = useState('');
+  const [bxResult, setBxResult] = useState<any>(null);
   const [settings, setSettings] = useState<any>({});
   const [form] = Form.useForm();
 
@@ -46,6 +49,22 @@ const SettingsPage: React.FC = () => {
       message.error(e?.response?.data?.error || 'Ошибка сохранения');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Битрикс24: экспорт/импорт
+  const bxAction = async (url: string, label: string) => {
+    setBxLoading(label);
+    setBxResult(null);
+    try {
+      const res = await api.post(url);
+      setBxResult(res.data);
+      message.success(`${label}: выполнено`);
+    } catch (err: any) {
+      setBxResult(err.response?.data || { error: 'Ошибка' });
+      message.error(`${label}: ошибка`);
+    } finally {
+      setBxLoading('');
     }
   };
 
@@ -159,6 +178,72 @@ const SettingsPage: React.FC = () => {
             <Form.Item name="media_retention_days" label="Хранить дней">
               <InputNumber min={1} max={365} style={{ width: '100%' }} />
             </Form.Item>
+          </TabPane>
+
+          <TabPane tab={<span><SyncOutlined /> Битрикс24</span>} key="bitrix24">
+            <Divider>Настройки подключения</Divider>
+            <Form.Item name="bitrix24_webhook" label="Webhook URL" help="Входящий вебхук: https://yourdomain.bitrix24.ru/rest/1/xxxx.../">
+              <Input.Password placeholder="https://yourdomain.bitrix24.ru/rest/1/abc123.../" />
+            </Form.Item>
+            <Form.Item name="bitrix24_active" label="Интеграция активна" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+
+            <Divider>Экспорт / Импорт</Divider>
+            <Alert
+              type="info" showIcon
+              message="Инструкция"
+              description={
+                <div style={{ fontSize: 13 }}>
+                  <p><strong>1.</strong> В Битрикс24: Разработчикам → Другой → Входящий вебхук.</p>
+                  <p><strong>2.</strong> Выдайте права: <code>crm</code> (контакты, товары).</p>
+                  <p><strong>3.</strong> Скопируйте URL вебхука и вставьте в поле «Webhook URL» выше, нажмите «Сохранить все настройки».</p>
+                  <p><strong>4.</strong> Используйте кнопки ниже для синхронизации.</p>
+                  <p><strong>Экспорт в Битрикс</strong> — передаёт клиентов/товары из CRM в Битрикс24.</p>
+                  <p><strong>Импорт из Битрикс</strong> — загружает контакты/товары из Битрикс24 в CRM.</p>
+                </div>
+              }
+              style={{ marginBottom: 16 }}
+            />
+
+            <Row gutter={[16, 16]}>
+              <Col span={12}>
+                <Card size="small" title="👥 Клиенты">
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Button icon={<ExportOutlined />} block loading={bxLoading === 'Экспорт клиентов'}
+                      onClick={() => bxAction('/bitrix24/clients/to-bitrix/', 'Экспорт клиентов')}>
+                      Экспорт в Битрикс24
+                    </Button>
+                    <Button icon={<ImportOutlined />} block loading={bxLoading === 'Импорт клиентов'}
+                      onClick={() => bxAction('/bitrix24/clients/from-bitrix/', 'Импорт клиентов')}>
+                      Импорт из Битрикс24
+                    </Button>
+                  </Space>
+                </Card>
+              </Col>
+              <Col span={12}>
+                <Card size="small" title="📦 Товары">
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Button icon={<ExportOutlined />} block loading={bxLoading === 'Экспорт товаров'}
+                      onClick={() => bxAction('/bitrix24/products/to-bitrix/', 'Экспорт товаров')}>
+                      Экспорт в Битрикс24
+                    </Button>
+                    <Button icon={<ImportOutlined />} block loading={bxLoading === 'Импорт товаров'}
+                      onClick={() => bxAction('/bitrix24/products/from-bitrix/', 'Импорт товаров')}>
+                      Импорт из Битрикс24
+                    </Button>
+                  </Space>
+                </Card>
+              </Col>
+            </Row>
+
+            {bxResult && (
+              <Card size="small" title="Результат" style={{ marginTop: 16 }}>
+                <pre style={{ fontSize: 12, maxHeight: 200, overflow: 'auto' }}>
+                  {JSON.stringify(bxResult, null, 2)}
+                </pre>
+              </Card>
+            )}
           </TabPane>
         </Tabs>
 

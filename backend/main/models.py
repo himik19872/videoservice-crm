@@ -135,7 +135,7 @@ class Client(models.Model):
     name = models.CharField(max_length=150, verbose_name=_('ФИО'))
     phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
     email = models.EmailField(blank=True, verbose_name=_('Email'))
-    address = models.CharField(max_length=255, verbose_name=_('Адрес'))
+    address = models.CharField(max_length=255, blank=True, default='', verbose_name=_('Адрес'))
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, related_name='clients', verbose_name=_('Район'))
     max_user_id = models.CharField(max_length=100, blank=True, verbose_name=_('Max user ID'))
     max_linked_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Max привязан'))
@@ -153,7 +153,7 @@ class Client(models.Model):
     # Расширенный разбор адреса при импорте
     district = models.CharField(max_length=200, blank=True, verbose_name=_('Район (муниципальный)'))
     source = models.CharField(max_length=20, default='manual', verbose_name=_('Источник'),
-                              choices=[('manual', _('Ручной ввод')), ('excel_import', _('Импорт Excel (ТСЖ)')), ('erc', _('ЕРЦ'))])
+                              choices=[('manual', _('Ручной ввод')), ('excel_import', _('Импорт Excel (ТСЖ)')), ('erc', _('ЕРЦ')), ('bitrix24', _('Битрикс24'))])
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
 
@@ -484,11 +484,25 @@ class SystemSettings(models.Model):
     current_version = models.CharField(max_length=50, default='1.0.0', verbose_name=_('Текущая версия'))
     latest_commit = models.CharField(max_length=40, blank=True, verbose_name=_('Последний коммит'))
 
+    # ═══ Битрикс24 ═══
+    bitrix24_webhook = models.CharField(max_length=500, blank=True, verbose_name=_('Bitrix24 Webhook URL'),
+                                         help_text=_('Входящий вебхук: https://yourdomain.bitrix24.ru/rest/1/xxxx...'))
+    bitrix24_active = models.BooleanField(default=False, verbose_name=_('Интеграция с Битрикс24 активна'))
+
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
 
     class Meta:
         verbose_name = _('Системные настройки')
         verbose_name_plural = _('Системные настройки')
+
+    def save(self, *args, **kwargs):
+        # Очищаем битрикс24 webhook: принимаем и с profile.json, и без
+        if self.bitrix24_webhook:
+            url = self.bitrix24_webhook.strip()
+            if url.endswith('/profile.json'):
+                url = url[:-13]
+            self.bitrix24_webhook = url
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return 'Системные настройки'
@@ -815,6 +829,128 @@ class SupplyInvoiceItem(models.Model):
     @property
     def received_total(self):
         return (self.unit_price or 0) * (self.quantity_received or 0)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Исходящая накладная (УПД — Универсальный передаточный документ)
+# ══════════════════════════════════════════════════════════════════
+
+class OutgoingInvoice(models.Model):
+    """Исходящая накладная (УПД) — выдача товаров со склада клиенту"""
+    STATUS_CHOICES = [
+        ('draft', _('Черновик')),
+        ('issued', _('Выдано')),
+        ('cancelled', _('Аннулировано')),
+    ]
+
+    number = models.CharField(max_length=50, unique=True, verbose_name=_('Номер УПД'))
+    date = models.DateField(default=timezone.localdate, verbose_name=_('Дата составления'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name=_('Статус'))
+
+    # От кого (наше юрлицо)
+    from_legal = models.ForeignKey('LegalEntity', on_delete=models.PROTECT, related_name='outgoing_invoices', verbose_name=_('От юр. лица'))
+
+    # Кому (клиент — физ. или юр. лицо)
+    to_client = models.ForeignKey('Client', on_delete=models.PROTECT, related_name='outgoing_invoices', verbose_name=_('Получатель'))
+
+    # Основание
+    basis = models.CharField(max_length=500, blank=True, verbose_name=_('Основание'), help_text=_('Договор, счёт, заявка'))
+
+    # Подписи
+    issued_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='issued_invoices', verbose_name=_('Выдал'))
+    received_by_name = models.CharField(max_length=200, blank=True, verbose_name=_('Принял (ФИО)'), help_text=_('Кто принял товар со стороны получателя'))
+
+    # Суммы
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Сумма итого'))
+    total_vat = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('В т.ч. НДС'))
+
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлена'))
+
+    class Meta:
+        verbose_name = _('Исходящая накладная (УПД)')
+        verbose_name_plural = _('Исходящие накладные (УПД)')
+        ordering = ['-date', '-created_at']
+
+    def __str__(self):
+        return f'УПД №{self.number} от {self.date} → {self.to_client}'
+
+    def save(self, *args, **kwargs):
+        if not self.number:
+            today = timezone.localdate()
+            date_part = today.strftime('%y%m%d')
+            # Найти последний номер за сегодня
+            last = OutgoingInvoice.objects.filter(number__startswith=f'УПД-{date_part}').order_by('-number').first()
+            if last:
+                try:
+                    seq = int(last.number.split('-')[-1]) + 1
+                except ValueError:
+                    seq = 1
+            else:
+                seq = 1
+            self.number = f'УПД-{date_part}-{seq:04d}'
+        super().save(*args, **kwargs)
+
+    def recalculate_totals(self):
+        items = self.items.all()
+        self.total_amount = sum((i.unit_price or 0) * (i.quantity or 0) for i in items)
+        # НДС 20% в сумме (упрощённо, без ставки в позициях)
+        self.total_vat = (self.total_amount * 20 / 120).quantize(self.total_amount)
+        self.save(update_fields=['total_amount', 'total_vat', 'updated_at'])
+
+    def issue(self, user):
+        """Провести выдачу: списать товары, создать движения"""
+        now = timezone.now()
+        for item in self.items.all():
+            inv_item = item.inventory_item
+            if item.quantity > inv_item.quantity:
+                raise ValueError(f'Недостаточно {inv_item.name}: есть {inv_item.quantity}, требуется {item.quantity}')
+            inv_item.quantity -= item.quantity
+            inv_item.save(update_fields=['quantity', 'updated_at'])
+            # Если остаток 0 — снимаем с ячейки
+            if inv_item.quantity == 0:
+                inv_item.storage_location = None
+                inv_item.status = 'written_off'
+                inv_item.save(update_fields=['storage_location', 'status', 'updated_at'])
+            # Движение
+            InventoryMovement.objects.create(
+                item=inv_item,
+                movement_type='installed',
+                quantity=item.quantity,
+                performed_by=user,
+                notes=f'Выдача по УПД №{self.number} клиенту {self.to_client}',
+            )
+        self.status = 'issued'
+        self.issued_by = user
+        self.save()
+
+
+class OutgoingInvoiceItem(models.Model):
+    """Товарная позиция в исходящей накладной (УПД)"""
+    invoice = models.ForeignKey(OutgoingInvoice, on_delete=models.CASCADE, related_name='items', verbose_name=_('Накладная'))
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name='outgoing_items', verbose_name=_('Номенклатура'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Цена за ед.'))
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Сумма'))
+    vat_rate = models.CharField(max_length=10, default='20%', blank=True, verbose_name=_('Ставка НДС'))
+    notes = models.CharField(max_length=300, blank=True, verbose_name=_('Примечание'))
+
+    class Meta:
+        verbose_name = _('Позиция УПД')
+        verbose_name_plural = _('Позиции УПД')
+
+    def __str__(self):
+        return f'{self.inventory_item.name}: {self.quantity} × {self.unit_price} ₽'
+
+    def save(self, *args, **kwargs):
+        self.amount = (self.unit_price or 0) * (self.quantity or 0)
+        super().save(*args, **kwargs)
+        # Пересчёт итогов накладной
+        if self.invoice_id:
+            self.invoice.recalculate_totals()
+
+
 # Финансы
 # ══════════════════════════════════════════════════════════════════
 

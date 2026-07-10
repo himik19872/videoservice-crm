@@ -9,6 +9,7 @@ from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequest
 from .models import OrderComment
 from .models import ErcAccount, ErcBillingRecord
 from .models import StorageLocation
+from .models import OutgoingInvoice, OutgoingInvoiceItem
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -563,6 +564,26 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def create(self, validated_data):
+        """При создании — авто-привязка к первой свободной ячейке, если не указана явно"""
+        if not validated_data.get('storage_location'):
+            # Ищем первую активную, не заполненную ячейку
+            loc = StorageLocation.objects.filter(is_active=True).first()
+            if not loc:
+                # Если ячеек нет — создаём ячейку по умолчанию
+                loc = StorageLocation.objects.create(
+                    code='A-01-01',
+                    zone='Основной склад',
+                    rack='01',
+                    shelf='01',
+                    capacity=0,  # безлимит
+                    is_active=True,
+                )
+            # Проверяем, не заполнена ли она
+            if not loc.is_full:
+                validated_data['storage_location'] = loc
+        return super().create(validated_data)
+
     def get_item_type_display(self, obj):
         return obj.get_item_type_display()
 
@@ -1044,3 +1065,71 @@ class StorageLocationDetailSerializer(StorageLocationSerializer):
             'status': item.status,
             'status_display': item.get_status_display(),
         } for item in items]
+
+
+# ══════════════════════════════════════════════════════════════════
+# Исходящие накладные (УПД)
+# ══════════════════════════════════════════════════════════════════
+
+class OutgoingInvoiceItemSerializer(serializers.ModelSerializer):
+    item_name = serializers.SerializerMethodField()
+    item_barcode = serializers.SerializerMethodField()
+    item_unit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OutgoingInvoiceItem
+        fields = ['id', 'invoice', 'inventory_item', 'item_name', 'item_barcode',
+                  'item_unit', 'quantity', 'unit_price', 'amount', 'vat_rate', 'notes']
+        read_only_fields = ['id', 'amount']
+
+    def get_item_name(self, obj):
+        return str(obj.inventory_item) if obj.inventory_item else ''
+
+    def get_item_barcode(self, obj):
+        return obj.inventory_item.barcode if obj.inventory_item else ''
+
+    def get_item_unit(self, obj):
+        return obj.inventory_item.unit if obj.inventory_item else 'шт.'
+
+
+class OutgoingInvoiceSerializer(serializers.ModelSerializer):
+    items = OutgoingInvoiceItemSerializer(many=True, read_only=True)
+    from_legal_name = serializers.SerializerMethodField()
+    to_client_name = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    issued_by_name = serializers.SerializerMethodField()
+    date = serializers.DateField(read_only=True)
+
+    class Meta:
+        model = OutgoingInvoice
+        fields = ['id', 'number', 'date', 'status', 'status_display',
+                  'from_legal', 'from_legal_name',
+                  'to_client', 'to_client_name',
+                  'basis', 'issued_by', 'issued_by_name',
+                  'received_by_name', 'total_amount', 'total_vat',
+                  'notes', 'items', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'number', 'created_at', 'updated_at']
+
+    def get_from_legal_name(self, obj):
+        return obj.from_legal.short_name or obj.from_legal.name if obj.from_legal else ''
+
+    def get_to_client_name(self, obj):
+        return obj.to_client.name if obj.to_client else ''
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    def get_issued_by_name(self, obj):
+        if obj.issued_by:
+            return obj.issued_by.get_full_name() or obj.issued_by.username
+        return ''
+
+
+class OutgoingInvoiceCreateSerializer(serializers.Serializer):
+    """Создание УПД с позициями"""
+    from_legal_id = serializers.IntegerField()
+    to_client_id = serializers.IntegerField()
+    basis = serializers.CharField(required=False, allow_blank=True, default='')
+    received_by_name = serializers.CharField(required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
+    items = serializers.ListField(child=serializers.DictField())
