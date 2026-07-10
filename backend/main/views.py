@@ -2556,7 +2556,8 @@ def export_clients_excel_view(request):
     for col, h in enumerate(headers, 1):
         ws.cell(row=1, column=col, value=h)
 
-    source_map = dict(Client._meta.get_field('source').choices)
+    # Маппинг source на читаемые названия
+    source_labels = {'manual': 'Ручной ввод', 'excel_import': 'Импорт (ТСЖ/УК)', 'erc': 'ЕРЦ'}
 
     for row_idx, c in enumerate(Client.objects.all().order_by('id'), 2):
         ws.cell(row=row_idx, column=1, value=c.id)
@@ -2568,7 +2569,7 @@ def export_clients_excel_view(request):
         ws.cell(row=row_idx, column=7, value=c.entrance_number)
         ws.cell(row=row_idx, column=8, value=c.management_company)
         ws.cell(row=row_idx, column=9, value=c.district)
-        ws.cell(row=row_idx, column=10, value=source_map.get(c.source, c.source))
+        ws.cell(row=row_idx, column=10, value=source_labels.get(c.source, c.source))
         ws.cell(row=row_idx, column=11, value=c.created_at.strftime('%d.%m.%Y %H:%M') if c.created_at else '')
         ws.cell(row=row_idx, column=12, value=c.notes)
 
