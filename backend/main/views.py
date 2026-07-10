@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from django.db.models import Sum
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from django.http import HttpResponse
 from datetime import timedelta
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, UserProfile, WorkShift, OrderMedia, PushToken
 from .models import MaxBotSettings, MaxUserLink
@@ -2477,3 +2478,144 @@ def import_preview_view(request):
     from .import_service import preview_excel
     result = preview_excel(uploaded.read())
     return Response(result)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Системная статистика, экспорт, очистка
+# ══════════════════════════════════════════════════════════════════
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def system_stats_view(request):
+    """Возвращает статистику системы: место на диске, размер медиафайлов."""
+    import os, shutil
+    from django.conf import settings as django_settings
+
+    result = {
+        'disk_total_gb': 0,
+        'disk_used_gb': 0,
+        'disk_free_gb': 0,
+        'media_count': 0,
+        'media_size_mb': 0,
+        'media_path': '',
+        'db_size_mb': 0,
+    }
+
+    # Место на диске
+    try:
+        media_root = getattr(django_settings, 'MEDIA_ROOT', '/app/media')
+        stat = shutil.disk_usage(os.path.dirname(str(media_root)) if media_root else '/')
+        result['disk_total_gb'] = round(stat.total / (1024**3), 1)
+        result['disk_used_gb'] = round(stat.used / (1024**3), 1)
+        result['disk_free_gb'] = round(stat.free / (1024**3), 1)
+        result['media_path'] = str(media_root)
+    except Exception:
+        pass
+
+    # Размер медиафайлов
+    from .models import OrderMedia
+    result['media_count'] = OrderMedia.objects.count()
+    try:
+        total_size = 0
+        for m in OrderMedia.objects.all():
+            try:
+                total_size += m.file.size
+            except Exception:
+                pass
+        result['media_size_mb'] = round(total_size / (1024**2), 1)
+    except Exception:
+        pass
+
+    # Размер БД (приблизительно)
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_database_size(current_database())")
+            db_size = cursor.fetchone()[0]
+            result['db_size_mb'] = round(db_size / (1024**2), 1)
+    except Exception:
+        pass
+
+    return Response(result)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_clients_excel_view(request):
+    """Экспорт всех клиентов в Excel-файл."""
+    import openpyxl, io
+    from .models import Client
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Клиенты"
+
+    # Заголовки
+    headers = ['ID', 'ФИО', 'Телефон', 'Email', 'Адрес', 'Л/счет', '№ парадной', 'УК/ТСЖ',
+               'Район (мун.)', 'Источник', 'Дата добавления', 'Примечания']
+    for col, h in enumerate(headers, 1):
+        ws.cell(row=1, column=col, value=h)
+
+    source_map = dict(Client._meta.get_field('source').choices)
+
+    for row_idx, c in enumerate(Client.objects.all().order_by('id'), 2):
+        ws.cell(row=row_idx, column=1, value=c.id)
+        ws.cell(row=row_idx, column=2, value=c.name)
+        ws.cell(row=row_idx, column=3, value=c.phone)
+        ws.cell(row=row_idx, column=4, value=c.email)
+        ws.cell(row=row_idx, column=5, value=c.address)
+        ws.cell(row=row_idx, column=6, value=c.personal_account_number or '')
+        ws.cell(row=row_idx, column=7, value=c.entrance_number)
+        ws.cell(row=row_idx, column=8, value=c.management_company)
+        ws.cell(row=row_idx, column=9, value=c.district)
+        ws.cell(row=row_idx, column=10, value=source_map.get(c.source, c.source))
+        ws.cell(row=row_idx, column=11, value=c.created_at.strftime('%d.%m.%Y %H:%M') if c.created_at else '')
+        ws.cell(row=row_idx, column=12, value=c.notes)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    response = HttpResponse(buf.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename=clients_export.xlsx'
+    return response
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cleanup_media_view(request):
+    """Очистка медиафайлов (фото/видео отчётов) старше N дней или все."""
+    from django.utils import timezone
+    from .models import OrderMedia
+    import os
+
+    days = request.data.get('days')
+    delete_all = request.data.get('delete_all', False)
+
+    deleted_count = 0
+    deleted_size = 0
+
+    qs = OrderMedia.objects.all()
+
+    if delete_all:
+        pass  # удаляем все
+    elif days:
+        cutoff = timezone.now() - timezone.timedelta(days=int(days))
+        qs = qs.filter(uploaded_at__lt=cutoff)
+    else:
+        return Response({'success': False, 'error': 'Укажите days или delete_all'}, status=400)
+
+    for media in qs:
+        try:
+            if media.file:
+                deleted_size += media.file.size
+                media.file.delete(save=False)
+            media.delete()
+            deleted_count += 1
+        except Exception as e:
+            pass
+
+    return Response({
+        'success': True,
+        'deleted_count': deleted_count,
+        'deleted_size_mb': round(deleted_size / (1024**2), 1),
+    })

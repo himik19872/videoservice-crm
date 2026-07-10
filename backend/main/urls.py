@@ -13,6 +13,7 @@ from .views import (
     ErcAccountViewSet, ErcBillingRecordViewSet,
     login_view, me_view, refresh_token_view,
     import_clients_excel_view, import_erc_excel_view, import_preview_view,
+    system_stats_view, export_clients_excel_view, cleanup_media_view,
 )
 from .max_views import MaxSettingsViewSet, max_webhook_view
 
@@ -56,5 +57,8 @@ urlpatterns = [
     path('import/clients/', import_clients_excel_view, name='import-clients'),
     path('import/erc/', import_erc_excel_view, name='import-erc'),
     path('import/preview/', import_preview_view, name='import-preview'),
+    path('system/stats/', system_stats_view, name='system-stats'),
+    path('system/export-clients/', export_clients_excel_view, name='export-clients'),
+    path('system/cleanup-media/', cleanup_media_view, name='cleanup-media'),
     path('', include(router.urls)),
 ]
