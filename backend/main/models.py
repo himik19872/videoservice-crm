@@ -616,7 +616,8 @@ class InventoryItem(models.Model):
     cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Закупочная цена'))
     sale_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Цена продажи'))
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_stock', verbose_name=_('Статус'))
-    location = models.CharField(max_length=200, blank=True, verbose_name=_('Место хранения'))
+    location = models.CharField(max_length=200, blank=True, verbose_name=_('Место хранения'))  # устаревшее, используйте storage_location
+    storage_location = models.ForeignKey('StorageLocation', on_delete=models.SET_NULL, null=True, blank=True, related_name='items', verbose_name=_('Ячейка хранения'))
     supplier = models.CharField(max_length=200, blank=True, verbose_name=_('Поставщик'))
     warranty_months = models.PositiveIntegerField(default=12, verbose_name=_('Гарантия (мес.)'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
@@ -627,6 +628,17 @@ class InventoryItem(models.Model):
         verbose_name = _('Складская единица')
         verbose_name_plural = _('Склад')
         ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        # Авто-генерация штрихкода если не задан
+        if not self.barcode:
+            import uuid
+            self.barcode = f'SKU-{uuid.uuid4().hex[:8].upper()}'
+        # Авто-наценка: если есть cost_price но нет sale_price → +25%
+        if self.cost_price and not self.sale_price:
+            from decimal import Decimal
+            self.sale_price = (self.cost_price * Decimal('1.25')).quantize(Decimal('0.01'))
+        super().save(*args, **kwargs)
 
     def __str__(self):
         sn = f' S/N:{self.serial_number}' if self.serial_number else ''
@@ -1377,3 +1389,46 @@ class ErcBillingRecord(models.Model):
 
     def __str__(self):
         return f'{self.account.account_number}: {self.period.strftime("%m.%Y")} — оплачено {self.paid} ₽ ({self.paid_percent}%)'
+
+
+# ══════════════════════════════════════════════════════════════════
+# Склад v4: Места хранения (StorageLocation)
+# ══════════════════════════════════════════════════════════════════
+
+class StorageLocation(models.Model):
+    """Физическое место хранения товаров на складе"""
+    code = models.CharField(max_length=50, unique=True, verbose_name=_('Код места'), help_text='Например: A-03-12')
+    barcode = models.CharField(max_length=100, blank=True, unique=True, null=True, verbose_name=_('Штрихкод места'))
+    zone = models.CharField(max_length=100, blank=True, verbose_name=_('Зона'), help_text='Например: Склад А, Основной')
+    rack = models.CharField(max_length=50, blank=True, verbose_name=_('Стеллаж'), help_text='Номер стеллажа')
+    shelf = models.CharField(max_length=50, blank=True, verbose_name=_('Полка'), help_text='Номер полки')
+    capacity = models.PositiveIntegerField(default=0, verbose_name=_('Вместимость'), help_text='Макс. кол-во позиций (0 = не ограничено)')
+    is_active = models.BooleanField(default=True, verbose_name=_('Активно'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Место хранения')
+        verbose_name_plural = _('Места хранения')
+        ordering = ['zone', 'rack', 'shelf']
+
+    def __str__(self):
+        parts = [self.zone, self.rack, self.shelf]
+        return f'[{self.code}] {" / ".join(p for p in parts if p)}'
+
+    def save(self, *args, **kwargs):
+        if not self.barcode:
+            import uuid
+            self.barcode = f'LOC-{uuid.uuid4().hex[:8].upper()}'
+        super().save(*args, **kwargs)
+
+    @property
+    def items_count(self):
+        return self.items.count()
+
+    @property
+    def is_full(self):
+        if self.capacity <= 0:
+            return False
+        return self.items_count >= self.capacity

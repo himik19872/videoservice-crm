@@ -332,6 +332,15 @@ export interface InventoryItem {
   unit: string;
   cost_price: number | null;
   sale_price: number | null;
+  storage_location: number | null;
+  storage_location_info?: {
+    id: number;
+    code: string;
+    barcode: string | null;
+    zone: string;
+    rack: string;
+    shelf: string;
+  } | null;
   total_value: number | null;
   status: string;
   status_display: string;
@@ -547,4 +556,43 @@ export interface ImportResult {
   column_mapping?: Record<string, any>;
   errors: string[];
   error?: string;
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+// Storage Location
+// ══════════════════════════════════════════════════════════════════
+
+export interface StorageLocation {
+  id: number;
+  code: string;
+  barcode: string | null;
+  zone: string;
+  rack: string;
+  shelf: string;
+  capacity: number;
+  is_active: boolean;
+  notes: string;
+  items_count: number;
+  is_full: boolean;
+  free_space: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StorageLocationDetail extends StorageLocation {
+  items: {
+    id: number;
+    name: string;
+    barcode: string | null;
+    serial_number: string;
+    model_name: string;
+    item_type: string;
+    item_type_display: string;
+    quantity: number;
+    cost_price: string | null;
+    sale_price: string | null;
+    status: string;
+    status_display: string;
+  }[];
 }

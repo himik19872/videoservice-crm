@@ -85,6 +85,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Склад',
     },
     {
+      key: '/storage-locations',
+      icon: <EnvironmentOutlined />,
+      label: 'Места хранения',
+    },
+    {
       key: '/finance',
       icon: <DollarOutlined />,
       label: 'Финансы',

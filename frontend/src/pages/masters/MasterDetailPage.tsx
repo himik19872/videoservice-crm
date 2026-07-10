@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Form, Input, Select, Switch, message, Spin, Popconfirm, Row, Col, Statistic } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined, BarChartOutlined, ReloadOutlined, AimOutlined } from '@ant-design/icons';
+import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Form, Input, Select, Switch, message, Spin, Popconfirm, Row, Col, Statistic, Table } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined, BarChartOutlined, ReloadOutlined, AimOutlined, ToolOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import type { Master, Region, MasterStats } from '../../types';
@@ -21,12 +21,24 @@ const MasterDetailPage: React.FC = () => {
   const [statsLoading, setStatsLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsData, setGpsData] = useState<any>(null);
+  const [inventoryItems, setInventoryItems] = useState<any[]>([]);
+  const [invLoading, setInvLoading] = useState(false);
   const [form] = Form.useForm();
 
   useEffect(() => {
     fetchMaster();
     fetchRegions();
+    fetchInventory();
   }, [id]);
+
+  const fetchInventory = async () => {
+    setInvLoading(true);
+    try {
+      const res = await api.get(`/masters/${id}/inventory/`);
+      setInventoryItems(res.data.items || []);
+    } catch (e) { /* ignore */ }
+    finally { setInvLoading(false); }
+  };
 
   const fetchMaster = async () => {
     setLoading(true);
@@ -291,8 +303,26 @@ const MasterDetailPage: React.FC = () => {
                 <Descriptions.Item label="Продажа">{stats.by_type.sale}</Descriptions.Item>
               </Descriptions>
             </Card>
-          )}
-        </Col>
+          )}          <Divider />
+          <Title level={5}><ToolOutlined /> Материалы у мастера</Title>
+          <Table
+            dataSource={inventoryItems}
+            loading={invLoading}
+            rowKey={(r, i) => `${r.item_name}-${i}`}
+            size="small"
+            pagination={false}
+            columns={[
+              { title: 'Номенклатура', dataIndex: 'item_name', key: 'name' },
+              { title: 'Тип', dataIndex: 'item_type', key: 'type' },
+              { title: 'Выдано', dataIndex: 'quantity_issued', key: 'issued' },
+              { title: 'Использовано', dataIndex: 'quantity_used', key: 'used' },
+              { title: 'Остаток', dataIndex: 'remaining', key: 'remaining',
+                render: (v: number) => <Tag color={v > 0 ? 'orange' : 'green'}>{v}</Tag>
+              },
+              { title: 'Основание', dataIndex: 'order_number', key: 'order' },
+            ]}
+            locale={{ emptyText: 'Материалов нет' }}
+          />        </Col>
       </Row>
     </div>
   );

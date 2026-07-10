@@ -8,6 +8,7 @@ from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
 from .models import ErcAccount, ErcBillingRecord
+from .models import StorageLocation
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -555,6 +556,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     item_type_display = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
     total_value = serializers.SerializerMethodField()
+    storage_location_info = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
@@ -570,6 +572,18 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     def get_total_value(self, obj):
         if obj.sale_price:
             return float(obj.sale_price) * obj.quantity
+        return None
+
+    def get_storage_location_info(self, obj):
+        if obj.storage_location:
+            return {
+                'id': obj.storage_location.id,
+                'code': obj.storage_location.code,
+                'barcode': obj.storage_location.barcode,
+                'zone': obj.storage_location.zone,
+                'rack': obj.storage_location.rack,
+                'shelf': obj.storage_location.shelf,
+            }
         return None
 
 
@@ -976,3 +990,57 @@ class ErcBillingRecordSerializer(serializers.ModelSerializer):
         fields = ['id', 'account', 'account_number', 'account_name', 'period',
                   'balance_start', 'charged', 'charged_no_benefits',
                   'paid', 'paid_percent', 'balance_end', 'credit', 'imported_at']
+
+
+# ══════════════════════════════════════════════════════════════════
+# StorageLocation
+# ══════════════════════════════════════════════════════════════════
+
+class StorageLocationSerializer(serializers.ModelSerializer):
+    items_count = serializers.SerializerMethodField()
+    is_full = serializers.SerializerMethodField()
+    free_space = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StorageLocation
+        fields = ['id', 'code', 'barcode', 'zone', 'rack', 'shelf',
+                  'capacity', 'is_active', 'notes',
+                  'items_count', 'is_full', 'free_space',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'barcode', 'created_at', 'updated_at']
+
+    def get_items_count(self, obj):
+        return obj.items.count()
+
+    def get_is_full(self, obj):
+        return obj.is_full
+
+    def get_free_space(self, obj):
+        if obj.capacity <= 0:
+            return None  # безлимит
+        return max(0, obj.capacity - obj.items.count())
+
+
+class StorageLocationDetailSerializer(StorageLocationSerializer):
+    """Расширенный сериализатор с перечнем товаров в ячейке"""
+    items = serializers.SerializerMethodField()
+
+    class Meta(StorageLocationSerializer.Meta):
+        fields = StorageLocationSerializer.Meta.fields + ['items']
+
+    def get_items(self, obj):
+        items = obj.items.select_related('storage_location').all()
+        return [{
+            'id': item.id,
+            'name': item.name,
+            'barcode': item.barcode,
+            'serial_number': item.serial_number,
+            'model_name': item.model_name,
+            'item_type': item.item_type,
+            'item_type_display': item.get_item_type_display(),
+            'quantity': item.quantity,
+            'cost_price': str(item.cost_price) if item.cost_price else None,
+            'sale_price': str(item.sale_price) if item.sale_price else None,
+            'status': item.status,
+            'status_display': item.get_status_display(),
+        } for item in items]

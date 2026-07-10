@@ -11,11 +11,14 @@ from .views import (
     SupplierViewSet, SupplyInvoiceViewSet,
     IssueOrderViewSet, PurchaseRequestViewSet,
     ErcAccountViewSet, ErcBillingRecordViewSet,
+    StorageLocationViewSet,
     login_view, me_view, refresh_token_view,
     import_clients_excel_view, import_erc_excel_view, import_preview_view,
     system_stats_view, export_clients_excel_view, cleanup_media_view,
 )
 from .max_views import MaxSettingsViewSet, max_webhook_view
+from .inventory_views import issue_zip_to_master, master_inventory
+from .inventory_views import issue_zip_to_master, master_inventory
 
 router = DefaultRouter()
 router.register(r'regions', RegionViewSet)
@@ -48,6 +51,7 @@ router.register(r'issue-orders', IssueOrderViewSet, basename='issue-orders')
 router.register(r'purchase-requests', PurchaseRequestViewSet, basename='purchase-requests')
 router.register(r'erc-accounts', ErcAccountViewSet, basename='erc-accounts')
 router.register(r'erc-billing', ErcBillingRecordViewSet, basename='erc-billing')
+router.register(r'storage-locations', StorageLocationViewSet, basename='storage-locations')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),
@@ -60,5 +64,7 @@ urlpatterns = [
     path('system/stats/', system_stats_view, name='system-stats'),
     path('system/export-clients/', export_clients_excel_view, name='export-clients'),
     path('system/cleanup-media/', cleanup_media_view, name='cleanup-media'),
+    path('inventory/issue-zip/', issue_zip_to_master, name='issue-zip'),
+    path('masters/<int:master_id>/inventory/', master_inventory, name='master-inventory'),
     path('', include(router.urls)),
 ]

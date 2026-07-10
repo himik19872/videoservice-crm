@@ -47,6 +47,8 @@ import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import ImportPage from './pages/ImportPage';
 import ErcPaymentsPage from './pages/ErcPaymentsPage';
+import StorageLocationsPage from './pages/StorageLocationsPage';
+import StorageLocationDetailPage from './pages/StorageLocationDetailPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
 import MasterOrdersPage from './pages/master/MasterOrdersPage';
 import MasterProfilePage from './pages/master/MasterProfilePage';
@@ -104,6 +106,8 @@ function AppContent() {
           <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
+          <Route path="/storage-locations" element={<StorageLocationsPage />} />
+          <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -187,6 +191,8 @@ function AppContent() {
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
+          <Route path="/storage-locations" element={<StorageLocationsPage />} />
+          <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AdminLayout>
@@ -238,6 +244,8 @@ function AppContent() {
         <Route path="/estimate-services" element={<EstimateServicesPage />} />
         <Route path="/import" element={<ImportPage />} />
         <Route path="/erc-payments" element={<ErcPaymentsPage />} />
+        <Route path="/storage-locations" element={<StorageLocationsPage />} />
+        <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>

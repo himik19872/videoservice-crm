@@ -94,6 +94,11 @@ const DispatcherLayout: React.FC<DispatcherLayoutProps> = ({ children }) => {
       icon: <DollarOutlined />,
       label: 'ЕРЦ',
     },
+    {
+      key: '/storage-locations',
+      icon: <EnvironmentOutlined />,
+      label: 'Места хранения',
+    },
   ];
 
   const handleMenuClick = ({ key }: { key: string }) => {

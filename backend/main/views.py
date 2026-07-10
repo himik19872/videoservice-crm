@@ -20,6 +20,7 @@ from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
 from .models import ErcAccount, ErcBillingRecord
+from .models import StorageLocation
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -36,6 +37,7 @@ from .serializers import IssueOrderSerializer, IssueOrderCreateSerializer, Issue
 from .serializers import PurchaseRequestSerializer, PurchaseRequestItemSerializer
 from .serializers import OrderCommentSerializer
 from .serializers import ErcAccountSerializer, ErcBillingRecordSerializer
+from .serializers import StorageLocationSerializer, StorageLocationDetailSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -731,6 +733,29 @@ class OrderViewSet(viewsets.ModelViewSet):
             old_status='completed', new_status='confirmed',
             notes=request.data.get('notes', 'Заявка подтверждена диспетчером')
         )
+
+        # Списываем материалы с мастера — закрываем расходные ордера по заявке
+        from .models import IssueOrder, IssueOrderItem, InventoryItem, InventoryMovement
+        for io in order.issue_orders.filter(status__in=['pending', 'received', 'partially_used']):
+            for ioi in io.items.all():
+                if ioi.quantity_used == 0:
+                    ioi.quantity_used = ioi.quantity_issued
+                    ioi.save()
+                if ioi.quantity_used > 0:
+                    ioi.inventory_item.status = 'installed'
+                    ioi.inventory_item.save(update_fields=['status', 'updated_at'])
+                    InventoryMovement.objects.create(
+                        item=ioi.inventory_item,
+                        movement_type='installed',
+                        quantity=ioi.quantity_used,
+                        master=io.master,
+                        order=order,
+                        performed_by=request.user,
+                        notes=f'Списание по заявке #{order.number}'
+                    )
+            io.status = 'fully_used'
+            io.completed_at = timezone.now()
+            io.save()
 
         # Max-уведомление клиенту: заявка подтверждена диспетчером
         if order.client:
@@ -1627,7 +1652,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.all()
     serializer_class = InventoryItemSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['item_type', 'status']
+    filterset_fields = ['item_type', 'status', 'storage_location']
     search_fields = ['name', 'serial_number', 'model_name', 'supplier', 'barcode']
 
     @action(detail=False, methods=['get'])
@@ -1641,6 +1666,15 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return Response(InventoryItemSerializer(item).data)
         except InventoryItem.DoesNotExist:
             return Response({'error': 'Товар с таким штрих-кодом не найден', 'barcode': barcode}, status=404)
+
+    @action(detail=True, methods=['post'])
+    def generate_barcode(self, request, pk=None):
+        """Сгенерировать новый штрих-код для позиции"""
+        item = self.get_object()
+        import uuid
+        item.barcode = f'SKU-{uuid.uuid4().hex[:8].upper()}'
+        item.save(update_fields=['barcode', 'updated_at'])
+        return Response(InventoryItemSerializer(item).data)
 
     @action(detail=False, methods=['get'])
     def summary(self, request):
@@ -2386,6 +2420,85 @@ class EstimateItemViewSet(viewsets.ModelViewSet):
     serializer_class = EstimateItemSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['estimate', 'item_type']
+
+
+# ══════════════════════════════════════════════════════════════════
+# Места хранения (StorageLocation)
+# ══════════════════════════════════════════════════════════════════
+
+class StorageLocationViewSet(viewsets.ModelViewSet):
+    """Физические места хранения товаров на складе (ячейки, стеллажи, полки)"""
+    queryset = StorageLocation.objects.all()
+    serializer_class = StorageLocationSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['zone', 'is_active']
+    search_fields = ['code', 'barcode', 'zone', 'rack', 'shelf', 'notes']
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve' or self.action == 'by_barcode':
+            return StorageLocationDetailSerializer
+        return StorageLocationSerializer
+
+    @action(detail=False, methods=['get'])
+    def by_barcode(self, request):
+        """Поиск места хранения по штрихкоду (для сканера)"""
+        barcode = request.query_params.get('code', '').strip()
+        if not barcode:
+            return Response({'error': 'Передайте ?code=ШТРИХКОД'}, status=400)
+        try:
+            loc = StorageLocation.objects.get(barcode=barcode)
+            return Response(StorageLocationDetailSerializer(loc).data)
+        except StorageLocation.DoesNotExist:
+            return Response({'error': 'Место с таким штрихкодом не найдено', 'barcode': barcode}, status=404)
+
+    @action(detail=True, methods=['post'])
+    def move_items(self, request, pk=None):
+        """Переместить товары из этого места в другое (тело: {target_location_id: N, item_ids: [...]})"""
+        source = self.get_object()
+        target_id = request.data.get('target_location_id')
+        item_ids = request.data.get('item_ids', [])
+
+        if not target_id:
+            return Response({'error': 'Укажите target_location_id'}, status=400)
+        try:
+            target = StorageLocation.objects.get(id=target_id)
+        except StorageLocation.DoesNotExist:
+            return Response({'error': 'Целевое место не найдено'}, status=404)
+
+        if target.is_full:
+            return Response({'error': 'Целевое место заполнено'}, status=400)
+
+        items = InventoryItem.objects.filter(id__in=item_ids, storage_location=source)
+        moved_count = items.update(storage_location=target)
+
+        return Response({
+            'success': True,
+            'moved_count': moved_count,
+            'source': StorageLocationSerializer(source).data,
+            'target': StorageLocationSerializer(target).data,
+        })
+
+    @action(detail=True, methods=['post'])
+    def recount(self, request, pk=None):
+        """Пересчёт: подтвердить список товаров в ячейке (тело: {item_ids: [...]})"""
+        loc = self.get_object()
+        confirmed_ids = request.data.get('item_ids', [])
+        confirmed_set = set(confirmed_ids)
+
+        # Товары, которые есть в ячейке, но не в списке — помечаем как missing
+        current_items = InventoryItem.objects.filter(storage_location=loc)
+        missing = []
+        for item in current_items:
+            if item.id not in confirmed_set:
+                missing.append(item.id)
+
+        return Response({
+            'success': True,
+            'location': StorageLocationDetailSerializer(loc).data,
+            'confirmed_count': len(confirmed_set),
+            'missing_item_ids': missing,
+            'missing_count': len(missing),
+        })
 
 
 # ══════════════════════════════════════════════════════════════════

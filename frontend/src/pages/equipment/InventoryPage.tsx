@@ -63,6 +63,14 @@ const InventoryPage: React.FC = () => {
     }
   };
 
+  const generateBarcode = async (item: InventoryItem) => {
+    try {
+      const res = await api.post(`/inventory/${item.id}/generate_barcode/`);
+      message.success(`Штрихкод: ${res.data.barcode}`);
+      fetchAll();
+    } catch (e: any) { message.error('Ошибка генерации штрихкода'); }
+  };
+
   const handleAddStock = async (qty: number) => {
     if (!selectedItem) return;
     try {
@@ -105,10 +113,11 @@ const InventoryPage: React.FC = () => {
       title: 'Статус', dataIndex: 'status_display', key: 'status', width: 110, render: (_: any, r: InventoryItem) => <Tag color={statusColors[r.status]}>{r.status_display}</Tag>
     },
     {
-      title: 'Действия', key: 'actions', width: 200, render: (_: any, r: InventoryItem) => (
-        <Space>
+      title: 'Действия', key: 'actions', width: 240, render: (_: any, r: InventoryItem) => (
+        <Space size="small" wrap>
           <Button size="small" icon={<PlusOutlined />} onClick={() => { setSelectedItem(r); setAddModal(true); }}>Приход</Button>
           <Button size="small" icon={<ExportOutlined />} onClick={() => { setSelectedItem(r); setIssueModal(true); }}>Выдать</Button>
+          <Button size="small" icon={<BarcodeOutlined />} onClick={() => generateBarcode(r)} title="Сгенерировать штрихкод">SKU</Button>
         </Space>
       ),
     },
@@ -169,17 +178,18 @@ const InventoryPage: React.FC = () => {
           <Form.Item name="item_type" label="Тип" rules={[{ required: true }]}>
             <Select options={ITEM_TYPES} />
           </Form.Item>
-          <Form.Item name="barcode" label="Штрих-код (SKU)">
-            <Input placeholder="Штрих-код с упаковки товара" prefix={<BarcodeOutlined />} />
+          <Form.Item name="barcode" label="Штрих-код (SKU)" help="Оставьте пустым — сгенерируется автоматически">
+            <Input placeholder="или авто" prefix={<BarcodeOutlined />} />
           </Form.Item>
           <Form.Item name="serial_number" label="Серийный номер"><Input /></Form.Item>
           <Form.Item name="model_name" label="Модель"><Input /></Form.Item>
           <Row gutter={12}>
             <Col span={8}><Form.Item name="quantity" label="Кол-во" initialValue={1}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="cost_price" label="Закупка (₽)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="sale_price" label="Продажа (₽)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="cost_price" label="Закупка (₽)" help="Продажа: +25% авто"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="sale_price" label="Продажа (₽)" help="Авто если пусто"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
           </Row>
-          <Form.Item name="supplier" label="Поставщик"><Input /></Form.Item>
+          <Form.Item name="supplier" label="Поставщик"><Input placeholder="Название поставщика" /></Form.Item>
+          <Form.Item name="location" label="Место хранения"><Input placeholder="Склад А, полка 3" /></Form.Item>
           <Form.Item name="warranty_months" label="Гарантия (мес.)" initialValue={12}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           <Button type="primary" htmlType="submit" block>Создать</Button>
         </Form>

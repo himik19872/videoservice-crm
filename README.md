@@ -9,6 +9,12 @@
 ![Stack](https://img.shields.io/badge/Deploy-Docker-2496ed?logo=docker)
 
 ---
+https://github.com/himik19872/videoservice-crm
+
+
+
+https://gitverse.ru/himik19872/videoservice-crm
+
 
 ## ✅ Что уже работает
 
@@ -42,12 +48,31 @@
 - Расширенная адресация: тип улицы, микрорайон, кол-во квартир и подъездов
 
 ### 📦 Склад и оборудование (Inventory)
-- Каталог оборудования: домофоны, камеры, вызывные панели, замки, мониторы, кабель, монтажные комплекты
-- Серийные номера, модели, закупочные/продажные цены, гарантийные сроки
+
+#### Каталог оборудования
+- Домофоны, камеры, вызывные панели, замки, мониторы, БП, кабель, монтажные комплекты
+- Серийные номера, модели, закупочные/продажные цены (+25% автонаценка), гарантийные сроки
+- Автогенерация штрихкодов (`SKU-XXXXXXXX`) для каждой позиции
+- Поиск по названию, серийному номеру, модели, поставщику, штрихкоду
+- Сводка склада: всего/на складе/у мастеров, стоимость, типы
+
+#### 📍 Места хранения (Storage Locations) — **новое**
+- **Физические ячейки** с уникальным кодом (например, `A-03-12`) и автогенерируемым штрихкодом (`LOC-XXXXXXXX`)
+- **Зоны, стеллажи, полки** — трёхуровневая система адресации
+- **Вместимость**: контроль заполненности (счётчик позиций / лимит)
+- **Поиск** по коду, штрихкоду, зоне, стеллажу, полке
+- **Сканер места**: отсканировал штрихкод ячейки → мгновенный переход к её содержимому
+- **Сканер товара в ячейке**: проверить наличие по штрихкоду внутри конкретного места
+- **Перемещение**: выбрать товары → указать целевую ячейку → переместить
+- **Пересчёт**: подтвердить актуальный список товаров в ячейке, выявить расхождения
+- **Карточка места**: статистика (позиций/свободно/всего товаров), таблица содержимого
+
+#### Движения и жизненный цикл
 - **Статусы**: на складе → у мастера → установлено → возвращено → брак → списано
-- **Движения**: приход, выдача мастеру, возврат, установка клиенту, списание
+- **Движения**: приход, выдача мастеру (в т.ч. ZIP-набором без заявки), возврат, установка клиенту, списание
+- **Автосписание при подтверждении заявки**: материалы со статусом «выдано» → «установлено»
 - Полная история с автообновлением остатков
-- Выдача мастерам под отчёт, отчёт по остаткам у мастеров
+- Отчёт по остаткам у мастеров
 
 ### 💰 Финансы
 - Учёт оплат: наличные, карта, перевод, онлайн
@@ -221,6 +246,30 @@ node server.js
 | GET/POST | `/api/inventory/` | Список / создать оборудование |
 | GET/PUT/DELETE | `/api/inventory/{id}/` | Детали / изменить / удалить |
 | GET/POST | `/api/inventory-movements/` | История движений |
+| GET | `/api/inventory/summary/` | Сводка склада |
+| GET | `/api/inventory/by_barcode/?code=` | Поиск товара по штрихкоду |
+| POST | `/api/inventory/{id}/generate_barcode/` | Сгенерировать штрихкод |
+| POST | `/api/inventory/issue-zip/` | Выдать ZIP-набор мастеру без заявки |
+| GET | `/api/masters/{id}/inventory/` | Остатки у мастера |
+
+### 📍 Места хранения
+| Метод | URL | Описание |
+|-------|-----|----------|
+| GET/POST | `/api/storage-locations/` | Список / создать место |
+| GET/PUT/DELETE | `/api/storage-locations/{id}/` | Детали + содержимое / изменить / удалить |
+| GET | `/api/storage-locations/by_barcode/?code=` | Найти место по штрихкоду |
+| POST | `/api/storage-locations/{id}/move_items/` | Переместить товары в другую ячейку |
+| POST | `/api/storage-locations/{id}/recount/` | Пересчёт (подтверждение списка) |
+
+### Импорт и ЕРЦ
+| Метод | URL | Описание |
+|-------|-----|----------|
+| POST | `/api/import/clients/` | Импорт базы ТСЖ/УК из Excel |
+| POST | `/api/import/erc/` | Импорт оборотной ведомости ЕРЦ |
+| POST | `/api/import/preview/` | Предпросмотр Excel (первые 10 строк) |
+| GET/POST | `/api/erc-accounts/` | Лицевые счета ЕРЦ |
+| GET | `/api/erc-billing/` | Платёжные записи ЕРЦ |
+| GET | `/api/clients/{id}/erc_payments/` | История платежей ЕРЦ по клиенту |
 
 ### Финансы
 | Метод | URL | Описание |
@@ -260,17 +309,24 @@ eas build --platform android --profile preview  # APK
 ```
 videoservice-crm/
 ├── backend/                # Django API
-│   ├── main/models.py      # 20+ моделей: Order, Client, Master, Building, InventoryItem, Payment, ...
+│   ├── main/models.py      # 25+ моделей: Order, Client, Master, StorageLocation, InventoryItem, Payment, ...
 │   ├── main/views.py       # ViewSets + actions + разграничение доступа
 │   ├── main/serializers.py # Сериализаторы с create/update логикой
+│   ├── main/inventory_views.py  # Выдача ZIP, остатки у мастера
+│   ├── main/import_service.py   # Импорт Excel: ТСЖ, ЕРЦ (4 формата)
 │   ├── main/max_service.py # Max-уведомления
 │   ├── main/max_views.py   # Max webhook + настройки
+│   ├── main/migrations/    # 33+ миграции
 │   ├── main/fixtures/      # regions, users, masters, user_profiles
 │   └── requirements.txt
 ├── frontend/               # React 19 + TypeScript + Ant Design 6
 │   └── src/pages/          # orders, clients, masters, buildings, reports, equipment, settings, ...
 │       ├── settings/AdminSettingsPage.tsx  # Единое управление сотрудниками + права
-│       └── orders/OrdersPage.tsx           # Заявки с сортировкой и фильтрами
+│       ├── orders/OrdersPage.tsx           # Заявки с сортировкой и фильтрами
+│       ├── StorageLocationsPage.tsx        # Таблица мест хранения
+│       ├── StorageLocationDetailPage.tsx   # Карточка места: содержимое, сканер
+│       ├── ImportPage.tsx                  # Импорт Excel (ТСЖ + ЕРЦ)
+│       └── ErcPaymentsPage.tsx             # Платежи ЕРЦ
 ├── mobile/                 # Expo 54 (React Native)
 │   └── src/
 │       ├── screens/        # Login, OrdersList, OrderDetail, Signature, MasterMap, Inventory, Payments, AddPayment
