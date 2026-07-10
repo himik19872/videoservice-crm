@@ -30,6 +30,11 @@ export interface Client {
   address: string;
   region?: Region;
   region_id?: number;
+  personal_account_number?: string;
+  entrance_number?: string;
+  management_company?: string;
+  district?: string;
+  source: 'manual' | 'excel_import' | 'erc';
   created_at: string;
   notes?: string;
 }
@@ -498,4 +503,48 @@ export interface PurchaseRequest {
   items: PurchaseRequestItem[];
   created_at: string;
   updated_at: string;
+}
+
+// ═══ ERC (Единый расчётный центр) ═══
+export interface ErcAccount {
+  id: number;
+  account_number: string;
+  full_name: string;
+  address: string;
+  residents_count: number;
+  is_active: boolean;
+  last_payment?: { period: string; paid: string; paid_percent: string };
+  billing_records_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ErcBillingRecord {
+  id: number;
+  account: number;
+  account_number: string;
+  account_name: string;
+  period: string;
+  balance_start: string;
+  charged: string;
+  charged_no_benefits: string;
+  paid: string;
+  paid_percent: string;
+  balance_end: string;
+  credit: string;
+  imported_at: string;
+}
+
+export interface ImportResult {
+  success: boolean;
+  total: number;
+  created?: number;
+  updated?: number;
+  accounts?: { created: number; updated: number };
+  billing_records?: { created: number; updated: number };
+  period?: string;
+  format?: string;
+  column_mapping?: Record<string, any>;
+  errors: string[];
+  error?: string;
 }

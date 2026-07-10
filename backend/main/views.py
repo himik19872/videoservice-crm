@@ -18,6 +18,7 @@ from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateIt
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
+from .models import ErcAccount, ErcBillingRecord
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -33,6 +34,7 @@ from .serializers import SupplyInvoiceItemSerializer
 from .serializers import IssueOrderSerializer, IssueOrderCreateSerializer, IssueOrderItemSerializer
 from .serializers import PurchaseRequestSerializer, PurchaseRequestItemSerializer
 from .serializers import OrderCommentSerializer
+from .serializers import ErcAccountSerializer, ErcBillingRecordSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -266,6 +268,21 @@ class ClientViewSet(viewsets.ModelViewSet):
                 pass
 
         return queryset
+
+    @action(detail=True, methods=['get'])
+    def erc_payments(self, request, pk=None):
+        """Возвращает историю платежей ЕРЦ для клиента (по personal_account_number)."""
+        client = self.get_object()
+        if not client.personal_account_number:
+            return Response([])
+
+        from .models import ErcBillingRecord
+        records = ErcBillingRecord.objects.filter(
+            account__account_number=client.personal_account_number
+        ).order_by('-period')
+
+        from .serializers import ErcBillingRecordSerializer
+        return Response(ErcBillingRecordSerializer(records, many=True).data)
 
 
 class EquipmentViewSet(viewsets.ModelViewSet):
@@ -2368,3 +2385,95 @@ class EstimateItemViewSet(viewsets.ModelViewSet):
     serializer_class = EstimateItemSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['estimate', 'item_type']
+
+
+# ══════════════════════════════════════════════════════════════════
+# ЕРЦ (Единый расчётный центр)
+# ══════════════════════════════════════════════════════════════════
+
+class ErcAccountViewSet(viewsets.ModelViewSet):
+    """Лицевые счета ЕРЦ"""
+    queryset = ErcAccount.objects.all()
+    serializer_class = ErcAccountSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['account_number', 'full_name', 'address']
+
+
+class ErcBillingRecordViewSet(viewsets.ModelViewSet):
+    """Платёжные записи ЕРЦ"""
+    queryset = ErcBillingRecord.objects.all()
+    serializer_class = ErcBillingRecordSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['account', 'period']
+    search_fields = ['account__account_number', 'account__full_name', 'account__address']
+
+
+# ══════════════════════════════════════════════════════════════════
+# Эндпоинты импорта из Excel
+# ══════════════════════════════════════════════════════════════════
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_clients_excel_view(request):
+    """
+    Импорт базы клиентов из Excel-файла.
+    Принимает multipart/form-data с полем 'file'.
+    """
+    if 'file' not in request.FILES:
+        return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
+
+    uploaded = request.FILES['file']
+    if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
+        return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .import_service import import_clients_from_excel
+    result = import_clients_from_excel(uploaded.read(), request.user)
+    return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_erc_excel_view(request):
+    """
+    Импорт данных ЕРЦ из Excel-файла (оборотная ведомость).
+    Принимает multipart/form-data с полем 'file' и опциональным 'period' (YYYY-MM-DD).
+    """
+    if 'file' not in request.FILES:
+        return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
+
+    uploaded = request.FILES['file']
+    if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
+        return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Период — опционально из запроса
+    period_date = None
+    period_str = request.data.get('period', '')
+    if period_str:
+        from datetime import datetime
+        try:
+            period_date = datetime.strptime(period_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'success': False, 'error': 'Формат периода: YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .import_service import import_erc_from_excel
+    result = import_erc_from_excel(uploaded.read(), request.user, period_date)
+    return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_preview_view(request):
+    """
+    Предпросмотр Excel-файла (первые 10 строк).
+    """
+    if 'file' not in request.FILES:
+        return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
+
+    uploaded = request.FILES['file']
+    if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
+        return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .import_service import preview_excel
+    result = preview_excel(uploaded.read())
+    return Response(result)

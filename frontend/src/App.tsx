@@ -44,6 +44,8 @@ import EstimateSettingsPage from './pages/settings/EstimateSettingsPage';
 import UpdatePage from './pages/settings/UpdatePage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
+import ImportPage from './pages/ImportPage';
+import ErcPaymentsPage from './pages/ErcPaymentsPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
 import MasterOrdersPage from './pages/master/MasterOrdersPage';
 import MasterProfilePage from './pages/master/MasterProfilePage';
@@ -99,6 +101,8 @@ function AppContent() {
           <Route path="/supply-invoices" element={<SupplyInvoicesPage />} />
           <Route path="/issue-orders" element={<IssueOrdersPage />} />
           <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
+          <Route path="/import" element={<ImportPage />} />
+          <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -180,6 +184,8 @@ function AppContent() {
           <Route path="/estimates" element={<EstimatesPage />} />
           <Route path="/estimates/:id" element={<EstimateDetailPage />} />
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
+          <Route path="/import" element={<ImportPage />} />
+          <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AdminLayout>
@@ -228,6 +234,8 @@ function AppContent() {
         <Route path="/estimates" element={<EstimatesPage />} />
         <Route path="/estimates/:id" element={<EstimateDetailPage />} />
         <Route path="/estimate-services" element={<EstimateServicesPage />} />
+        <Route path="/import" element={<ImportPage />} />
+        <Route path="/erc-payments" element={<ErcPaymentsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>

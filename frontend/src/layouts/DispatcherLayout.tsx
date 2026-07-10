@@ -10,7 +10,7 @@ import {
   UserOutlined,
   HomeOutlined,
   BarChartOutlined,
-  CheckCircleOutlined,
+  CheckCircleOutlined, FileExcelOutlined, DollarOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -83,6 +83,16 @@ const DispatcherLayout: React.FC<DispatcherLayoutProps> = ({ children }) => {
       key: '/reports',
       icon: <BarChartOutlined />,
       label: 'Отчёты',
+    },
+    {
+      key: '/import',
+      icon: <FileExcelOutlined />,
+      label: 'Импорт',
+    },
+    {
+      key: '/erc-payments',
+      icon: <DollarOutlined />,
+      label: 'ЕРЦ',
     },
   ];
 

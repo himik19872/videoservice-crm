@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
-from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice
+from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, ErcAccount, ErcBillingRecord
 
 
 class MasterInline(admin.StackedInline):
@@ -16,6 +16,20 @@ class UserAdmin(BaseUserAdmin):
 
 admin.site.unregister(User)
 admin.site.register(User, UserAdmin)
+
+
+@admin.register(ErcAccount)
+class ErcAccountAdmin(admin.ModelAdmin):
+    list_display = ['account_number', 'full_name', 'address', 'residents_count', 'is_active']
+    search_fields = ['account_number', 'full_name', 'address']
+    list_filter = ['is_active']
+
+
+@admin.register(ErcBillingRecord)
+class ErcBillingRecordAdmin(admin.ModelAdmin):
+    list_display = ['account', 'period', 'charged', 'paid', 'paid_percent', 'balance_end']
+    list_filter = ['period']
+    search_fields = ['account__account_number', 'account__full_name']
 
 
 @admin.register(Region)

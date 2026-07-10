@@ -218,7 +218,7 @@ const OrdersPage: React.FC = () => {
       render: (_: any, record: Order) => (
         <Space size={4}>
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewOrder(record)} />
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => navigate(`/orders/${record.id}`)} />
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => navigate(`/orders/${record.id}/edit`)} />
         </Space>
       ),
     },

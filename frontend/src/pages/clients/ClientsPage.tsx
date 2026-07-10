@@ -5,8 +5,16 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../services/api';
 import type { Client, ClientFormValues, Region } from '../../types';
+import type { TablePaginationConfig } from 'antd/es/table';
+import type { SorterResult } from 'antd/es/table/interface';
 
 const { Title } = Typography;
+
+const sourceLabels: Record<string, { label: string; color: string }> = {
+  manual: { label: 'Ручной ввод', color: 'default' },
+  excel_import: { label: 'Импорт (ТСЖ/УК)', color: 'blue' },
+  erc: { label: 'ЕРЦ', color: 'green' },
+};
 
 const ClientsPage: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -17,19 +25,27 @@ const ClientsPage: React.FC = () => {
   const [form] = Form.useForm();
   const [regions, setRegions] = useState<Region[]>([]);
   const [searchText, setSearchText] = useState('');
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [ordering, setOrdering] = useState<string>('');
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchClients();
+      fetchClients(page, searchText, pageSize, ordering);
       fetchRegions();
     }
   }, [isAuthenticated]);
 
-  const fetchClients = async () => {
+  const fetchClients = async (pg: number, search: string, size: number, order?: string) => {
     setLoading(true);
     try {
-      const response = await api.get('/clients/');
+      const params: any = { page: pg, page_size: size };
+      if (search) params.search = search;
+      if (order) params.ordering = order;
+      const response = await api.get('/clients/', { params });
       setClients(response.data.results || response.data);
+      setTotal(response.data.count || 0);
     } catch (error) {
       message.error('Ошибка загрузки клиентов');
     } finally {
@@ -46,90 +62,101 @@ const ClientsPage: React.FC = () => {
     }
   };
 
+  const handleTableChange = (pagination: TablePaginationConfig, _filters: any, sorter: SorterResult<Client> | SorterResult<Client>[]) => {
+    const newPage = pagination.current || 1;
+    const newSize = pagination.pageSize || 50;
+    setPage(newPage);
+    setPageSize(newSize);
+    
+    let newOrdering = '';
+    const s = Array.isArray(sorter) ? sorter[0] : sorter;
+    if (s.field && s.order) {
+      newOrdering = s.order === 'ascend' ? s.field as string : `-${s.field}`;
+    }
+    setOrdering(newOrdering);
+    fetchClients(newPage, searchText, newSize, newOrdering);
+  };
+
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+    setPage(1);
+    fetchClients(1, value, pageSize, ordering);
+  };
+
   const handleCreateClient = async (values: ClientFormValues) => {
     try {
-      const response = await api.post('/clients/', values);
-      setClients([response.data, ...clients]);
+      await api.post('/clients/', values);
       setIsModalOpen(false);
       form.resetFields();
       message.success('Клиент создан');
+      fetchClients(page, searchText, pageSize, ordering);
     } catch (error) {
       message.error('Ошибка создания клиента');
     }
-  };
-
-  const handleEditClient = (client: Client) => {
-    navigate(`/clients/${client.id}`);
   };
 
   const handleViewClient = (client: Client) => {
     navigate(`/clients/${client.id}`);
   };
 
-  const filteredClients = clients.filter((client) => {
-    return (
-      client.full_name?.toLowerCase().includes(searchText.toLowerCase()) ||
-      client.phone?.toLowerCase().includes(searchText.toLowerCase()) ||
-      client.address?.toLowerCase().includes(searchText.toLowerCase())
-    );
-  });
-
   const columns = [
-    {
-      title: 'ФИО',
-      dataIndex: 'full_name',
-      key: 'full_name',
-      width: 200,
-    },
-    {
-      title: 'Телефон',
-      dataIndex: 'phone',
-      key: 'phone',
-      width: 150,
-    },
-    {
-      title: 'Email',
-      dataIndex: 'email',
-      key: 'email',
-      width: 200,
-    },
     {
       title: 'Адрес',
       dataIndex: 'address',
       key: 'address',
-      width: 250,
+      width: 280,
+      ellipsis: true,
+      sorter: true,
     },
     {
-      title: 'Район',
-      dataIndex: 'region',
-      key: 'region',
-      width: 150,
-      render: (region: any) => region?.name || '-',
+      title: 'ФИО',
+      dataIndex: 'full_name',
+      key: 'full_name',
+      width: 180,
+      sorter: true,
+      render: (text: string) => text || 'Не определено',
     },
     {
-      title: 'Дата добавления',
+      title: 'Л/счет',
+      dataIndex: 'personal_account_number',
+      key: 'personal_account_number',
+      width: 130,
+      sorter: true,
+      render: (text: string) => text || '-',
+    },
+    {
+      title: 'УК / ТСЖ',
+      dataIndex: 'management_company',
+      key: 'management_company',
+      width: 180,
+      ellipsis: true,
+      sorter: true,
+      render: (text: string) => text || '-',
+    },
+    {
+      title: 'Источник',
+      dataIndex: 'source',
+      key: 'source',
+      width: 140,
+      render: (src: string) => {
+        const info = sourceLabels[src] || sourceLabels.manual;
+        return <Tag color={info.color}>{info.label}</Tag>;
+      },
+    },
+    {
+      title: 'Дата',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 150,
-      render: (date: string) => new Date(date).toLocaleDateString('ru-RU'),
+      width: 110,
+      sorter: true,
+      render: (date: string) => date ? new Date(date).toLocaleDateString('ru-RU') : '-',
     },
     {
-      title: 'Действия',
+      title: '',
       key: 'actions',
-      width: 120,
+      width: 50,
       render: (_: any, record: Client) => (
-        <Space>
-          <Button
-            type="link"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewClient(record)}
-          />
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => handleEditClient(record)}
-          />
-        </Space>
+        <Button type="link" icon={<EyeOutlined />} onClick={() => handleViewClient(record)} />
       ),
     },
   ];
@@ -138,32 +165,36 @@ const ClientsPage: React.FC = () => {
     <div>
       <Title level={3}>Клиенты</Title>
 
-      <Space style={{ marginBottom: 16 }}>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setIsModalOpen(true)}
-        >
-          Новый клиент
-        </Button>
+      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }} wrap>
+        <Space>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)}>
+            Новый клиент
+          </Button>
+        </Space>
       </Space>
 
       <Input.Search
-        placeholder="Поиск по ФИО, телефону, адресу..."
-        style={{ marginBottom: 16, width: 300 }}
-        onChange={(e) => setSearchText(e.target.value)}
+        placeholder="Поиск по адресу, ФИО, телефону..."
+        style={{ marginBottom: 16, width: 400 }}
+        onSearch={handleSearch}
+        onChange={(e) => !e.target.value && handleSearch('')}
         allowClear
       />
 
       <Table
         columns={columns}
-        dataSource={filteredClients}
+        dataSource={clients}
         loading={loading}
         rowKey="id"
+        onChange={handleTableChange}
+        scroll={{ x: 1000 }}
         pagination={{
-          pageSize: 10,
+          current: page,
+          pageSize: pageSize,
+          total: total,
           showSizeChanger: true,
-          showTotal: (total) => `Всего: ${total}`,
+          pageSizeOptions: ['20', '50', '100'],
+          showTotal: (t: number) => `Всего: ${t}`,
         }}
       />
 
@@ -174,69 +205,30 @@ const ClientsPage: React.FC = () => {
         footer={null}
         width={600}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleCreateClient}
-        >
-          <Form.Item
-            name="full_name"
-            label="ФИО"
-            rules={[{ required: true, message: 'Введите ФИО' }]}
-          >
+        <Form form={form} layout="vertical" onFinish={handleCreateClient}>
+          <Form.Item name="full_name" label="ФИО" rules={[{ required: true, message: 'Введите ФИО' }]}>
             <Input placeholder="Введите ФИО" />
           </Form.Item>
-
-          <Form.Item
-            name="phone"
-            label="Телефон"
-            rules={[{ required: true, message: 'Введите телефон' }]}
-          >
+          <Form.Item name="phone" label="Телефон" rules={[{ required: true, message: 'Введите телефон' }]}>
             <Input placeholder="Введите телефон" />
           </Form.Item>
-
-          <Form.Item
-            name="email"
-            label="Email"
-          >
-            <Input placeholder="Введите email" />
-          </Form.Item>
-
-          <Form.Item
-            name="address"
-            label="Адрес"
-            rules={[{ required: true, message: 'Введите адрес' }]}
-          >
+          <Form.Item name="address" label="Адрес" rules={[{ required: true, message: 'Введите адрес' }]}>
             <Input placeholder="Введите адрес" />
           </Form.Item>
-
-          <Form.Item
-            name="region_id"
-            label="Район"
-            rules={[{ required: true, message: 'Выберите район' }]}
-          >
-            <Select
-              placeholder="Выберите район"
-              options={regions.map((region) => ({
-                value: region.id,
-                label: region.name,
-              }))}
-            />
+          <Form.Item name="region_id" label="Район">
+            <Select placeholder="Выберите район" allowClear>
+              {regions.map((r) => (
+                <Select.Option key={r.id} value={r.id}>{r.name}</Select.Option>
+              ))}
+            </Select>
           </Form.Item>
-
-          <Form.Item
-            name="notes"
-            label="Примечания"
-          >
-            <Input.TextArea rows={3} placeholder="Дополнительная информация" />
+          <Form.Item name="management_company" label="УК / ТСЖ">
+            <Input placeholder="Управляющая компания" />
           </Form.Item>
-
-          <Form.Item style={{ textAlign: 'right', marginTop: 24 }}>
-            <Button onClick={() => setIsModalOpen(false)}>Отмена</Button>
-            <Button type="primary" htmlType="submit" style={{ marginLeft: 8 }}>
-              Создать
-            </Button>
+          <Form.Item name="notes" label="Примечания">
+            <Input.TextArea rows={3} />
           </Form.Item>
+          <Button type="primary" htmlType="submit">Создать</Button>
         </Form>
       </Modal>
     </div>

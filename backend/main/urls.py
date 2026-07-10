@@ -10,7 +10,9 @@ from .views import (
     LegalEntityViewSet, EstimateServiceViewSet, CommercialEstimateViewSet, EstimateItemViewSet,
     SupplierViewSet, SupplyInvoiceViewSet,
     IssueOrderViewSet, PurchaseRequestViewSet,
-    login_view, me_view, refresh_token_view
+    ErcAccountViewSet, ErcBillingRecordViewSet,
+    login_view, me_view, refresh_token_view,
+    import_clients_excel_view, import_erc_excel_view, import_preview_view,
 )
 from .max_views import MaxSettingsViewSet, max_webhook_view
 
@@ -43,11 +45,16 @@ router.register(r'suppliers', SupplierViewSet, basename='suppliers')
 router.register(r'supply-invoices', SupplyInvoiceViewSet, basename='supply-invoices')
 router.register(r'issue-orders', IssueOrderViewSet, basename='issue-orders')
 router.register(r'purchase-requests', PurchaseRequestViewSet, basename='purchase-requests')
+router.register(r'erc-accounts', ErcAccountViewSet, basename='erc-accounts')
+router.register(r'erc-billing', ErcBillingRecordViewSet, basename='erc-billing')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),
     path('auth/refresh/', refresh_token_view, name='auth-refresh'),
     path('users/me/', me_view, name='users-me'),
     path('max/webhook/', max_webhook_view, name='max-webhook'),
+    path('import/clients/', import_clients_excel_view, name='import-clients'),
+    path('import/erc/', import_erc_excel_view, name='import-erc'),
+    path('import/preview/', import_preview_view, name='import-preview'),
     path('', include(router.urls)),
 ]

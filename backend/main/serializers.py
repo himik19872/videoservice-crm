@@ -7,6 +7,7 @@ from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateIt
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
+from .models import ErcAccount, ErcBillingRecord
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -134,7 +135,10 @@ class ClientSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'full_name', 'phone', 'email', 'address',
             'region', 'region_id', 'is_legal', 'inn', 'kpp', 'ogrn',
-            'legal_address', 'director_name', 'created_at', 'notes'
+            'legal_address', 'director_name',
+            'personal_account_number', 'entrance_number', 'management_company',
+            'district', 'source',
+            'created_at', 'notes'
         ]
         read_only_fields = ['id', 'created_at']
 
@@ -934,3 +938,41 @@ class OrderCommentSerializer(serializers.ModelSerializer):
 
     def get_author_name(self, obj):
         return obj.author.get_full_name() or obj.author.username
+
+
+# ══════════════════════════════════════════════════════════════════
+# Сериализаторы для ЕРЦ
+# ══════════════════════════════════════════════════════════════════
+
+class ErcAccountSerializer(serializers.ModelSerializer):
+    last_payment = serializers.SerializerMethodField()
+    billing_records_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ErcAccount
+        fields = ['id', 'account_number', 'full_name', 'address', 'residents_count',
+                  'is_active', 'last_payment', 'billing_records_count', 'created_at', 'updated_at']
+
+    def get_last_payment(self, obj):
+        last = obj.billing_records.order_by('-period').first()
+        if last:
+            return {
+                'period': last.period.strftime('%Y-%m'),
+                'paid': str(last.paid),
+                'paid_percent': str(last.paid_percent),
+            }
+        return None
+
+    def get_billing_records_count(self, obj):
+        return obj.billing_records.count()
+
+
+class ErcBillingRecordSerializer(serializers.ModelSerializer):
+    account_number = serializers.CharField(source='account.account_number', read_only=True)
+    account_name = serializers.CharField(source='account.full_name', read_only=True)
+
+    class Meta:
+        model = ErcBillingRecord
+        fields = ['id', 'account', 'account_number', 'account_name', 'period',
+                  'balance_start', 'charged', 'charged_no_benefits',
+                  'paid', 'paid_percent', 'balance_end', 'credit', 'imported_at']

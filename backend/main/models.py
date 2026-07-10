@@ -133,7 +133,7 @@ class Master(models.Model):
 class Client(models.Model):
     """Клиент"""
     name = models.CharField(max_length=150, verbose_name=_('ФИО'))
-    phone = models.CharField(max_length=20, verbose_name=_('Телефон'))
+    phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
     email = models.EmailField(blank=True, verbose_name=_('Email'))
     address = models.CharField(max_length=255, verbose_name=_('Адрес'))
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, related_name='clients', verbose_name=_('Район'))
@@ -146,12 +146,21 @@ class Client(models.Model):
     ogrn = models.CharField(max_length=15, blank=True, verbose_name=_('ОГРН'))
     legal_address = models.CharField(max_length=500, blank=True, verbose_name=_('Юридический адрес'))
     director_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО руководителя'))
+    # Импорт из Excel — база клиентов
+    personal_account_number = models.CharField(max_length=50, blank=True, null=True, db_index=True, verbose_name=_('Номер лицевого счета'))
+    entrance_number = models.CharField(max_length=20, blank=True, verbose_name=_('№ парадной/подъезда'))
+    management_company = models.CharField(max_length=300, blank=True, verbose_name=_('Управляющая компания/ТСЖ'))
+    # Расширенный разбор адреса при импорте
+    district = models.CharField(max_length=200, blank=True, verbose_name=_('Район (муниципальный)'))
+    source = models.CharField(max_length=20, default='manual', verbose_name=_('Источник'),
+                              choices=[('manual', _('Ручной ввод')), ('excel_import', _('Импорт Excel (ТСЖ)')), ('erc', _('ЕРЦ'))])
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
 
     class Meta:
         verbose_name = _('Клиент')
         verbose_name_plural = _('Клиенты')
+        ordering = ['name']
 
     def __str__(self):
         return f"{self.name} ({self.phone})"
@@ -1321,3 +1330,50 @@ class PurchaseRequestItem(models.Model):
 
     def __str__(self):
         return f'{self.name} x{self.quantity}'
+
+
+# ══════════════════════════════════════════════════════════════════
+# Импорт из Excel: ЕРЦ (Единый расчётный центр)
+# ══════════════════════════════════════════════════════════════════
+
+class ErcAccount(models.Model):
+    """Лицевой счёт из ЕРЦ (отдельные клиенты, не пересекаются с основной базой)"""
+    account_number = models.CharField(max_length=50, unique=True, verbose_name=_('Номер лицевого счета'))
+    full_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО'))
+    address = models.CharField(max_length=500, blank=True, verbose_name=_('Адрес'))
+    residents_count = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Кол-во жильцов'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Дата обновления'))
+
+    class Meta:
+        verbose_name = _('ЕРЦ — лицевой счёт')
+        verbose_name_plural = _('ЕРЦ — лицевые счета')
+        ordering = ['account_number']
+
+    def __str__(self):
+        return f'ЕРЦ {self.account_number}: {self.full_name or "—"}'
+
+
+class ErcBillingRecord(models.Model):
+    """Ежемесячная запись о начислениях и оплатах из ЕРЦ"""
+    account = models.ForeignKey(ErcAccount, on_delete=models.CASCADE, related_name='billing_records', verbose_name=_('Лицевой счёт'))
+    period = models.DateField(verbose_name=_('Период (первое число месяца)'), help_text=_('Например: 2026-05-01 для мая 2026'))
+    # Данные из оборотной ведомости ЕРЦ (форма № 30.01.01)
+    balance_start = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name=_('Сальдо на начало'))
+    charged = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name=_('Начислено (фактически)'))
+    charged_no_benefits = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name=_('Начислено (без льгот)'))
+    paid = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name=_('Оплачено'))
+    paid_percent = models.DecimalField(max_digits=7, decimal_places=2, default=0, verbose_name=_('% оплаты'))
+    balance_end = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name=_('Сальдо на конец (дебет)'))
+    credit = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name=_('Кредит'))
+    imported_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата импорта'))
+
+    class Meta:
+        verbose_name = _('ЕРЦ — платёжная запись')
+        verbose_name_plural = _('ЕРЦ — платёжные записи')
+        ordering = ['-period', 'account__account_number']
+        unique_together = ['account', 'period']
+
+    def __str__(self):
+        return f'{self.account.account_number}: {self.period.strftime("%m.%Y")} — оплачено {self.paid} ₽ ({self.paid_percent}%)'

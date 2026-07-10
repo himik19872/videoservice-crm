@@ -5,7 +5,7 @@ import {
   AppstoreOutlined, TeamOutlined, EnvironmentOutlined,
   BarChartOutlined, SettingOutlined, ShopOutlined, DollarOutlined,
   HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined, ToolOutlined, BankOutlined, FileTextOutlined,
-  UserOutlined, CheckCircleOutlined,
+  UserOutlined, CheckCircleOutlined, FileExcelOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -108,6 +108,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/estimate-services',
       icon: <ToolOutlined />,
       label: 'Услуги',
+    },
+    {
+      key: '/import',
+      icon: <FileExcelOutlined />,
+      label: 'Импорт',
     },
     {
       key: '/settings/legal-entities',
