@@ -27,6 +27,7 @@ import TraccarIntegrationPage from './pages/settings/TraccarIntegrationPage';
 import AdminSettingsPage from './pages/settings/AdminSettingsPage';
 import MaxSettingsPage from './pages/settings/MaxSettingsPage';
 import SystemSettingsPage from './pages/settings/SystemSettingsPage';
+import AsteriskSettingsPage from './pages/settings/AsteriskSettingsPage';
 import ReportsPage from './pages/reports/ReportsPage';
 import FinancePage from './pages/reports/FinancePage';
 import InventoryPage from './pages/equipment/InventoryPage';
@@ -224,6 +225,7 @@ function AppContent() {
         <Route path="/settings/traccar" element={<TraccarIntegrationPage />} />
         <Route path="/settings/max" element={<MaxSettingsPage />} />
         <Route path="/settings/system" element={<SystemSettingsPage />} />
+        <Route path="/settings/asterisk" element={<AsteriskSettingsPage />} />
         <Route path="/settings/update" element={<UpdatePage />} />
         <Route path="/settings/stats" element={<SystemStatsPage />} />
         <Route path="/settings/legal-entities" element={<LegalEntitiesPage />} />

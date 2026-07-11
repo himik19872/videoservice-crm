@@ -13,12 +13,25 @@ from .views import (
     ErcAccountViewSet, ErcBillingRecordViewSet,
     StorageLocationViewSet,
     OutgoingInvoiceViewSet,
+    CallLogViewSet,
+    AsteriskSipPeerViewSet, AsteriskTrunkViewSet, AsteriskRouteViewSet,
+    AsteriskIvrViewSet, AsteriskIvrOptionViewSet,
+    AsteriskVoicemailViewSet, AsteriskCallRecordingViewSet,
     login_view, me_view, refresh_token_view,
     import_clients_excel_view, import_erc_excel_view, import_preview_view,
     system_stats_view, export_clients_excel_view, cleanup_media_view,
 )
 from .bitrix24_views import bitrix24_clients_to_bitrix_view, bitrix24_clients_from_bitrix_view
 from .bitrix24_views import bitrix24_products_to_bitrix_view, bitrix24_products_from_bitrix_view
+from .rostelecom_views import (
+    rostelecom_get_calls_view, rostelecom_sync_calls_view,
+    rostelecom_status_view, rostelecom_test_connection_view,
+    rostelecom_update_settings_view,
+)
+from .asterisk_views import (
+    asterisk_generate_configs_view, asterisk_push_configs_view,
+    asterisk_dashboard_view,
+)
 from .max_views import MaxSettingsViewSet, max_webhook_view
 from .inventory_views import issue_zip_to_master, master_inventory
 
@@ -55,6 +68,14 @@ router.register(r'erc-accounts', ErcAccountViewSet, basename='erc-accounts')
 router.register(r'erc-billing', ErcBillingRecordViewSet, basename='erc-billing')
 router.register(r'storage-locations', StorageLocationViewSet, basename='storage-locations')
 router.register(r'outgoing-invoices', OutgoingInvoiceViewSet, basename='outgoing-invoices')
+router.register(r'call-logs', CallLogViewSet, basename='call-logs')
+router.register(r'asterisk/sip-peers', AsteriskSipPeerViewSet, basename='asterisk-sip-peers')
+router.register(r'asterisk/trunks', AsteriskTrunkViewSet, basename='asterisk-trunks')
+router.register(r'asterisk/routes', AsteriskRouteViewSet, basename='asterisk-routes')
+router.register(r'asterisk/ivrs', AsteriskIvrViewSet, basename='asterisk-ivrs')
+router.register(r'asterisk/ivr-options', AsteriskIvrOptionViewSet, basename='asterisk-ivr-options')
+router.register(r'asterisk/voicemails', AsteriskVoicemailViewSet, basename='asterisk-voicemails')
+router.register(r'asterisk/recordings', AsteriskCallRecordingViewSet, basename='asterisk-recordings')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),
@@ -74,5 +95,13 @@ urlpatterns = [
     path('system/cleanup-media/', cleanup_media_view, name='cleanup-media'),
     path('inventory/issue-zip/', issue_zip_to_master, name='issue-zip'),
     path('masters/<int:master_id>/inventory/', master_inventory, name='master-inventory'),
+    path('rostelecom/get-calls/', rostelecom_get_calls_view, name='rostelecom-get-calls'),
+    path('rostelecom/sync-calls/', rostelecom_sync_calls_view, name='rostelecom-sync-calls'),
+    path('rostelecom/status/', rostelecom_status_view, name='rostelecom-status'),
+    path('rostelecom/test-connection/', rostelecom_test_connection_view, name='rostelecom-test'),
+    path('rostelecom/update-settings/', rostelecom_update_settings_view, name='rostelecom-update-settings'),
+    path('asterisk/dashboard/', asterisk_dashboard_view, name='asterisk-dashboard'),
+    path('asterisk/generate-configs/', asterisk_generate_configs_view, name='asterisk-generate-configs'),
+    path('asterisk/push-configs/', asterisk_push_configs_view, name='asterisk-push-configs'),
     path('', include(router.urls)),
 ]

@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   SettingOutlined, GlobalOutlined, ApiOutlined, SafetyOutlined,
   EnvironmentOutlined, MessageOutlined, AimOutlined, CloudDownloadOutlined,
-  ExportOutlined, ImportOutlined, SyncOutlined,
+  ExportOutlined, ImportOutlined, SyncOutlined, PhoneOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 
@@ -52,12 +52,12 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  // Битрикс24: экспорт/импорт
-  const bxAction = async (url: string, label: string) => {
+  // Битрикс24/Ростелеком: экспорт/импорт/синхронизация
+  const bxAction = async (url: string, label: string, method: 'get' | 'post' = 'post') => {
     setBxLoading(label);
     setBxResult(null);
     try {
-      const res = await api.post(url);
+      const res = method === 'get' ? await api.get(url) : await api.post(url);
       setBxResult(res.data);
       message.success(`${label}: выполнено`);
     } catch (err: any) {
@@ -244,6 +244,51 @@ const SettingsPage: React.FC = () => {
                 </pre>
               </Card>
             )}
+          </TabPane>
+
+          <TabPane tab={<span><PhoneOutlined /> Ростелеком АТС</span>} key="rostelecom">
+            <Divider>Настройки подключения</Divider>
+            <Form.Item name="rostelecom_account_id" label="Account ID">
+              <Input placeholder="ID аккаунта Ростелеком" />
+            </Form.Item>
+            <Form.Item name="rostelecom_api_token" label="API токен">
+              <Input.Password placeholder="Токен доступа к API" />
+            </Form.Item>
+            <Form.Item name="rostelecom_active" label="Интеграция активна" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+
+            <Divider>Управление</Divider>
+            <Alert
+              type="info" showIcon
+              message="Инструкция"
+              description={
+                <div style={{ fontSize: 13 }}>
+                  <p>Интеграция с <strong>Ростелеком АТС</strong> позволяет получать историю звонков (CDR) напрямую в CRM.</p>
+                  <p><strong>1.</strong> Получите Account ID и API токен в личном кабинете Ростелеком АТС.</p>
+                  <p><strong>2.</strong> Заполните поля выше и включите интеграцию, нажмите «Сохранить все настройки».</p>
+                  <p><strong>3.</strong> Используйте кнопки ниже для синхронизации звонков.</p>
+                  <p>⚠️ Для работы входящего вебхука (мгновенное уведомление о звонке) настройте URL в личном кабинете Ростелеком:<br/>
+                  <code>{window.location.origin}/api/rostelecom/webhook/</code></p>
+                </div>
+              }
+              style={{ marginBottom: 16 }}
+            />
+
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Button icon={<PhoneOutlined />} block loading={bxLoading === 'Получение звонков'}
+                onClick={() => bxAction('/rostelecom/get-calls/?days=7', 'Получение звонков', 'get')}>
+                Получить звонки за 7 дней
+              </Button>
+              <Button icon={<SyncOutlined />} block loading={bxLoading === 'Синхронизация'}
+                onClick={() => bxAction('/rostelecom/sync-calls/', 'Синхронизация', 'post')}>
+                Синхронизировать звонки в CRM
+              </Button>
+              <Button block loading={bxLoading === 'Статус'}
+                onClick={() => bxAction('/rostelecom/status/', 'Статус', 'get')}>
+                Проверить статус интеграции
+              </Button>
+            </Space>
           </TabPane>
         </Tabs>
 

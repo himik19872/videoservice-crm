@@ -100,6 +100,60 @@ https://gitverse.ru/himik19872/videoservice-crm
 - **Инструкция** по настройке вебхука прямо на странице
 - Сохранение источника `bitrix24` для импортированных клиентов
 
+
+### ☎️ Asterisk PBX — телефония
+
+Полноценная интеграция с Asterisk 20.6+ через AMI (Asterisk Manager Interface).  
+Управление SIP-аккаунтами, транками, маршрутами, IVR и голосовой почтой прямо из CRM.
+
+#### Возможности
+- **SIP-аккаунты** — внутренние номера сотрудников (добавить/редактировать/удалить)
+- **SIP-транки** — подключение к операторам связи (Ростелеком, МГТС, SIPNET и др.)
+- **Маршрутизация звонков** — входящие/исходящие/внутренние правила с шаблонами номеров
+- **IVR (голосовое меню)** — древовидные меню с настройкой действий по цифрам
+- **Автоответчики (Voicemail)** — голосовая почта с отправкой на email
+- **Записи звонков** — журнал с привязкой к клиентам CRM
+- **Генератор конфигов** — автосоздание `pjsip.conf`, `extensions.conf`, `voicemail.conf` из моделей
+- **Push на сервер** — отправка конфигов по SSH с автоматическим `reload` Asterisk
+- **Дашборд** — статус подключения, активные каналы, версия Asterisk, статистика
+- **Click-to-Call** — инициирование звонка из карточки клиента (Originate)
+- **Всплывающая карточка клиента** при входящем звонке (по Caller ID)
+
+#### Страница настройки
+`/settings/asterisk` — 6 вкладок:
+1. **Сервер** — настройки подключения (IP, порт AMI, логин/пароль) + дашборд + генерация/пуш конфигов
+2. **SIP-аккаунты** — таблица внутренних номеров с CRUD
+3. **Транки** — управление подключениями к провайдерам
+4. **Маршруты** — входящие/исходящие правила маршрутизации
+5. **IVR** — голосовые меню с раскрывающимися опциями
+6. **Записи** — журнал записей звонков
+
+#### API Asterisk
+| Метод | URL | Описание |
+|-------|-----|----------|
+| GET/POST | `/api/asterisk/sip-peers/` | SIP-аккаунты |
+| GET/POST | `/api/asterisk/trunks/` | SIP-транки |
+| GET/POST | `/api/asterisk/routes/` | Маршруты звонков |
+| GET/POST | `/api/asterisk/ivrs/` | IVR-меню |
+| POST | `/api/asterisk/ivrs/{id}/add_option/` | Добавить опцию в IVR |
+| DELETE | `/api/asterisk/ivrs/{id}/remove-option/{opt}/` | Удалить опцию |
+| GET/POST | `/api/asterisk/voicemails/` | Автоответчики |
+| GET | `/api/asterisk/recordings/` | Записи звонков |
+| GET | `/api/asterisk/dashboard/` | Дашборд состояния |
+| POST | `/api/asterisk/generate-configs/` | Сгенерировать конфиги |
+| POST | `/api/asterisk/push-configs/` | Отправить конфиги на сервер + reload |
+
+#### Журнал звонков (Ростелеком АТС)
+Также поддерживается интеграция с **Ростелеком АТС** для получени�� CDR через REST API.
+Настройки находятся на странице «Системные настройки» → вкладка «Ростелеком АТС».
+| GET/POST | `/api/call-logs/` | Журнал звонков (фильтры: direction, status, call_type; поиск: phone, client) |
+| GET | `/api/rostelecom/status/` | Статус интеграции |
+| POST | `/api/rostelecom/sync-calls/` | Синхронизация CDR |
+| GET | `/api/rostelecom/get-calls/` | Получить звонки без сохранения |
+
+
+
+
 ### 🤖 Max Бот
 - Уведомления клиентам о статусе заявок
 - Уведомление при назначении мастера (ФИО + телефон)
@@ -162,32 +216,132 @@ https://gitverse.ru/himik19872/videoservice-crm
 ## 🏗️ Архитектура
 
 ```
-                    ┌─────────┐
-                    │  Nginx  │  (опционально)
-                    └────┬────┘
-                         │ :443/:80
-                    ┌────▼────┐
-                    │ Express │  Прокси :3000
-                    │ / → React SPA (build/)
-                    │ /api/* → Django :8000
-                    └────┬────┘
-                         │
-              ┌──────────┴──────────┐
-              ▼                     ▼
-     ┌────────────────┐   ┌────────────────┐
-     │ Django + DRF   │   │ PostgreSQL 15  │
-     │ (Docker) :8000 │◄──│ (Docker) :5432 │
-     └────────────────┘   └────────────────┘
+                         ┌──────────────┐
+                         │   Клиенты    │
+                         │  (браузер)   │
+                         └──────┬───────┘
+                                │ :443/:80
+                         ┌──────▼──────┐
+                         │   Nginx     │  (опционально)
+                         └──────┬──────┘
+                                │
+                         ┌──────▼──────┐
+                         │  Express    │  Прокси :3000
+                         │ / → React   │
+                         │ /api/* →    │
+                         │ Django :8000│
+                         └──────┬──────┘
+                                │
+              ┌─────────────────┼─────────────────┐
+              ▼                 ▼                  ▼
+     ┌────────────────┐ ┌──────────────┐ ┌──────────────────┐
+     │ Django + DRF   │ │ PostgreSQL   │ │  Asterisk PBX    │
+     │ (Docker) :8000 │ │ (Docker)     │ │  192.168.1.68    │
+     │                │ │ :5432        │ │  AMI :5038       │
+     │ asterisk_      │ │              │ │  HTTP :8088      │
+     │ service.py ────┼─┼──────────────┼─│  SIP :5060       │
+     └────────────────┘ └──────────────┘ └──────────────────┘
 
 Внешние сервисы:
-  🤖 Max (platform-api2.max.ru) — уведомления клиентам
-  📍 DaData (suggestions.dadata.ru) — подсказки адресов
+  ☎️ Asterisk PBX — телефония (AMI/SSH)
+  🤖 Max — уведомления клиентам
+  📍 DaData — подсказки адресов
   🗺️ Yandex Maps — навигация
   📡 Traccar GPS — маяки мастеров
-  📱 Expo Push — push-уведомления в мобильное приложение
+  📱 Expo Push — уведомления в мобильное приложение
+  🔄 Bitrix24 — синхронизация клиентов и товаров
+  📞 Ростелеком АТС — CDR (история звонков)
 ```
 
 ---
+
+## ☎️ Развёртывание Asterisk (отдельный сервер)
+
+Asterisk рекомендуется устанавливать на **отдельный сервер** (физический или виртуальный) для стабильной работы телефонии.
+
+### Минимальные требования
+- **ОС**: Ubuntu 22.04 / 24.04
+- **RAM**: 1 GB
+- **Диск**: 10 GB
+- **Сеть**: статический IP в локальной сети, доступный с CRM-сервера
+
+### Установка Asterisk на Ubuntu 24.04
+
+```bash
+# 1. Установка Asterisk из репозитория
+sudo apt update
+sudo apt install -y asterisk asterisk-core-sounds-ru asterisk-mp3 asterisk-mysql asterisk-modules
+
+# 2. Запуск и автостарт
+sudo systemctl enable asterisk
+sudo systemctl start asterisk
+sudo systemctl status asterisk    # проверяем: active (running)
+
+# 3. Версия
+asterisk -V
+# Asterisk 20.6.0
+```
+
+### Настройка AMI (Asterisk Manager Interface)
+
+AMI нужен для управления Asterisk из CRM. Создайте файл `/etc/asterisk/manager.d/crm.conf`:
+
+```ini
+[crm_admin]
+secret = ВАШ_НАДЁЖНЫЙ_ПАРОЛЬ
+deny = 0.0.0.0/0.0.0.0
+permit = 127.0.0.1/255.255.255.0
+permit = 192.168.0.0/255.255.0.0   ; ваша локальная сеть
+read = all
+write = all
+eventfilter = !Event: RTCP*
+eventfilter = !Event: VarSet
+eventfilter = !Event: Newexten
+```
+
+### Включение HTTP-сервера (для будущих вебхуков)
+
+В `/etc/asterisk/http.conf` раскомментируйте:
+```ini
+[general]
+enabled=yes
+bindaddr=0.0.0.0
+bindport=8088
+```
+
+### Применение и проверка
+
+```bash
+sudo systemctl restart asterisk
+
+# Проверка AMI
+sudo asterisk -rx "manager show user crm_admin"
+
+# Проверка портов
+sudo ss -tlnp | grep -E "5038|5060|8088"
+# Должны быть: 5038 (AMI), 5060 (SIP), 8088 (HTTP)
+```
+
+### Привязка к CRM
+
+1. В CRM зайдите в **Asterisk PBX → Сервер** (или `/settings/asterisk`)
+2. Заполните поля:
+   - **IP-адрес** — IP вашего Asterisk-сервера (например `192.168.1.68`)
+   - **AMI порт** — `5038`
+   - **AMI логин** — `crm_admin`
+   - **AMI пароль** — тот, что указали в `crm.conf`
+3. Включите переключатель **«Интеграция активна»**
+4. Нажмите **«Сохранить настройки подключения»**
+5. Дашборд должен показать **Онлайн** и версию Asterisk
+
+### Дальнейшая настройка (уже из CRM)
+- Создайте **SIP-аккаунты** для сотрудников (вкладка «SIP»)
+- Добавьте **SIP-транк** от провайдера телефонии (вкладка «Транки»)
+- Настройте **маршруты** входящих/исходящих звонков (вкладка «Маршруты»)
+- Создайте **IVR-меню** (вкладка «IVR») — «Здравствуйте! Отдел продаж — 1, Сервис — 2...»
+- Нажмите **«Сгенерировать конфиги»** → **«Отправить и перезагрузить»**
+
+Конфиги автоматически сгенерируются и отправятся на Asterisk-сервер по SSH.
 
 ## 🚀 Быстрый старт
 
@@ -327,26 +481,33 @@ eas build --platform android --profile preview  # APK
 ```
 videoservice-crm/
 ├── backend/                # Django API
-│   ├── main/models.py      # 25+ моделей: Order, Client, Master, StorageLocation, InventoryItem, Payment, ...
+│   ├── main/models.py      # 45+ моделей: Order, Client, Master, StorageLocation, InventoryItem, Payment, AsteriskSipPeer, ...
 │   ├── main/views.py       # ViewSets + actions + разграничение доступа
 │   ├── main/serializers.py # Сериализаторы с create/update логикой
-│   ├── main/inventory_views.py  # Выдача ZIP, остатки у мастера
-│   ├── main/import_service.py   # Импорт Excel: ТСЖ, ЕРЦ (4 формата)
-│   ├── main/bitrix24_service.py # Экспорт/импорт в Битрикс24 (webhook REST API)
-│   ├── main/bitrix24_views.py   # API эндпоинты синхронизации с Битрикс24
-│   ├── main/max_service.py # Max-уведомления
-│   ├── main/max_views.py   # Max webhook + настройки
-│   ├── main/migrations/    # 33+ миграции
-│   ├── main/fixtures/      # regions, users, masters, user_profiles
+│   ├── main/inventory_views.py       # Выдача ZIP, остатки у мастера
+│   ├── main/import_service.py        # Импорт Excel: ТСЖ, ЕРЦ (4 формата)
+│   ├── main/bitrix24_service.py      # Экспорт/импорт в Битрикс24 (webhook REST API)
+│   ├── main/bitrix24_views.py        # API эндпоинты синхронизации с Битрикс24
+│   ├── main/rostelecom_service.py    # Интеграция с Ростелеком АТС (CDR)
+│   ├── main/rostelecom_views.py      # API эндпоинты Ростелеком АТС
+│   ├── main/asterisk_service.py      # ☎️ AMI-клиент (Ping, Status, Originate, CDR, CLI)
+│   ├── main/asterisk_views.py        # ☎️ API эндпоинты Asterisk (дашборд, конфиги, пуш)
+│   ├── main/asterisk_config_generator.py  # ☎️ Генератор pjsip.conf/extensions.conf/voicemail.conf
+│   ├── main/max_service.py  # Max-уведомления
+│   ├── main/max_views.py    # Max webhook + настройки
+│   ├── main/migrations/     # 41+ миграция
+│   ├── main/fixtures/       # regions, users, masters, user_profiles
 │   └── requirements.txt
 ├── frontend/               # React 19 + TypeScript + Ant Design 6
 │   └── src/pages/          # orders, clients, masters, buildings, reports, equipment, settings, ...
-│       ├── settings/AdminSettingsPage.tsx  # Единое управление сотрудниками + права
-│       ├── orders/OrdersPage.tsx           # Заявки с сортировкой и фильтрами
-│       ├── StorageLocationsPage.tsx        # Таблица мест хранения
-│       ├── StorageLocationDetailPage.tsx   # Карточка места: содержимое, сканер
-│       ├── ImportPage.tsx                  # Импорт Excel (ТСЖ + ЕРЦ)
-│       └── ErcPaymentsPage.tsx             # Платежи ЕРЦ
+│       ├── settings/AdminSettingsPage.tsx     # Единое управление сотрудниками + права
+│       ├── settings/SystemSettingsPage.tsx    # Системные настройки (DaData, Max, Traccar, Bitrix24, Ростелеком, GitHub)
+│       ├── settings/AsteriskSettingsPage.tsx  # ☎️ Настройка телефонии (SIP, транки, маршруты, IVR, voicemail)
+│       ├── orders/OrdersPage.tsx              # Заявки с сортировкой и фильтрами
+│       ├── StorageLocationsPage.tsx           # Таблица мест хранения
+│       ├── StorageLocationDetailPage.tsx      # Карточка места: содержимое, сканер
+│       ├── ImportPage.tsx                     # Импорт Excel (ТСЖ + ЕРЦ)
+│       └── ErcPaymentsPage.tsx                # Платежи ЕРЦ
 ├── mobile/                 # Expo 54 (React Native)
 │   └── src/
 │       ├── screens/        # Login, OrdersList, OrderDetail, Signature, MasterMap, Inventory, Payments, AddPayment

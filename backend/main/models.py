@@ -489,6 +489,18 @@ class SystemSettings(models.Model):
                                          help_text=_('Входящий вебхук: https://yourdomain.bitrix24.ru/rest/1/xxxx...'))
     bitrix24_active = models.BooleanField(default=False, verbose_name=_('Интеграция с Битрикс24 активна'))
 
+    # ═══ Ростелеком АТС ═══
+    rostelecom_account_id = models.CharField(max_length=100, blank=True, verbose_name=_('Account ID Ростелеком'))
+    rostelecom_api_token = models.CharField(max_length=255, blank=True, verbose_name=_('API токен Ростелеком'))
+    rostelecom_active = models.BooleanField(default=False, verbose_name=_('Интеграция с Ростелеком АТС активна'))
+
+    # ═══ Asterisk PBX ═══
+    asterisk_host = models.CharField(max_length=100, default='192.168.1.68', blank=True, verbose_name=_('Asterisk хост'))
+    asterisk_port = models.PositiveIntegerField(default=5038, verbose_name=_('Asterisk AMI порт'))
+    asterisk_user = models.CharField(max_length=100, default='crm_admin', blank=True, verbose_name=_('AMI пользователь'))
+    asterisk_secret = models.CharField(max_length=255, default='crm_asterisk_secret_2026', blank=True, verbose_name=_('AMI пароль'))
+    asterisk_active = models.BooleanField(default=False, verbose_name=_('Интеграция с Asterisk активна'))
+
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
 
     class Meta:
@@ -1525,6 +1537,262 @@ class ErcBillingRecord(models.Model):
 
     def __str__(self):
         return f'{self.account.account_number}: {self.period.strftime("%m.%Y")} — оплачено {self.paid} ₽ ({self.paid_percent}%)'
+
+
+# ══════════════════════════════════════════════════════════════════
+# Asterisk PBX — Управление телефонией
+# ══════════════════════════════════════════════════════════════════
+
+class AsteriskSipPeer(models.Model):
+    """SIP-аккаунт (внутренний номер сотрудника или внешний абонент)"""
+    TRANSPORT_CHOICES = [
+        ('udp', 'UDP'),
+        ('tcp', 'TCP'),
+        ('tls', 'TLS'),
+    ]
+    CODEC_CHOICES = [
+        ('ulaw,alaw', 'G.711 (ulaw + alaw)'),
+        ('ulaw,alaw,g722', 'HD Voice (G.722)'),
+        ('ulaw,alaw,gsm', 'G.711 + GSM'),
+        ('opus,ulaw,alaw', 'Opus + G.711'),
+    ]
+
+    name = models.CharField(max_length=80, verbose_name=_('Номер/имя'), help_text=_('Напр. 101, 102, manager'))
+    display_name = models.CharField(max_length=100, blank=True, verbose_name=_('Отображаемое имя'))
+    secret = models.CharField(max_length=100, verbose_name=_('Пароль'), default='')
+    host = models.CharField(max_length=15, default='dynamic', verbose_name=_('Хост'), help_text=_('dynamic — любой IP, либо фиксированный'))
+    transport = models.CharField(max_length=10, choices=TRANSPORT_CHOICES, default='udp', verbose_name=_('Транспорт'))
+    codecs = models.CharField(max_length=100, choices=CODEC_CHOICES, default='ulaw,alaw', verbose_name=_('Кодеки'))
+    context = models.CharField(max_length=80, default='internal', verbose_name=_('Контекст'))
+    caller_id = models.CharField(max_length=100, blank=True, verbose_name=_('Caller ID'), help_text=_('Отображаемый номер, напр. +74951112233'))
+    mailbox = models.CharField(max_length=50, blank=True, verbose_name=_('Голосовая почта'), help_text=_('Напр. 101@default'))
+    nat = models.BooleanField(default=True, verbose_name=_('NAT (за роутером)'))
+    allow = models.CharField(max_length=200, default='ulaw,alaw', verbose_name=_('Разрешённые кодеки'))
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sip_peer', verbose_name=_('Сотрудник'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+
+    class Meta:
+        verbose_name = _('SIP-аккаунт')
+        verbose_name_plural = _('SIP-аккаунты')
+        ordering = ['name']
+
+    def __str__(self):
+        return f"SIP/{self.name} ({self.display_name or self.name})"
+
+
+class AsteriskTrunk(models.Model):
+    """SIP-транк (подключение к оператору связи)"""
+    name = models.CharField(max_length=80, verbose_name=_('Название транка'), help_text=_('Напр. rostel-sip, mgts'))
+    provider = models.CharField(max_length=200, blank=True, verbose_name=_('Провайдер'))
+    host = models.CharField(max_length=200, verbose_name=_('Сервер провайдера'), help_text=_('sip.provider.ru'))
+    port = models.PositiveIntegerField(default=5060, verbose_name=_('Порт'))
+    username = models.CharField(max_length=100, blank=True, verbose_name=_('Логин (username)'))
+    secret = models.CharField(max_length=100, blank=True, verbose_name=_('Пароль'))
+    auth_username = models.CharField(max_length=100, blank=True, verbose_name=_('Auth username'), help_text=_('Если отличается от username'))
+    from_user = models.CharField(max_length=100, blank=True, verbose_name=_('From User'))
+    from_domain = models.CharField(max_length=200, blank=True, verbose_name=_('From Domain'))
+    caller_id = models.CharField(max_length=100, blank=True, verbose_name=_('Caller ID'), help_text=_('Исходящий номер'))
+    context = models.CharField(max_length=80, default='inbound', verbose_name=_('Входящий контекст'))
+    transport = models.CharField(max_length=10, choices=[('udp', 'UDP'), ('tcp', 'TCP'), ('tls', 'TLS')], default='udp', verbose_name=_('Транспорт'))
+    codecs = models.CharField(max_length=100, default='ulaw,alaw', verbose_name=_('Кодеки'))
+    max_channels = models.PositiveIntegerField(default=10, verbose_name=_('Макс. каналов'))
+    register = models.BooleanField(default=True, verbose_name=_('Регистрироваться'), help_text=_('Отправить REGISTER провайдеру'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+
+    class Meta:
+        verbose_name = _('SIP-транк')
+        verbose_name_plural = _('SIP-транки')
+        ordering = ['name']
+
+    def __str__(self):
+        return f"Trunk: {self.name} ({self.provider or self.host})"
+
+
+class AsteriskRoute(models.Model):
+    """Маршрут звонков (входящий/исходящий/внутренний)"""
+    DIRECTION_CHOICES = [
+        ('inbound', _('Входящий')),
+        ('outbound', _('Исходящий')),
+        ('internal', _('Внутренний')),
+    ]
+    MATCH_CHOICES = [
+        ('_X.', _('Любой номер')),
+        ('_8XXXXXXXXXX', _('Местный (8XXXXXXXXXX)')),
+        ('_+7XXXXXXXXXX', _('Мобильный (+7XXXXXXXXXX)')),
+        ('_8XXXXXXXXXXX', _('Мобильный (8XXXXXXXXXXX)')),
+        ('_XXXX', _('Внутренний (короткий)')),
+    ]
+
+    name = models.CharField(max_length=100, verbose_name=_('Название маршрута'))
+    direction = models.CharField(max_length=20, choices=DIRECTION_CHOICES, verbose_name=_('Направление'))
+    match_pattern = models.CharField(max_length=80, choices=MATCH_CHOICES, default='_X.', verbose_name=_('Шаблон номера'))
+    priority = models.PositiveIntegerField(default=1, verbose_name=_('Приоритет'))
+    trunk = models.ForeignKey(AsteriskTrunk, on_delete=models.CASCADE, null=True, blank=True, related_name='routes', verbose_name=_('Транк'))
+    prepend = models.CharField(max_length=20, blank=True, verbose_name=_('Добавить перед номером'), help_text=_('Напр. 8, +7, 810'))
+    strip = models.PositiveIntegerField(default=0, verbose_name=_('Убрать цифр сначала'), help_text=_('Сколько цифр убрать из номера'))
+    destination = models.CharField(max_length=200, blank=True, verbose_name=_('Цель (extension/context)'), help_text=_('Куда направить: SIP/101, ivr-main, queue-support'))
+    caller_id_override = models.CharField(max_length=100, blank=True, verbose_name=_('Подмена Caller ID'))
+    failover_destination = models.CharField(max_length=200, blank=True, verbose_name=_('Резервная цель'), help_text=_('Куда направить при отказе'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+
+    class Meta:
+        verbose_name = _('Маршрут звонков')
+        verbose_name_plural = _('Маршруты звонков')
+        ordering = ['direction', 'priority']
+
+    def __str__(self):
+        return f"Route: {self.name} ({self.get_direction_display()})"
+
+
+class AsteriskIvr(models.Model):
+    """Голосовое меню (IVR)"""
+    name = models.CharField(max_length=100, verbose_name=_('Название IVR'))
+    description = models.TextField(blank=True, verbose_name=_('Описание'))
+    greeting_audio = models.CharField(max_length=200, blank=True, verbose_name=_('Аудио приветствия'), help_text=_('Путь к файлу, напр. /var/lib/asterisk/sounds/ivr/welcome'))
+    timeout = models.PositiveIntegerField(default=5, verbose_name=_('Таймаут ввода (сек)'))
+    max_attempts = models.PositiveIntegerField(default=3, verbose_name=_('Макс. попыток'))
+    invalid_audio = models.CharField(max_length=200, blank=True, verbose_name=_('Аудио при ошибке'))
+    exit_destination = models.CharField(max_length=200, default='hangup', verbose_name=_('Куда направить при ошибке'), help_text=_('hangup, SIP/101, queue-support'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+
+    class Meta:
+        verbose_name = _('Голосовое меню (IVR)')
+        verbose_name_plural = _('Голосовые меню (IVR)')
+        ordering = ['name']
+
+    def __str__(self):
+        return f"IVR: {self.name}"
+
+
+class AsteriskIvrOption(models.Model):
+    """Опция IVR-меню: нажатие цифры → действие"""
+    ACTION_CHOICES = [
+        ('extension', _('Внутренний номер')),
+        ('queue', _('Очередь')),
+        ('ivr', _('Под-меню (IVR)')),
+        ('playback', _('Проиграть аудио')),
+        ('voicemail', _('Голосовая почта')),
+        ('hangup', _('Завершить звонок')),
+        ('dial', _('Набрать номер')),
+    ]
+
+    ivr = models.ForeignKey(AsteriskIvr, on_delete=models.CASCADE, related_name='options', verbose_name=_('IVR'))
+    digit = models.CharField(max_length=5, verbose_name=_('Цифра'), help_text=_('0-9, *, # или t (таймаут)'))
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, default='extension', verbose_name=_('Действие'))
+    destination = models.CharField(max_length=200, verbose_name=_('Цель'), help_text=_('SIP/101, queue-support, hangup, номер'))
+    description = models.CharField(max_length=200, blank=True, verbose_name=_('Описание (озвучка)'))
+    order = models.PositiveIntegerField(default=0, verbose_name=_('Порядок'))
+
+    class Meta:
+        verbose_name = _('Опция IVR')
+        verbose_name_plural = _('Опции IVR')
+        ordering = ['ivr', 'order']
+
+    def __str__(self):
+        return f"IVR {self.ivr.name}: {self.digit} → {self.get_action_display()}"
+
+
+class AsteriskVoicemail(models.Model):
+    """Автоответчик / голосовая почта"""
+    mailbox = models.CharField(max_length=50, verbose_name=_('Номер ящика'), help_text=_('Напр. 101@default'))
+    password = models.CharField(max_length=20, default='0000', verbose_name=_('Пароль доступа'))
+    display_name = models.CharField(max_length=100, blank=True, verbose_name=_('Отображаемое имя'))
+    email = models.EmailField(blank=True, verbose_name=_('Email для уведомлений'))
+    email_attachment = models.BooleanField(default=True, verbose_name=_('Отправлять запись на email'))
+    delete_after_email = models.BooleanField(default=False, verbose_name=_('Удалять после отправки'))
+    max_messages = models.PositiveIntegerField(default=100, verbose_name=_('Макс. сообщений'))
+    max_seconds = models.PositiveIntegerField(default=120, verbose_name=_('Макс. длительность (сек)'))
+    min_seconds = models.PositiveIntegerField(default=3, verbose_name=_('Мин. длительность (сек)'))
+    greeting = models.CharField(max_length=200, blank=True, verbose_name=_('Приветствие (аудио)'), help_text=_('Напр. vm-intro'))
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='voicemail', verbose_name=_('Сотрудник'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+
+    class Meta:
+        verbose_name = _('Автоответчик')
+        verbose_name_plural = _('Автоответчики')
+        ordering = ['mailbox']
+
+    def __str__(self):
+        return f"VM: {self.mailbox} ({self.display_name or ''})"
+
+
+class AsteriskCallRecording(models.Model):
+    """Запись звонка (ссылка на файл на Asterisk-сервере)"""
+    call_id = models.CharField(max_length=100, unique=True, verbose_name=_('ID звонка'))
+    caller = models.CharField(max_length=50, verbose_name=_('Звонящий'))
+    callee = models.CharField(max_length=50, verbose_name=_('Вызываемый'))
+    direction = models.CharField(max_length=20, choices=[('incoming', _('Входящий')), ('outgoing', _('Исходящий')), ('internal', _('Внутренний'))], verbose_name=_('Направление'))
+    start_time = models.DateTimeField(verbose_name=_('Начало'))
+    duration = models.PositiveIntegerField(default=0, verbose_name=_('Длительность (сек)'))
+    file_path = models.CharField(max_length=500, verbose_name=_('Путь к файлу'))
+    file_size = models.PositiveIntegerField(default=0, verbose_name=_('Размер (байт)'))
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='call_recordings', verbose_name=_('Клиент'))
+    synced_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Синхронизировано'))
+
+    class Meta:
+        verbose_name = _('Запись звонка')
+        verbose_name_plural = _('Записи звонков')
+        ordering = ['-start_time']
+
+    def __str__(self):
+        return f"Recording: {self.caller} → {self.callee} ({self.start_time})"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Интеграция с Ростелеком АТС — Журнал звонков (CDR)
+# ══════════════════════════════════════════════════════════════════
+
+class CallLog(models.Model):
+    """Запись звонка из Ростелеком АТС"""
+    DIRECTION_CHOICES = [
+        ('incoming', _('Входящий')),
+        ('outgoing', _('Исходящий')),
+        ('internal', _('Внутренний')),
+    ]
+
+    CALL_TYPE_CHOICES = [
+        ('voip', _('VoIP')),
+        ('mobile', _('Мобильный')),
+        ('landline', _('Стационарный')),
+        ('unknown', _('Неизвестно')),
+    ]
+
+    STATUS_CHOICES = [
+        ('completed', _('Завершен')),
+        ('missed', _('Пропущенный')),
+        ('busy', _('Занято')),
+        ('failed', _('Ошибка')),
+        ('queued', _('В очереди')),
+    ]
+
+    call_id = models.CharField(max_length=100, unique=True, verbose_name=_('ID звонка'))
+    phone = models.CharField(max_length=50, verbose_name=_('Номер телефона'))
+    direction = models.CharField(max_length=20, choices=DIRECTION_CHOICES, verbose_name=_('Направление'))
+    start_time = models.DateTimeField(verbose_name=_('Начало звонка'))
+    duration = models.PositiveIntegerField(default=0, verbose_name=_('Длительность (сек)'))
+    call_type = models.CharField(max_length=20, choices=CALL_TYPE_CHOICES, default='unknown', verbose_name=_('Тип звонка'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed', verbose_name=_('Статус'))
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='call_logs', verbose_name=_('Клиент'))
+    raw_data = models.JSONField(default=dict, verbose_name=_('Полные данные (JSON)'))
+    synced_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Синхронизировано'))
+
+    class Meta:
+        verbose_name = _('Звонок (Ростелеком)')
+        verbose_name_plural = _('Журнал звонков (Ростелеком)')
+        ordering = ['-start_time']
+        indexes = [
+            models.Index(fields=['phone', 'start_time']),
+            models.Index(fields=['client', 'start_time']),
+        ]
+
+    def __str__(self):
+        direction_label = self.get_direction_display()
+        return f"{direction_label} {self.phone} → {self.start_time.strftime('%d.%m.%Y %H:%M')} ({self.duration}с)"
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -6,6 +6,7 @@ import {
   BarChartOutlined, SettingOutlined, ShopOutlined, DollarOutlined,
   HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined, ToolOutlined, BankOutlined, FileTextOutlined,
   UserOutlined, CheckCircleOutlined, FileExcelOutlined, HddOutlined,
+  PhoneOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -138,6 +139,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/settings/system',
       icon: <SettingOutlined />,
       label: 'Системные настройки',
+    },
+    {
+      key: '/settings/asterisk',
+      icon: <PhoneOutlined />,
+      label: 'Asterisk PBX',
     },
     {
       key: '/settings/traccar',

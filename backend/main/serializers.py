@@ -10,6 +10,9 @@ from .models import OrderComment
 from .models import ErcAccount, ErcBillingRecord
 from .models import StorageLocation
 from .models import OutgoingInvoice, OutgoingInvoiceItem
+from .models import CallLog
+from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, AsteriskIvrOption
+from .models import AsteriskVoicemail, AsteriskCallRecording
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -1133,3 +1136,81 @@ class OutgoingInvoiceCreateSerializer(serializers.Serializer):
     received_by_name = serializers.CharField(required=False, allow_blank=True, default='')
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     items = serializers.ListField(child=serializers.DictField())
+
+
+
+
+# ════════════════════════════════════════════════════════════
+# Asterisk PBX сериализаторы
+# ════════════════════════════════════════════════════════════
+
+class AsteriskSipPeerSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.username', read_only=True, allow_null=True)
+
+    class Meta:
+        model = AsteriskSipPeer
+        fields = '__all__'
+        extra_kwargs = {'secret': {'write_only': True}}
+
+
+class AsteriskTrunkSerializer(serializers.ModelSerializer):
+    routes_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AsteriskTrunk
+        fields = '__all__'
+        extra_kwargs = {'secret': {'write_only': True}}
+
+    def get_routes_count(self, obj):
+        return obj.routes.count()
+
+
+class AsteriskRouteSerializer(serializers.ModelSerializer):
+    trunk_name = serializers.CharField(source='trunk.name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = AsteriskRoute
+        fields = '__all__'
+
+
+class AsteriskIvrOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AsteriskIvrOption
+        fields = '__all__'
+
+
+class AsteriskIvrSerializer(serializers.ModelSerializer):
+    options = AsteriskIvrOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = AsteriskIvr
+        fields = '__all__'
+
+
+class AsteriskVoicemailSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.username', read_only=True, allow_null=True)
+
+    class Meta:
+        model = AsteriskVoicemail
+        fields = '__all__'
+        extra_kwargs = {'password': {'write_only': True}}
+
+
+class AsteriskCallRecordingSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source='client.name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = AsteriskCallRecording
+        fields = '__all__'
+
+
+class CallLogSerializer(serializers.ModelSerializer):
+    """Сериализатор записи звонка"""
+    direction_display = serializers.CharField(source='get_direction_display', read_only=True)
+    call_type_display = serializers.CharField(source='get_call_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    client_name = serializers.CharField(source='client.name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = CallLog
+        fields = '__all__'

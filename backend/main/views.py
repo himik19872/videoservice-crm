@@ -22,6 +22,9 @@ from .models import OrderComment
 from .models import ErcAccount, ErcBillingRecord
 from .models import StorageLocation
 from .models import OutgoingInvoice, OutgoingInvoiceItem
+from .models import CallLog
+from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, AsteriskIvrOption
+from .models import AsteriskVoicemail, AsteriskCallRecording
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -40,6 +43,10 @@ from .serializers import OrderCommentSerializer
 from .serializers import ErcAccountSerializer, ErcBillingRecordSerializer
 from .serializers import StorageLocationSerializer, StorageLocationDetailSerializer
 from .serializers import OutgoingInvoiceSerializer, OutgoingInvoiceCreateSerializer
+from .serializers import CallLogSerializer
+from .serializers import AsteriskSipPeerSerializer, AsteriskTrunkSerializer, AsteriskRouteSerializer
+from .serializers import AsteriskIvrSerializer, AsteriskIvrOptionSerializer
+from .serializers import AsteriskVoicemailSerializer, AsteriskCallRecordingSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -2649,6 +2656,104 @@ class OutgoingInvoiceViewSet(viewsets.ModelViewSet):
                 'vat_rate': item.vat_rate,
             } for item in invoice.items.all()],
         })
+
+
+# ══════════════════════════════════════════════════════════════════
+# Asterisk PBX — управление телефонией
+# ══════════════════════════════════════════════════════════════════
+
+class AsteriskSipPeerViewSet(viewsets.ModelViewSet):
+    """SIP-аккаунты (внутренние номера)"""
+    queryset = AsteriskSipPeer.objects.all().order_by('name')
+    serializer_class = AsteriskSipPeerSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'display_name', 'caller_id']
+
+    def perform_create(self, serializer):
+        # Генерируем пароль, если не задан
+        if not serializer.validated_data.get('secret'):
+            import secrets
+            serializer.validated_data['secret'] = secrets.token_urlsafe(12)
+        serializer.save()
+
+
+class AsteriskTrunkViewSet(viewsets.ModelViewSet):
+    """SIP-транки (подключение к провайдерам)"""
+    queryset = AsteriskTrunk.objects.all().order_by('name')
+    serializer_class = AsteriskTrunkSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'provider', 'host']
+
+
+class AsteriskRouteViewSet(viewsets.ModelViewSet):
+    """Маршруты звонков"""
+    queryset = AsteriskRoute.objects.select_related('trunk').all().order_by('direction', 'priority')
+    serializer_class = AsteriskRouteSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['direction', 'is_active']
+    search_fields = ['name', 'match_pattern']
+
+
+class AsteriskIvrViewSet(viewsets.ModelViewSet):
+    """Голосовые меню (IVR)"""
+    queryset = AsteriskIvr.objects.prefetch_related('options').all().order_by('name')
+    serializer_class = AsteriskIvrSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'description']
+
+    @action(detail=True, methods=['post'])
+    def add_option(self, request, pk=None):
+        """Добавить опцию в IVR-меню"""
+        ivr = self.get_object()
+        serializer = AsteriskIvrOptionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(ivr=ivr)
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+    @action(detail=True, methods=['delete'], url_path='remove-option/(?P<option_id>[^/.]+)')
+    def remove_option(self, request, pk=None, option_id=None):
+        """Удалить опцию из IVR-меню"""
+        ivr = self.get_object()
+        opt = get_object_or_404(AsteriskIvrOption, id=option_id, ivr=ivr)
+        opt.delete()
+        return Response({'ok': True})
+
+
+class AsteriskIvrOptionViewSet(viewsets.ModelViewSet):
+    """Опции IVR (без вложенности)"""
+    queryset = AsteriskIvrOption.objects.all()
+    serializer_class = AsteriskIvrOptionSerializer
+
+
+class AsteriskVoicemailViewSet(viewsets.ModelViewSet):
+    """Автоответчики / голосовая почта"""
+    queryset = AsteriskVoicemail.objects.all().order_by('mailbox')
+    serializer_class = AsteriskVoicemailSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['mailbox', 'display_name', 'email']
+
+
+class AsteriskCallRecordingViewSet(viewsets.ReadOnlyModelViewSet):
+    """Записи звонков"""
+    queryset = AsteriskCallRecording.objects.select_related('client').all().order_by('-start_time')
+    serializer_class = AsteriskCallRecordingSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['direction']
+    search_fields = ['caller', 'callee', 'client__name']
+
+
+# ══════════════════════════════════════════════════════════════════
+# Ростелеком АТС — журнал звонков
+# ══════════════════════════════════════════════════════════════════
+
+class CallLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Журнал звонков (CDR) из Ростелеком АТС"""
+    queryset = CallLog.objects.select_related('client').order_by('-start_time')
+    serializer_class = CallLogSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['direction', 'status', 'call_type']
+    search_fields = ['phone', 'client__name']
 
 
 # ══════════════════════════════════════════════════════════════════
