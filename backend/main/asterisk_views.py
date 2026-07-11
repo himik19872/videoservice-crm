@@ -69,8 +69,15 @@ def asterisk_push_configs_view(request):
             return Response({'success': False, 'error': 'Системные настройки не найдены'})
 
         host = settings.asterisk_host
+        ssh_user = settings.asterisk_ssh_user or 'root'
+        ssh_pass = settings.asterisk_ssh_password or ''
+        ssh_port = settings.asterisk_ssh_port or 22
+        sudo_pass = ssh_pass  # используем тот же пароль для sudo
+
         if not host:
             return Response({'success': False, 'error': 'Не указан хост Asterisk'})
+        if not ssh_pass:
+            return Response({'success': False, 'error': 'Не указан SSH пароль в настройках Asterisk'})
 
         # Генерируем конфиги
         peers = AsteriskSipPeer.objects.all()
@@ -100,9 +107,9 @@ def asterisk_push_configs_view(request):
                 # Отправляем на сервер через ssh + sudo tee
                 remote_path = f'/etc/asterisk/{filename}'
                 cmd = (
-                    f'sshpass -p "96811621" ssh -o StrictHostKeyChecking=no '
-                    f'himik@{host} '
-                    f'"echo \'96811621\' | sudo -S tee {remote_path}" '
+                    f'sshpass -p "{ssh_pass}" ssh -o StrictHostKeyChecking=no -p {ssh_port} '
+                    f'{ssh_user}@{host} '
+                    f'"echo \'{sudo_pass}\' | sudo -S tee {remote_path}" '
                     f'< {tmp_path}'
                 )
                 result = subprocess.run(
@@ -123,9 +130,9 @@ def asterisk_push_configs_view(request):
         if not push_errors:
             try:
                 cmd = (
-                    f'sshpass -p "96811621" ssh -o StrictHostKeyChecking=no '
-                    f'himik@{host} '
-                    f'"echo \'96811621\' | sudo -S asterisk -rx \\"module reload\\""'
+                    f'sshpass -p "{ssh_pass}" ssh -o StrictHostKeyChecking=no -p {ssh_port} '
+                    f'{ssh_user}@{host} '
+                    f'"echo \'{sudo_pass}\' | sudo -S asterisk -rx \\"module reload\\""'
                 )
                 r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
                 reload_result = r.stdout.strip() if r.returncode == 0 else r.stderr.strip()

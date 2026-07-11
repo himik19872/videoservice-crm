@@ -81,6 +81,9 @@ const AsteriskSettingsPage: React.FC = () => {
         asterisk_user: s.asterisk_user || '',
         asterisk_secret: s.asterisk_secret || '',
         asterisk_active: s.asterisk_active || false,
+        asterisk_ssh_user: s.asterisk_ssh_user || '',
+        asterisk_ssh_password: s.asterisk_ssh_password || '',
+        asterisk_ssh_port: s.asterisk_ssh_port || 22,
       });
     } catch (e) { console.error(e); }
     finally { setServerLoading(false); }
@@ -320,6 +323,18 @@ const AsteriskSettingsPage: React.FC = () => {
             </Form.Item>
             <Form.Item name="asterisk_secret" label="AMI пароль">
               <Input.Password placeholder="Пароль AMI-пользователя" />
+            </Form.Item>
+          </div>
+          <Divider style={{ fontSize: 13, margin: '8px 0' }}>SSH (для отправки конфигов на сервер)</Divider>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item name="asterisk_ssh_user" label="SSH логин" help="Пользователь с правами sudo">
+              <Input placeholder="himik" />
+            </Form.Item>
+            <Form.Item name="asterisk_ssh_port" label="SSH порт">
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="asterisk_ssh_password" label="SSH пароль">
+              <Input.Password placeholder="Пароль для SSH и sudo" />
             </Form.Item>
           </div>
           <Form.Item name="asterisk_active" label="Интеграция активна" valuePropName="checked">

@@ -499,6 +499,9 @@ class SystemSettings(models.Model):
     asterisk_port = models.PositiveIntegerField(default=5038, verbose_name=_('Asterisk AMI порт'))
     asterisk_user = models.CharField(max_length=100, default='crm_admin', blank=True, verbose_name=_('AMI пользователь'))
     asterisk_secret = models.CharField(max_length=255, default='crm_asterisk_secret_2026', blank=True, verbose_name=_('AMI пароль'))
+    asterisk_ssh_user = models.CharField(max_length=100, default='himik', blank=True, verbose_name=_('SSH пользователь'))
+    asterisk_ssh_password = models.CharField(max_length=255, default='96811621', blank=True, verbose_name=_('SSH пароль'))
+    asterisk_ssh_port = models.PositiveIntegerField(default=22, verbose_name=_('SSH порт'))
     asterisk_active = models.BooleanField(default=False, verbose_name=_('Интеграция с Asterisk активна'))
 
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
