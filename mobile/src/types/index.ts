@@ -1,6 +1,7 @@
-// Внешний адрес API (сервер за роутером, порт 3000 проброшен на 8000)
-// Либо через тот же порт 3000 с прокси
-export const API_URL = 'http://83.243.73.86:3000/api';
+// ═══ Типы данных CRM ═══
+
+// API_URL теперь определяется динамически в src/services/api.ts
+// Настройки сервера хранятся в AsyncStorage (ключи: @videoservice_server_ip, @videoservice_server_port)
 
 export interface User {
   id: number;

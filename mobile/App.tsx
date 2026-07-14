@@ -5,6 +5,7 @@ import { ActivityIndicator, View, Text, TouchableOpacity, StyleSheet, Alert, Pla
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { OfflineProvider, setOfflineApi, useOffline } from './src/contexts/OfflineContext';
+import { ServerProvider, useServer } from './src/contexts/ServerContext';
 import api from './src/services/api';
 
 // Screens
@@ -17,6 +18,7 @@ import InventoryDetailScreen from './src/screens/InventoryDetailScreen';
 import PaymentsScreen from './src/screens/PaymentsScreen';
 import AddPaymentScreen from './src/screens/AddPaymentScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
+import ServerSetupScreen from './src/screens/ServerSetupScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -25,6 +27,29 @@ setOfflineApi(api);
 
 function AuthStack() {
   const { theme } = useTheme();
+  const { isConfigured, loading } = useServer();
+  const [showSetup, setShowSetup] = React.useState(false);
+
+  React.useEffect(() => {
+    // Если сервер не настроен, показываем экран настройки
+    if (!loading && !isConfigured) {
+      setShowSetup(true);
+    }
+  }, [loading, isConfigured]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f0f2f5' }}>
+        <ActivityIndicator size="large" color="#1677ff" />
+        <Text style={{ marginTop: 12, color: '#888' }}>Загрузка...</Text>
+      </View>
+    );
+  }
+
+  if (showSetup || !isConfigured) {
+    return <ServerSetupScreen onConfigured={() => setShowSetup(false)} />;
+  }
+
   return (
     <Stack.Navigator>
       <Stack.Screen
@@ -41,6 +66,7 @@ function AppStack() {
   const { theme, isDark, toggleTheme } = useTheme();
   const { isOnline, pendingActions } = useOffline();
   const [shiftActive, setShiftActive] = React.useState(false);
+  const navigationRef = React.useRef<any>(null);
 
   const checkShift = async () => {
     try {
@@ -78,6 +104,9 @@ function AppStack() {
       {pendingActions.length > 0 && (
         <Text style={{ color: '#fa8c16', marginRight: 6, fontSize: 12 }}>{pendingActions.length}⚡</Text>
       )}
+      <TouchableOpacity onPress={() => navigationRef.current?.navigate('ServerSetup')} style={styles.themeBtn}>
+        <Text style={{ fontSize: 16 }}>⚙️</Text>
+      </TouchableOpacity>
       <TouchableOpacity onPress={toggleTheme} style={styles.themeBtn}>
         <Text style={{ fontSize: 16 }}>{isDark ? '☀️' : '🌙'}</Text>
       </TouchableOpacity>
@@ -153,6 +182,17 @@ function AppStack() {
         component={MessagesScreen}
         options={{
           title: '💬 Сообщения',
+          headerStyle,
+          headerTintColor,
+        }}
+      />
+
+      {/* Настройки сервера */}
+      <Stack.Screen
+        name="ServerSetup"
+        component={ServerSetupScreen as any}
+        options={{
+          title: '⚙️ Настройки сервера',
           headerStyle,
           headerTintColor,
         }}
