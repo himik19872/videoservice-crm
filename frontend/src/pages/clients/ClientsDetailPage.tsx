@@ -36,7 +36,7 @@ const ClientsDetailPage: React.FC = () => {
     try {
       const response = await api.get(`/clients/${id}/`);
       setClient(response.data);
-      if (response.data.personal_account_number && response.data.source === 'erc') {
+      if (response.data.personal_account_number) {
         fetchErcPayments();
       }
     } catch (error) {
@@ -175,30 +175,32 @@ const ClientsDetailPage: React.FC = () => {
         {client.notes && <><Divider /><Text type="secondary">{client.notes}</Text></>}
       </Card>
 
-      {/* Платежи ЕРЦ */}
-      {client.source === 'erc' && client.personal_account_number && (
-        <Card title="Платежи ЕРЦ" style={{ marginTop: 16 }}>
+      {/* Платежи ЕРЦ — показываем для любого клиента с лицевым счётом */}
+      {client.personal_account_number && (
+        <Card title="📊 История платежей ЕРЦ" style={{ marginTop: 16 }}>
           {ercPayments.length > 0 ? (
             <Table dataSource={ercPayments} rowKey="id" loading={ercLoading} pagination={false} size="small"
               columns={[
                 { title: 'Период', dataIndex: 'period', key: 'period',
-                  render: (d: string) => { const [y, m] = d.split('-'); return `${m}.${y}`; } },
+                  render: (d: string) => { const parts = d.split('-'); return `${parts[1]}.${parts[0]}`; } },
                 { title: 'Сальдо нач.', dataIndex: 'balance_start', key: 'bs', align: 'right' as const,
-                  render: (v: string) => `${parseFloat(v).toFixed(2)} ₽` },
+                  render: (v: any) => v != null ? `${parseFloat(v || 0).toFixed(2)} ₽` : '—' },
                 { title: 'Начислено', dataIndex: 'charged', key: 'ch', align: 'right' as const,
-                  render: (v: string) => `${parseFloat(v).toFixed(2)} ₽` },
+                  render: (v: any) => v != null ? `${parseFloat(v || 0).toFixed(2)} ₽` : '—' },
                 { title: 'Оплачено', dataIndex: 'paid', key: 'pd', align: 'right' as const,
-                  render: (v: string) => <Text strong style={{ color: '#52c41a' }}>{parseFloat(v).toFixed(2)} ₽</Text> },
+                  render: (v: any) => <Text strong style={{ color: v > 0 ? '#52c41a' : '#ff4d4f' }}>{parseFloat(v || 0).toFixed(2)} ₽</Text> },
                 { title: '%', dataIndex: 'paid_percent', key: 'pp', align: 'right' as const,
-                  render: (v: string) => {
-                    const p = parseFloat(v);
+                  render: (v: any) => {
+                    const p = parseFloat(v || 0);
                     return <Tag color={p >= 100 ? 'green' : p >= 50 ? 'orange' : 'red'}>{p.toFixed(1)}%</Tag>;
                   } },
                 { title: 'Сальдо кон.', dataIndex: 'balance_end', key: 'be', align: 'right' as const,
-                  render: (v: string) => `${parseFloat(v).toFixed(2)} ₽` },
+                  render: (v: any) => v != null ? `${parseFloat(v || 0).toFixed(2)} ₽` : '—' },
+                { title: 'Импорт', dataIndex: 'imported_at', key: 'ia',
+                  render: (d: string) => d ? new Date(d).toLocaleDateString('ru') : '—' },
               ]}
             />
-          ) : !ercLoading && <Empty description="Нет данных" />}
+          ) : !ercLoading && <Empty description="Нет данных ЕРЦ. Загрузите файл ЕРЦ через Импорт." />}
         </Card>
       )}
 
