@@ -2789,16 +2789,22 @@ def import_clients_excel_view(request):
     Импорт базы клиентов из Excel-файла.
     Принимает multipart/form-data с полем 'file'.
     """
-    if 'file' not in request.FILES:
-        return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        if 'file' not in request.FILES:
+            return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
 
-    uploaded = request.FILES['file']
-    if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
-        return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
+        uploaded = request.FILES['file']
+        if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
+            return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
 
-    from .import_service import import_clients_from_excel
-    result = import_clients_from_excel(uploaded.read(), request.user)
-    return Response(result)
+        from .import_service import import_clients_from_excel
+        result = import_clients_from_excel(uploaded.read(), request.user)
+        return Response(result)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': f'Ошибка импорта: {str(e)}',
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
@@ -2806,28 +2812,32 @@ def import_clients_excel_view(request):
 def import_erc_excel_view(request):
     """
     Импорт данных ЕРЦ из Excel-файла (оборотная ведомость).
-    Принимает multipart/form-data с полем 'file' и опциональным 'period' (YYYY-MM-DD).
     """
-    if 'file' not in request.FILES:
-        return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        if 'file' not in request.FILES:
+            return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
 
-    uploaded = request.FILES['file']
-    if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
-        return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
+        uploaded = request.FILES['file']
+        if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
+            return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Период — опционально из запроса
-    period_date = None
-    period_str = request.data.get('period', '')
-    if period_str:
-        from datetime import datetime
-        try:
-            period_date = datetime.strptime(period_str, '%Y-%m-%d').date()
-        except ValueError:
-            return Response({'success': False, 'error': 'Формат периода: YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+        period_date = None
+        period_str = request.data.get('period', '')
+        if period_str:
+            from datetime import datetime
+            try:
+                period_date = datetime.strptime(period_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'success': False, 'error': 'Формат периода: YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
 
-    from .import_service import import_erc_from_excel
-    result = import_erc_from_excel(uploaded.read(), request.user, period_date)
-    return Response(result)
+        from .import_service import import_erc_from_excel
+        result = import_erc_from_excel(uploaded.read(), request.user, period_date)
+        return Response(result)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': f'Ошибка импорта ЕРЦ: {str(e)}',
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])

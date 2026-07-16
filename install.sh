@@ -140,6 +140,10 @@ step "Шаг 6/7: Запуск Docker-контейнеров"
 # Останавливаем старые контейнеры если есть
 docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
 
+# Пересобираем образ (важно после обновления кода!)
+info "Собираю Docker-образ..."
+docker compose build --no-cache 2>&1 || docker-compose build --no-cache 2>&1
+
 # Запускаем
 docker compose up -d 2>&1 || docker-compose up -d 2>&1
 
