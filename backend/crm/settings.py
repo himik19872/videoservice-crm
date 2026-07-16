@@ -164,6 +164,10 @@ else:
     CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000,http://127.0.0.1:3000').split(',')
 CORS_ALLOW_CREDENTIALS = True
 
+# Upload limits — разрешаем файлы до 50 MB (импорт Excel, фото/видео)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
+
 # Phone integration settings (optional)
 TTS_API_URL = config('TTS_API_URL', default='')
 TTS_API_KEY = config('TTS_API_KEY', default='')

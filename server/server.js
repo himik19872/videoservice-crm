@@ -19,18 +19,28 @@ function proxyRequest(req, res) {
   const options = {
     hostname: API_HOST, port: API_PORT, path: req.originalUrl,
     method: req.method, headers: { ...req.headers },
+    timeout: 300000, // 5 минут на загрузку больших файлов
   };
   delete options.headers.host;
-  if (options.headers['content-length'] === '0') delete options.headers['content-length'];
+  // Не удаляем content-length — он нужен Django для корректной обработки тела запроса
+
   const proxyReq = http.request(options, (proxyRes) => {
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     proxyRes.pipe(res);
   });
   proxyReq.on('error', (e) => {
+    console.error('Proxy error:', e.message);
     res.status(502).json({ error: 'Backend unavailable: ' + e.message });
   });
-  if (req.method !== 'GET' && req.method !== 'HEAD') { req.pipe(proxyReq); }
-  else { proxyReq.end(); }
+  proxyReq.on('timeout', () => {
+    proxyReq.destroy();
+    res.status(504).json({ error: 'Backend timeout' });
+  });
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    req.pipe(proxyReq);
+  } else {
+    proxyReq.end();
+  }
 }
 
 app.use('/api', proxyRequest);
