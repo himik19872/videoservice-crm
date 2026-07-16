@@ -3,118 +3,170 @@
 
 Поддерживает два формата:
 1. База клиентов (ТСЖ/УК): № п/п, № лицевого счета, ФИО, Адрес, № парадной, ТСЖ
-   Лицевой счёт игнорируется. Адрес парсится на: город, улица, район, дом, корпус, квартира.
+   Адрес нормализуется через DaData API.
 2. Оборотная ведомость ЕРЦ (форма № 30.01.01): автоопределение колонок по заголовкам.
 """
 
 import io
 import re
+import requests
 from datetime import datetime
 from collections import defaultdict
 import openpyxl
 
 
 # ══════════════════════════════════════════════════════════════════
-# Парсинг адреса
+# Нормализация адреса через DaData
 # ══════════════════════════════════════════════════════════════════
 
-# Пример: "Санкт-Петербург, Аврова (Петергоф) ул, д..5 корп. 2, 19"
-# Город: Санкт-Петербург
-# Улица: Аврова
-# Район (в скобках): Петергоф
-# Дом: 5
-# Корпус: 2
-# Квартира: 19
+def get_dadata_token():
+    """Получить DaData API токен из настроек."""
+    try:
+        from main.models import SystemSettings
+        s = SystemSettings.objects.first()
+        return s.dadata_token if s else ''
+    except Exception:
+        return ''
+
+
+def normalize_address_dadata(raw_address):
+    """
+    Нормализует адрес через DaData API.
+    Возвращает dict с полями из ответа DaData или None при ошибке.
+    """
+    token = get_dadata_token()
+    if not token:
+        return None
+
+    try:
+        resp = requests.post(
+            'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address',
+            json={'query': raw_address, 'count': 1},
+            headers={
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': f'Token {token}'
+            },
+            timeout=5
+        )
+        data = resp.json()
+        suggestions = data.get('suggestions', [])
+        if not suggestions:
+            return None
+
+        s = suggestions[0]
+        d = s.get('data', {})
+
+        return {
+            'unrestricted': s.get('unrestricted_value', ''),
+            'value': s.get('value', ''),
+            'city': d.get('city', '') or d.get('settlement', ''),
+            'city_district': d.get('city_district', ''),
+            'street': d.get('street', ''),
+            'house': d.get('house', ''),
+            'block': d.get('block', ''),
+            'flat': d.get('flat', ''),
+            'postal_code': d.get('postal_code', ''),
+            'region': d.get('region', ''),
+            'area': d.get('area', ''),
+            'settlement': d.get('settlement', ''),
+        }
+    except Exception:
+        return None
+
 
 def parse_address(raw_address):
     """
-    Разбирает адрес на составные части.
-    Возвращает dict: city, street, district, house, building, apartment.
+    Разбирает адрес на составные части с использованием DaData для нормализации.
+    Если DaData недоступен — использует упрощённый регекс-парсер как fallback.
+    
+    Возвращает dict: city, street, district, house, building, apartment, full.
     """
     result = {
         'city': '',
         'street': '',
-        'district': '',  # район в скобках, например Петергоф
+        'district': '',
         'house': '',
         'building': '',
         'apartment': '',
-        'full': raw_address.strip(),
+        'full': raw_address.strip() if raw_address else '',
     }
 
-    if not raw_address:
+    if not raw_address or not raw_address.strip():
         return result
 
-    text = raw_address.strip()
-    result['full'] = text
+    raw = raw_address.strip()
+    result['full'] = raw
 
-    # 1. Выделяем район из скобок: (Петергоф), (Ломоносов) и т.д.
+    # Пробуем нормализовать через DaData
+    dd = normalize_address_dadata(raw)
+    if dd:
+        # Город: приоритет city > settlement
+        result['city'] = dd['city'] or ''
+        # Если есть city_district (район города, напр. Петергоф, Ломоносов) — добавляем
+        if dd['city_district']:
+            if result['city']:
+                result['district'] = dd['city_district']
+            else:
+                result['city'] = dd['city_district']
+
+        result['street'] = dd['street'] or ''
+        result['house'] = dd['house'] or ''
+        result['building'] = dd['block'] or ''
+        result['apartment'] = dd['flat'] or ''
+
+        # Формируем полный адрес
+        address_parts = []
+        if result['city']:
+            prefix = 'г. ' if not result['city'].startswith(('г.', 'г ', 'пос.', 'д.')) else ''
+            address_parts.append(f'{prefix}{result["city"]}')
+        if result['district'] and result['district'] != result['city']:
+            address_parts[-1] = f'{address_parts[-1]}, {result["district"]}' if address_parts else result['district']
+        if result['street']:
+            address_parts.append(result['street'])
+        if result['house']:
+            house_str = f'д. {result["house"]}'
+            if result['building']:
+                house_str += f' корп. {result["building"]}'
+            address_parts.append(house_str)
+        if result['apartment']:
+            address_parts.append(f'кв. {result["apartment"]}')
+        
+        result['full'] = ', '.join(address_parts) if address_parts else raw
+        return result
+
+    # ── Fallback: упрощённый парсер (если DaData недоступен) ──
+    text = raw
     district_match = re.search(r'\(([^)]+)\)', text)
     if district_match:
         result['district'] = district_match.group(1).strip()
         text = text.replace(district_match.group(0), '').strip()
-        # Убираем двойные запятые/пробелы
         text = re.sub(r',\s*,', ',', text)
-        text = re.sub(r'\s{2,}', ' ', text)
 
-    # 2. Разбиваем по запятым
     parts = [p.strip() for p in text.split(',') if p.strip()]
 
-    # Первая часть — обычно "Город, ..."
     if parts:
         first = parts[0]
-        # Проверяем: если первая часть — город (Санкт-Петербург, Москва...)
-        if any(city in first for city in ['Санкт-Петербург', 'Москва', 'СПб', 'Спб']):
+        if any(c in first for c in ['Санкт-Петербург', 'Москва', 'СПб', 'Спб']):
             result['city'] = first.replace('СПб', 'Санкт-Петербург').replace('Спб', 'Санкт-Петербург')
-            parts = parts[1:]  # убираем город
+            parts = parts[1:]
 
-    # 3. Улица — ищем часть с "ул", "пр", "пер" и т.д.
-    street_idx = -1
     for i, p in enumerate(parts):
-        p_lower = p.lower()
-        if any(kw in p_lower for kw in [' ул', 'ул.', ' ул.', 'пр-кт', 'пр.', 'пер.', 'наб.', 'шоссе', 'проезд', 'аллея', 'бульвар']):
-            street_idx = i
+        if any(kw in p.lower() for kw in [' ул', 'ул.', ' ул.', 'пр-кт', 'пр.', 'пер.', 'наб.', 'шоссе', 'проезд', 'аллея', 'бульвар']):
+            result['street'] = p
+            remaining = parts[i+1:]
+            for rp in remaining:
+                rp = rp.strip()
+                hm = re.search(r'д\.?\.?\s*(\d+[а-яА-Яa-zA-Z]*)', rp, re.IGNORECASE)
+                if hm and not result['house']:
+                    result['house'] = hm.group(1)
+                cm = re.search(r'корп\.?\s*(\S+)', rp, re.IGNORECASE)
+                if cm:
+                    result['building'] = cm.group(1).rstrip(',')
+                am = re.search(r'(\d+)$', rp.strip())
+                if am and result['house'] and not result['apartment']:
+                    result['apartment'] = am.group(1)
             break
-    if street_idx == -1:
-        # Если нет типа улицы, берём первую непохожую на дом часть
-        for i, p in enumerate(parts):
-            if not re.search(r'д\.\s*\d|дом\s*\d|корп\.?\s*\d|кв\.?\s*\d|\d+$', p.lower()):
-                street_idx = i
-                break
-
-    if street_idx >= 0:
-        result['street'] = parts[street_idx]
-
-    # 4. Дом, корпус, квартира — ищем в оставшихся частях
-    remaining = parts[max(street_idx + 1, 0):]
-
-    for p in remaining:
-        p_clean = p.strip()
-
-        # Корпус: "корп. 2" или "к. 2"
-        corp_match = re.search(r'корп\.?\s*(\S+)', p_clean, re.IGNORECASE)
-        if corp_match:
-            result['building'] = corp_match.group(1).rstrip(',')
-            p_clean = re.sub(r'корп\.?\s*\S+', '', p_clean, flags=re.IGNORECASE).strip()
-
-        # Дом: "д. 5", "д..5", "дом 5", просто "5" в начале
-        house_match = re.search(r'д\.?\.?\s*(\d+[а-яА-Яa-zA-Z]*)', p_clean, re.IGNORECASE)
-        if house_match and not result['house']:
-            result['house'] = house_match.group(1)
-            p_clean = re.sub(r'д\.?\.?\s*\d+[а-яА-Яa-zA-Z]*', '', p_clean, flags=re.IGNORECASE).strip()
-
-        # Квартира: просто число в конце
-        apt_match = re.search(r'(?:кв\.?|квартира)?\s*(\d+)$', p_clean, re.IGNORECASE)
-        if apt_match and not result['apartment']:
-            apt_num = apt_match.group(1)
-            # Не путаем с домом: если число маленькое и дом уже есть — это квартира
-            if result['house'] or int(apt_num) >= 10:
-                result['apartment'] = apt_num
-
-        # Если дом ещё не нашли — возможно это просто число
-        if not result['house']:
-            num_match = re.search(r'^(\d+[а-яА-Яa-zA-Z]*)$', p_clean.strip())
-            if num_match:
-                result['house'] = num_match.group(1)
 
     return result
 
@@ -159,38 +211,36 @@ def import_clients_from_excel(file_bytes, user):
             if not full_name and not raw_address and not management_company:
                 continue
 
-            # Парсим адрес
+            # Парсим и нормализуем адрес через DaData
             parsed = parse_address(raw_address)
 
-            # Собираем полный адрес: город, улица, дом, ...
-            address_parts = []
-            if parsed['city']:
-                address_parts.append(parsed['city'])
-            if parsed['street']:
-                address_parts.append(parsed['street'])
-            if parsed['house']:
-                house_str = f'д. {parsed["house"]}'
-                if parsed['building']:
-                    house_str += f' корп. {parsed["building"]}'
-                address_parts.append(house_str)
-            if parsed['apartment']:
-                address_parts.append(f'кв. {parsed["apartment"]}')
-            if entrance:
-                address_parts.append(f'под. {entrance}')
+            # Используем нормализованный полный адрес от DaData
+            address = parsed['full'] if parsed['full'] else raw_address
 
-            address = ', '.join(address_parts) if address_parts else raw_address
+            # Пытаемся найти существующего клиента по адресу
+            existing = Client.objects.filter(
+                address=address, name=full_name
+            ).first() if address else None
 
-            # Всегда создаём новую запись (без попытки найти дубликат)
-            Client.objects.create(
-                name=full_name if full_name else 'Не определено',
-                address=address,
-                phone='',
-                entrance_number=entrance,
-                management_company=management_company,
-                district=parsed['district'],
-                source='excel_import',
-            )
-            created += 1
+            if existing:
+                # Обновляем существующего
+                existing.entrance_number = entrance or existing.entrance_number
+                existing.management_company = management_company or existing.management_company
+                existing.district = parsed['district'] or existing.district
+                existing.source = 'excel_import'
+                existing.save()
+                updated += 1
+            else:
+                Client.objects.create(
+                    name=full_name if full_name else 'Не определено',
+                    address=address,
+                    phone='',
+                    entrance_number=entrance,
+                    management_company=management_company,
+                    district=parsed['district'],
+                    source='excel_import',
+                )
+                created += 1
 
         except Exception as e:
             errors.append(f'Строка {total}: {str(e)}')
