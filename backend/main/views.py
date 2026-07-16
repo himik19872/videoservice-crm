@@ -343,6 +343,49 @@ class ClientViewSet(viewsets.ModelViewSet):
         return Response(ErcBillingRecordSerializer(records, many=True).data)
 
 
+    @action(detail=False, methods=['get'])
+    def address_suggest(self, request):
+        """Адресные подсказки через DaData. Параметр: ?q=улица Ленина"""
+        import requests
+        q = request.query_params.get('q', '').strip()
+        if len(q) < 3:
+            return Response([])
+
+        settings = SystemSettings.objects.first()
+        token = settings.dadata_token if settings else ''
+        if not token:
+            return Response([])
+
+        try:
+            resp = requests.post(
+                'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address',
+                json={'query': q, 'count': 7},
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Authorization': f'Token {token}'
+                },
+                timeout=5
+            )
+            data = resp.json()
+            suggestions = []
+            for s in data.get('suggestions', []):
+                suggestions.append({
+                    'value': s.get('value', ''),
+                    'unrestricted_value': s.get('unrestricted_value', ''),
+                    'data': {
+                        'city': s.get('data', {}).get('city', ''),
+                        'street': s.get('data', {}).get('street', ''),
+                        'house': s.get('data', {}).get('house', ''),
+                        'flat': s.get('data', {}).get('flat', ''),
+                    }
+                })
+            return Response(suggestions)
+        except Exception:
+            return Response([])
+
+
+
 class EquipmentViewSet(viewsets.ModelViewSet):
     queryset = Equipment.objects.all()
     serializer_class = EquipmentSerializer

@@ -57,7 +57,7 @@ const OrdersCreatePage: React.FC = () => {
     } catch (error) {}
   };
 
-  // Поиск клиентов через autocomplete API — быстро, ищет по адресу/ИНН/названию/ФИО
+  // Поиск клиентов через autocomplete + DaData адресные подсказки
   const handleClientSearch = async (value: string) => {
     if (!value || value.length < 2) {
       if (!preselectedClientId) setClientOptions([]);
@@ -65,21 +65,68 @@ const OrdersCreatePage: React.FC = () => {
     }
     setClientSearching(true);
     try {
-      const res = await api.get('/clients/autocomplete/', { params: { q: value } });
-      const results = res.data || [];
-      setClientOptions(results.map((c: any) => ({
-        value: c.id,
-        label: c.is_legal
-          ? `${c.name} — ИНН ${c.inn || '—'} — ${c.address}`
-          : `${c.name} — ${c.address} (${c.phone || 'нет тел.'})`,
-        client: c,
-      })));
-    } catch (e) { setClientOptions([]); }
+      // Параллельно: клиенты CRM + адреса DaData
+      const [crmRes, dadataRes] = await Promise.all([
+        api.get('/clients/autocomplete/', { params: { q: value } }).then(r => r.data || []),
+        api.get('/clients/address_suggest/', { params: { q: value } }).then(r => r.data || []).catch(() => []),
+      ]);
+
+      const options: any[] = [];
+
+      // Клиенты из CRM
+      crmRes.forEach((c: any) => {
+        options.push({
+          value: c.id,
+          label: c.is_legal
+            ? `👤 ${c.name} — ИНН ${c.inn || '—'} — ${c.address}`
+            : `👤 ${c.name} — ${c.address}`,
+          client: c,
+          type: 'client',
+        });
+      });
+
+      // Адресные подсказки DaData
+      if (dadataRes.length > 0) {
+        // Разделитель
+        if (options.length > 0) {
+          options.push({ value: -1, label: '── 📍 Адресные подсказки ──', disabled: true, client: null, type: 'divider' });
+        }
+        dadataRes.forEach((d: any) => {
+          options.push({
+            value: `dadata_${d.value}`,
+            label: `📍 ${d.unrestricted_value || d.value}`,
+            client: null,
+            type: 'dadata',
+            dadata: d,
+          });
+        });
+      }
+
+      setClientOptions(options);
+    } catch { setClientOptions([]); }
     finally { setClientSearching(false); }
   };
 
-  const handleClientSelect = (clientId: number) => {
-    const found = clientOptions.find(c => c.value === clientId);
+  const handleClientSelect = (val: any) => {
+    // Если выбрали адрес из DaData — переключаемся на создание нового клиента
+    if (typeof val === 'string' && val.startsWith('dadata_')) {
+      const found = clientOptions.find(o => o.value === val);
+      if (found?.dadata) {
+        const d = found.dadata;
+        form.setFieldsValue({ client_id: undefined });
+        setClientMode('new');
+        setTimeout(() => {
+          form.setFieldsValue({
+            new_client_address: d.unrestricted_value || d.value,
+          });
+        }, 100);
+        message.info('Заполните ФИО и телефон для нового клиента');
+        return;
+      }
+    }
+
+    // Стандартный выбор клиента из CRM
+    const found = clientOptions.find(c => c.value === val);
     if (found?.client) {
       const c = found.client;
       form.setFieldsValue({
