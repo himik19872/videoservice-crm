@@ -281,6 +281,52 @@ class ClientViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    @action(detail=False, methods=['get'])
+    def autocomplete(self, request):
+        """
+        Быстрый поиск клиентов для автокомплита.
+        Ищет по: адресу, названию юрлица, ИНН, ФИО, телефону.
+        Параметр: ?q=поисковый_запрос (минимум 2 символа)
+        Возвращает до 15 результатов.
+        """
+        q = request.query_params.get('q', '').strip()
+        if len(q) < 2:
+            return Response([])
+
+        from django.db.models import Q
+
+        clients = Client.objects.filter(
+            Q(name__icontains=q) |
+            Q(phone__icontains=q) |
+            Q(address__icontains=q) |
+            Q(inn__icontains=q) |
+            Q(legal_address__icontains=q)
+        ).order_by('name')[:15]
+
+        # Возвращаем только нужные поля для автокомплита
+        data = []
+        for c in clients:
+            label = c.name
+            sub = c.address or c.phone or ''
+            if c.is_legal:
+                label = f'{c.name} (ИНН {c.inn})' if c.inn else c.name
+                sub = c.legal_address or c.address or ''
+
+            data.append({
+                'id': c.id,
+                'label': label,
+                'sub': sub,
+                'name': c.name,
+                'phone': c.phone,
+                'address': c.address,
+                'inn': c.inn,
+                'is_legal': c.is_legal,
+                'personal_account_number': c.personal_account_number,
+            })
+
+        return Response(data)
+
+
     @action(detail=True, methods=['get'])
     def erc_payments(self, request, pk=None):
         """Возвращает историю платежей ЕРЦ для клиента (по personal_account_number)."""

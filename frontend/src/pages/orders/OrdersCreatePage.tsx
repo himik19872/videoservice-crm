@@ -57,7 +57,7 @@ const OrdersCreatePage: React.FC = () => {
     } catch (error) {}
   };
 
-  // Поиск клиентов через API (серверный)
+  // Поиск клиентов через autocomplete API — быстро, ищет по адресу/ИНН/названию/ФИО
   const handleClientSearch = async (value: string) => {
     if (!value || value.length < 2) {
       if (!preselectedClientId) setClientOptions([]);
@@ -65,13 +65,13 @@ const OrdersCreatePage: React.FC = () => {
     }
     setClientSearching(true);
     try {
-      const res = await api.get('/clients/', { params: { search: value, page_size: 50 } });
-      const results = (res.data.results || []);
+      const res = await api.get('/clients/autocomplete/', { params: { q: value } });
+      const results = res.data || [];
       setClientOptions(results.map((c: any) => ({
         value: c.id,
         label: c.is_legal
-          ? `${c.full_name} (ИНН: ${c.inn || '—'}) — ${c.address}`
-          : `${c.full_name} — ${c.address} (${c.phone || 'нет тел.'})`,
+          ? `${c.name} — ИНН ${c.inn || '—'} — ${c.address}`
+          : `${c.name} — ${c.address} (${c.phone || 'нет тел.'})`,
         client: c,
       })));
     } catch (e) { setClientOptions([]); }
