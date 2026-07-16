@@ -456,7 +456,7 @@ def import_erc_from_excel(file_bytes, user, period_date=None):
                 paid = float(row[mapping['paid']]) if len(row) > mapping['paid'] and row[mapping['paid']] else 0
                 ErcBillingRecord.objects.update_or_create(
                     account=account, period=period_date or datetime.now().date().replace(day=1),
-                    defaults={'accrued': accrued, 'paid': paid}
+                    defaults={'charged': accrued, 'paid': paid}
                 )
             created += 1
         except Exception as e:

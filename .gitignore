@@ -77,6 +77,7 @@ Thumbs.db
 data/
 exports/
 backups/
+тест-ипорт/
 *.sql
 *.dump
 
