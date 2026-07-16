@@ -2887,7 +2887,22 @@ def import_clients_excel_view(request):
             return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
 
         from .import_service import import_clients_from_excel
-        result = import_clients_from_excel(uploaded.read(), request.user)
+        # Принимаем опциональный column_map для гибкого маппинга колонок
+        column_map = None
+        if 'column_map' in request.data:
+            try:
+                import json
+                raw_map = request.data['column_map']
+                if isinstance(raw_map, str):
+                    column_map = json.loads(raw_map)
+                else:
+                    column_map = dict(raw_map)
+                # Конвертируем ключи в int
+                column_map = {k: int(v) for k, v in column_map.items() if v}
+            except (ValueError, TypeError):
+                column_map = None
+
+        result = import_clients_from_excel(uploaded.read(), request.user, column_map)
         return Response(result)
     except Exception as e:
         return Response({

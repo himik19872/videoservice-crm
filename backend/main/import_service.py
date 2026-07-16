@@ -1,89 +1,83 @@
 """
 Сервис импорта данных из Excel-файлов.
 
-Поддерживает два формата:
-1. База клиентов (ТСЖ/УК): № п/п, № лицевого счета, ФИО, Адрес, № парадной, ТСЖ
-   Адрес нормализуется через DaData API.
+Поддерживает:
+1. База клиентов (ТСЖ/УК): с гибким маппингом колонок
 2. Оборотная ведомость ЕРЦ (форма № 30.01.01): автоопределение колонок по заголовкам.
+
+Адрес парсится локально (без внешних API) с поддержкой пригородов СПб.
 """
 
 import io
 import re
-import requests
 from datetime import datetime
 from collections import defaultdict
 import openpyxl
 
 
 # ══════════════════════════════════════════════════════════════════
-# Нормализация адреса через DaData
+# Словарь пригородов Санкт-Петербурга (город в городе)
 # ══════════════════════════════════════════════════════════════════
 
-def get_dadata_token():
-    """Получить DaData API токен из настроек."""
-    try:
-        from main.models import SystemSettings
-        s = SystemSettings.objects.first()
-        return s.dadata_token if s else ''
-    except Exception:
-        return ''
+SPB_SUBURBS = {
+    'петергоф': 'Петергоф',
+    'петродворец': 'Петергоф',
+    'ломоносов': 'Ломоносов',
+    'колпино': 'Колпино',
+    'пушкин': 'Пушкин',
+    'царское село': 'Пушкин',
+    'павловск': 'Павловск',
+    'кронштадт': 'Кронштадт',
+    'сестрорецк': 'Сестрорецк',
+    'зеленогорск': 'Зеленогорск',
+    'красное село': 'Красное Село',
+    'гатчина': 'Гатчина',
+    'стрельна': 'Стрельна',
+    'шушары': 'Шушары',
+    'парголово': 'Парголово',
+    'левашово': 'Левашово',
+    'репино': 'Репино',
+    'комарово': 'Комарово',
+    'солнечное': 'Солнечное',
+    'белоостров': 'Белоостров',
+    'серово': 'Серово',
+    'усть-ижора': 'Усть-Ижора',
+    'понтонный': 'Понтонный',
+    'металлострой': 'Металлострой',
+    'сапёрный': 'Сапёрный',
+    'петро-славянка': 'Петро-Славянка',
+    'динамо': 'Динамо',
+    'рощино': 'Рощино',
+    'молодёжное': 'Молодёжное',
+    'сосново': 'Сосново',
+    'всеволожск': 'Всеволожск',
+    'тосненский': 'Тосно',
+}
 
-
-def normalize_address_dadata(raw_address):
-    """
-    Нормализует адрес через DaData API.
-    Возвращает dict с полями из ответа DaData или None при ошибке.
-    """
-    token = get_dadata_token()
-    if not token:
-        return None
-
-    try:
-        resp = requests.post(
-            'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address',
-            json={'query': raw_address, 'count': 1},
-            headers={
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': f'Token {token}'
-            },
-            timeout=5
-        )
-        data = resp.json()
-        suggestions = data.get('suggestions', [])
-        if not suggestions:
-            return None
-
-        s = suggestions[0]
-        d = s.get('data', {})
-
-        return {
-            'unrestricted': s.get('unrestricted_value', ''),
-            'value': s.get('value', ''),
-            'city': d.get('city', '') or d.get('settlement', ''),
-            'city_district': d.get('city_district', ''),
-            'street': d.get('street', ''),
-            'house': d.get('house', ''),
-            'block': d.get('block', ''),
-            'flat': d.get('flat', ''),
-            'postal_code': d.get('postal_code', ''),
-            'region': d.get('region', ''),
-            'area': d.get('area', ''),
-            'settlement': d.get('settlement', ''),
-        }
-    except Exception:
-        return None
+# Типы улиц (ключевые слова для поиска)
+STREET_TYPES = [
+    'ул.', ' ул', 'улица',
+    'пр-кт', 'пр.', 'пр ', 'проспект',
+    'пер.', 'пер ', 'переулок',
+    'наб.', 'наб ', 'набережная',
+    'шоссе', 'ш.', 'ш ',
+    'бульвар', 'б-р', 'бул.',
+    'аллея', 'проезд', 'пл.', 'площадь',
+    'линия', 'дорога', 'дор.', 'тупик',
+    'канал', 'кан.', 'мост', 'м.',
+    'тракт', 'промузел',
+]
 
 
 def parse_address(raw_address):
     """
-    Разбирает адрес на составные части с использованием DaData для нормализации.
-    Если DaData недоступен — использует упрощённый регекс-парсер как fallback.
+    Локальный парсер адресов (без внешних API).
+    Поддерживает пригороды СПб (в скобках и вне скобок).
     
     Возвращает dict: city, street, district, house, building, apartment, full.
     """
     result = {
-        'city': '',
+        'city': 'Санкт-Петербург',
         'street': '',
         'district': '',
         'house': '',
@@ -96,137 +90,232 @@ def parse_address(raw_address):
         return result
 
     raw = raw_address.strip()
-    result['full'] = raw
-
-    # Пробуем нормализовать через DaData
-    dd = normalize_address_dadata(raw)
-    if dd:
-        # Город: приоритет city > settlement
-        result['city'] = dd['city'] or ''
-        # Если есть city_district (район города, напр. Петергоф, Ломоносов) — добавляем
-        if dd['city_district']:
-            if result['city']:
-                result['district'] = dd['city_district']
-            else:
-                result['city'] = dd['city_district']
-
-        result['street'] = dd['street'] or ''
-        result['house'] = dd['house'] or ''
-        result['building'] = dd['block'] or ''
-        result['apartment'] = dd['flat'] or ''
-
-        # Формируем полный адрес
-        address_parts = []
-        if result['city']:
-            prefix = 'г. ' if not result['city'].startswith(('г.', 'г ', 'пос.', 'д.')) else ''
-            address_parts.append(f'{prefix}{result["city"]}')
-        if result['district'] and result['district'] != result['city']:
-            address_parts[-1] = f'{address_parts[-1]}, {result["district"]}' if address_parts else result['district']
-        if result['street']:
-            address_parts.append(result['street'])
-        if result['house']:
-            house_str = f'д. {result["house"]}'
-            if result['building']:
-                house_str += f' корп. {result["building"]}'
-            address_parts.append(house_str)
-        if result['apartment']:
-            address_parts.append(f'кв. {result["apartment"]}')
-        
-        result['full'] = ', '.join(address_parts) if address_parts else raw
-        return result
-
-    # ── Fallback: упрощённый парсер (если DaData недоступен) ──
     text = raw
-    district_match = re.search(r'\(([^)]+)\)', text)
-    if district_match:
-        result['district'] = district_match.group(1).strip()
-        text = text.replace(district_match.group(0), '').strip()
-        text = re.sub(r',\s*,', ',', text)
 
+    # ── 1. Выделяем содержимое скобок — пригород/район ──
+    bracket_match = re.search(r'\(([^)]+)\)', text)
+    bracket_text = ''
+    if bracket_match:
+        bracket_text = bracket_match.group(1).strip().lower()
+        text = text.replace(bracket_match.group(0), '').strip()
+        text = re.sub(r',\s*,', ',', text)
+        text = re.sub(r'\s{2,}', ' ', text)
+
+    # ── 2. Разбиваем по запятым ──
     parts = [p.strip() for p in text.split(',') if p.strip()]
 
+    # ── 3. Определяем город ──
+    city_found = None
     if parts:
-        first = parts[0]
-        if any(c in first for c in ['Санкт-Петербург', 'Москва', 'СПб', 'Спб']):
-            result['city'] = first.replace('СПб', 'Санкт-Петербург').replace('Спб', 'Санкт-Петербург')
+        first = parts[0].lower()
+        if any(c in first for c in ['санкт-петербург', 'спб', 'москва']):
+            city_found = 'Санкт-Петербург' if 'москва' not in first else 'Москва'
             parts = parts[1:]
 
+    # Проверяем скобки на пригород
+    if bracket_text:
+        for key, val in SPB_SUBURBS.items():
+            if key in bracket_text:
+                city_found = val
+                result['district'] = val  # пригород = и город, и район
+                break
+        if not city_found:
+            # Не пригород — значит район (Петродворцовый, Приморский...)
+            result['district'] = bracket_text.title()
+            if not city_found:
+                city_found = 'Санкт-Петербург'
+
+    # Проверяем сами части на пригород
+    if not city_found or city_found == 'Санкт-Петербург':
+        for i, p in enumerate(parts):
+            for key, val in SPB_SUBURBS.items():
+                if key in p.lower() and key not in (result.get('street') or '').lower():
+                    city_found = val
+                    if not result['district']:
+                        result['district'] = val
+                    # Убираем название города из части (оставляем остальное как улицу)
+                    parts[i] = re.sub(r'(?i)\b' + re.escape(key) + r'\b\s*', '', p).strip()
+                    if not parts[i]:
+                        parts.pop(i)
+                    break
+            if city_found and city_found != 'Санкт-Петербург':
+                break
+
+    result['city'] = city_found or 'Санкт-Петербург'
+
+    # ── 4. Ищем улицу ──
+    street_idx = -1
     for i, p in enumerate(parts):
-        if any(kw in p.lower() for kw in [' ул', 'ул.', ' ул.', 'пр-кт', 'пр.', 'пер.', 'наб.', 'шоссе', 'проезд', 'аллея', 'бульвар']):
-            result['street'] = p
-            remaining = parts[i+1:]
-            for rp in remaining:
-                rp = rp.strip()
-                hm = re.search(r'д\.?\.?\s*(\d+[а-яА-Яa-zA-Z]*)', rp, re.IGNORECASE)
-                if hm and not result['house']:
-                    result['house'] = hm.group(1)
-                cm = re.search(r'корп\.?\s*(\S+)', rp, re.IGNORECASE)
-                if cm:
-                    result['building'] = cm.group(1).rstrip(',')
-                am = re.search(r'(\d+)$', rp.strip())
-                if am and result['house'] and not result['apartment']:
-                    result['apartment'] = am.group(1)
+        p_lower = p.lower()
+        for st in STREET_TYPES:
+            if st in p_lower or p_lower.startswith(st.replace('.', '')):
+                street_idx = i
+                break
+        if street_idx >= 0:
             break
 
+    if street_idx >= 0:
+        result['street'] = parts[street_idx]
+    elif parts:
+        # Нет типа улицы — берём первую непохожую на дом/квартиру часть
+        for i, p in enumerate(parts):
+            if not re.search(r'д\.\s*\d|дом\s*\d|корп|кв\.?\s*\d|^\d+$', p.lower()):
+                result['street'] = p
+                street_idx = i
+                break
+
+    # ── 5. Дом, корпус, квартира ──
+    remaining = parts[max(street_idx + 1, 0):]
+
+    for p in remaining:
+        p_clean = p.strip()
+
+        # Литера: "лит. А", "литера А", "лит А"
+        lit_match = re.search(r'лит\.?\s*([а-яА-Яa-zA-Z])', p_clean, re.IGNORECASE)
+        if lit_match:
+            if result['building']:
+                result['building'] += f' литера {lit_match.group(1).upper()}'
+            else:
+                result['building'] = f'литера {lit_match.group(1).upper()}'
+            p_clean = re.sub(r'лит\.?\s*[а-яА-Яa-zA-Z]', '', p_clean, flags=re.IGNORECASE).strip()
+
+        # Корпус/строение: "корп. 3", "корп 3", "к.3", "стр. 2"
+        corp_match = re.search(r'(?:корп|к|стр)\.?\s*(\d+[а-яА-Яa-zA-Z]?)', p_clean, re.IGNORECASE)
+        if corp_match:
+            corp_val = corp_match.group(1)
+            if result['building']:
+                result['building'] += f' корп. {corp_val}'
+            else:
+                result['building'] = corp_val
+            p_clean = re.sub(r'(?:корп|к|стр)\.?\s*\d+[а-яА-Яa-zA-Z]?', '', p_clean, flags=re.IGNORECASE).strip()
+
+        # Дом: "д. 37", "д..37", "д 37А", "дом 37"
+        house_match = re.search(r'д\.?\.?\s*(\d+[а-яА-Яa-zA-Z]*)', p_clean, re.IGNORECASE)
+        if house_match and not result['house']:
+            result['house'] = house_match.group(1)
+            p_clean = re.sub(r'д\.?\.?\s*\d+[а-яА-Яa-zA-Z]*', '', p_clean, flags=re.IGNORECASE).strip()
+
+        # Квартира: число в конце (после всего)
+        apt_match = re.search(r'(?:\d+)\s*$', p_clean.strip().rstrip(','))
+        if apt_match and result['house'] and not result['apartment']:
+            result['apartment'] = apt_match.group(0).strip()
+
+        # Дом без префикса: просто число
+        if not result['house']:
+            num_match = re.search(r'^(\d+[а-яА-Яa-zA-Z]?)$', p_clean.strip().rstrip(','))
+            if num_match:
+                result['house'] = num_match.group(1)
+
+    # ── 6. Собираем полный адрес ──
+    address_parts = []
+    city_name = result['city']
+    if city_name != 'Санкт-Петербург':
+        address_parts.append(f'г. {city_name}')
+    else:
+        address_parts.append('Санкт-Петербург')
+
+    if result['district'] and result['district'] != city_name and result['district'] not in address_parts[-1]:
+        address_parts.append(result['district'])
+    if result['street']:
+        address_parts.append(result['street'])
+    if result['house']:
+        house_str = f'д. {result["house"]}'
+        if result['building']:
+            # Если building содержит "корп." — не дублируем
+            if 'корп.' in result['building'] or 'литера' in result['building']:
+                house_str += f', {result["building"]}'
+            else:
+                house_str += f' корп. {result["building"]}'
+        address_parts.append(house_str)
+    if result['apartment']:
+        address_parts.append(f'кв. {result["apartment"]}')
+
+    result['full'] = ', '.join(address_parts)
     return result
 
 
 # ══════════════════════════════════════════════════════════════════
-# Импорт базы клиентов (ТСЖ)
+# Импорт базы клиентов (ТСЖ) — с гибким маппингом колонок
 # ══════════════════════════════════════════════════════════════════
 
-def import_clients_from_excel(file_bytes, user):
+DEFAULT_COLUMN_MAP = {
+    'name': 2,           # ФИО (индекс 2 = колонка C)
+    'address': 3,        # Адрес (индекс 3 = колонка D)
+    'entrance': 4,       # № парадной (индекс 4 = колонка E)
+    'management_company': 5,  # ТСЖ/УК (индекс 5 = колонка F)
+    'personal_account': 1,    # № лицевого счёта (индекс 1 = колонка B)
+}
+
+
+def import_clients_from_excel(file_bytes, user, column_map=None):
     """
     Импорт клиентов из Excel-файла (ТСЖ/УК).
-    Формат: № п/п, № лицевого счета (игнорируется), ФИО, Адрес, № парадной, ТСЖ
-
-    Адрес парсится на: город, улица, район, дом, корпус, квартира.
-    Возвращает: dict с результатами
+    
+    Args:
+        file_bytes: содержимое .xlsx файла
+        user: пользователь Django (для логов)
+        column_map: dict с маппингом колонок (0-based индексы):
+            {'name': 2, 'address': 3, 'entrance': 4, 'management_company': 5, 'personal_account': 1}
+            Если None — используется DEFAULT_COLUMN_MAP.
+    
+    Возвращает: dict { success, total, created, updated, errors }
     """
     from .models import Client
+
+    cm = column_map or DEFAULT_COLUMN_MAP
 
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
 
-    rows = list(ws.iter_rows(min_row=2, values_only=True))  # пропускаем заголовок
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
     total = 0
     created = 0
     updated = 0
     errors = []
 
     for row in rows:
-        # Нет адреса и нет ФИО — пропускаем
         if not row:
             continue
 
         total += 1
         try:
-            # Колонки: 0=№п/п, 1=№лицевого (игнорируем), 2=ФИО, 3=Адрес, 4=№парадной, 5=ТСЖ
-            full_name = str(row[2]).strip() if len(row) > 2 and row[2] is not None else 'Не определено'
-            raw_address = str(row[3]).strip() if len(row) > 3 and row[3] else ''
-            entrance = str(row[4]).strip() if len(row) > 4 and row[4] else ''
-            management_company = str(row[5]).strip() if len(row) > 5 and row[5] else ''
+            # Извлекаем значения по индексам из column_map
+            def get_col(key, default=''):
+                idx = cm.get(key, -1)
+                if 0 <= idx < len(row) and row[idx] is not None:
+                    return str(row[idx]).strip()
+                return default
 
-            # Пропускаем только полностью пустые строки (нет ни адреса, ни ФИО, ни УК)
+            full_name = get_col('name', 'Не определено')
+            raw_address = get_col('address', '')
+            entrance = get_col('entrance', '')
+            management_company = get_col('management_company', '')
+            personal_account = get_col('personal_account', '')
+
             if not full_name and not raw_address and not management_company:
                 continue
 
-            # Парсим и нормализуем адрес через DaData
+            # Парсим адрес
             parsed = parse_address(raw_address)
-
-            # Используем нормализованный полный адрес от DaData
             address = parsed['full'] if parsed['full'] else raw_address
 
-            # Пытаемся найти существующего клиента по адресу
-            existing = Client.objects.filter(
-                address=address, name=full_name
-            ).first() if address else None
+            # Ищем существующего
+            existing = None
+            if personal_account:
+                existing = Client.objects.filter(
+                    personal_account_number=personal_account
+                ).first()
+            if not existing and address:
+                existing = Client.objects.filter(
+                    address=address, name=full_name
+                ).first()
 
             if existing:
-                # Обновляем существующего
+                existing.address = address or existing.address
                 existing.entrance_number = entrance or existing.entrance_number
                 existing.management_company = management_company or existing.management_company
                 existing.district = parsed['district'] or existing.district
+                existing.personal_account_number = personal_account or existing.personal_account_number
                 existing.source = 'excel_import'
                 existing.save()
                 updated += 1
@@ -238,6 +327,7 @@ def import_clients_from_excel(file_bytes, user):
                     entrance_number=entrance,
                     management_company=management_company,
                     district=parsed['district'],
+                    personal_account_number=personal_account,
                     source='excel_import',
                 )
                 created += 1
@@ -259,10 +349,7 @@ def import_clients_from_excel(file_bytes, user):
 # ══════════════════════════════════════════════════════════════════
 
 def _find_column_indices(header_rows, ws_max_column):
-    """
-    Ищет индексы колонок по заголовкам. Поддерживает 4 формата ЕРЦ.
-    Возвращает dict с детектированным форматом и маппингом колонок.
-    """
+    """Ищет индексы колонок по заголовкам. 4 формата ЕРЦ."""
     max_cols = max(len(row) for row in header_rows if row)
     combined = [''] * max_cols
     
@@ -279,245 +366,106 @@ def _find_column_indices(header_rows, ws_max_column):
         return any(w in combined[idx] for w in words)
 
     mapping = {}
-    fmt = 'standard'  # standard | lo | agalatovo
+    fmt = 'standard'
 
-    # 1. Лицевой счёт — вторая колонка
     mapping['account_number'] = 1
-    
-    # 2. ФИО — третья колонка
     mapping['full_name'] = 2
 
-    # Определяем формат
-    has_city_col = any('населенный пункт' in combined[i] for i in range(len(combined)))
-    has_credit_col = any('кредит' in combined[i] and i > 5 for i in range(len(combined)))
-    has_paid_pct = any('% оплаты' in combined[i] for i in range(len(combined)))
-
-    if has_city_col:
-        # Формат Агалатово: адрес разбит по колонкам
-        fmt = 'agalatovo'
-        mapping['address_city'] = 5      # Населенный пункт
-        mapping['address_street'] = 6     # Улица
-        mapping['address_house'] = 7      # Дом
-        mapping['address_apt'] = 8        # Кв.
-        mapping['balance_start'] = 9      # Сальдо на 01.05 (колонка 10 Excel)
-        mapping['charged'] = 11           # Начислено (колонка 12 Excel)
-        mapping['paid'] = 13              # Оплачено (колонка 14 Excel)
-        mapping['paid_percent'] = None
-        mapping['balance_end'] = None
-    elif has_credit_col and not has_paid_pct:
-        # Формат ЛО: дебет/кредит, но без % оплаты
+    if has(3, 'дебет') and has(4, 'кредит'):
         fmt = 'lo'
-        mapping['format'] = 'lo'
-        mapping['address'] = 5
-        mapping['balance_start'] = 6      # дебет
-        mapping['balance_start_credit'] = 7  # кредит
-        mapping['charged'] = 8            # Начислено
-        mapping['charged_total'] = 11     # Всего начислено
-        mapping['paid'] = 12              # Оплата
-        mapping['balance_end'] = 14       # дебет
-        mapping['balance_end_credit'] = 15  # кредит
-        mapping['paid_percent'] = None
-        mapping['residents'] = None
-    else:
-        # Стандартный формат (СПб, Коммунар)
+        mapping['period'] = 0
+        mapping['debet'] = 3
+        mapping['credit'] = 4
+    elif has(0, '№п/п') and has(3, 'начисл'):
         fmt = 'standard'
-        mapping['format'] = 'standard'
-        mapping['address'] = 5
-        # Ищем колонки по заголовкам
-        for i in range(6, max_cols):
-            if 'жильцов' in combined[i]:
-                mapping['residents'] = i
-            elif 'сальдо' in combined[i] and any(d in combined[i] for d in ['01.', 'начало']):
-                mapping['balance_start'] = i
-            elif 'без льгот' in combined[i]:
-                mapping['charged_no_benefits'] = i
-            elif 'фактически' in combined[i]:
-                mapping['charged'] = i
-            elif 'начислено' in combined[i] and 'льгот' not in combined[i] and 'charged' not in mapping:
-                mapping['charged'] = i
-            elif 'оплачено' in combined[i] and '%' not in combined[i]:
-                mapping['paid'] = i
-            elif '% оплаты' in combined[i]:
-                mapping['paid_percent'] = i
-            elif 'сальдо' in combined[i] and any(d in combined[i] for d in ['конец', '31.', 'конечн']):
-                mapping['balance_end'] = i
-            elif 'кредит' in combined[i]:
-                mapping['credit'] = i
-        
-        # Defaults для стандартного формата
-        mapping.setdefault('balance_start', 8)
-        mapping.setdefault('charged', 10)
-        mapping.setdefault('paid', 11)
-        mapping.setdefault('paid_percent', 12)
-        mapping.setdefault('balance_end', 13)
-        mapping.setdefault('credit', 14)
-        mapping.setdefault('residents', 7)
-        mapping.setdefault('charged_no_benefits', 9)
+        mapping['accrued'] = 3
+        mapping['paid'] = 4
+        mapping['debt_start'] = 5
+        mapping['debt_end'] = 6
+    else:
+        fmt = 'agalatovo'
+        mapping['accrued'] = 3
+        mapping['paid'] = 4
+        mapping['debt_end'] = 6
 
     return mapping, fmt
 
 
 def import_erc_from_excel(file_bytes, user, period_date=None):
-    """Универсальный импорт ЕРЦ. Автоопределение формата."""
-    from .models import ErcAccount, ErcBillingRecord, Client
-    from django.utils import timezone
+    """Импорт данных ЕРЦ из Excel."""
+    from .models import ErcAccount, ErcBillingRecord
 
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
+    all_rows = list(ws.iter_rows(min_row=1, values_only=True))
 
-    # Ищем строку заголовка с «фамилия» + «лицевого»
-    header_start = None
-    for r in range(1, min(40, ws.max_row + 1)):
-        row_vals = [str(ws.cell(row=r, column=c).value or '').lower() for c in range(1, min(ws.max_column+1, 20))]
-        combined = ' '.join(row_vals)
-        if ('фамилия' in combined or 'фио' in combined) and ('лицевого' in combined or 'счета' in combined or 'адрес' in combined):
-            header_start = r
-            break
+    header_rows = all_rows[:5]
+    mapping, fmt = _find_column_indices(header_rows, ws.max_column)
 
-    if header_start is None:
-        header_start = 6
-
-    # Берём 4 строки заголовка
-    header_rows = []
-    for r in range(header_start, min(header_start + 4, ws.max_row + 1)):
-        header_rows.append(list(ws.iter_rows(min_row=r, max_row=r, values_only=True))[0])
-
-    col, fmt = _find_column_indices(header_rows, ws.max_column)
-
-    # Ищем первую строку данных
-    data_start_row = header_start + 4
-    for r in range(header_start + 3, min(header_start + 15, ws.max_row + 1)):
-        val = ws.cell(row=r, column=2).value  # л/с всегда в колонке 2
-        if val is not None and str(val).strip():
-            data_start_row = r
-            break
-
-    rows = list(ws.iter_rows(min_row=data_start_row, values_only=True))
-
-    # Период
-    if period_date is None:
-        today = timezone.localdate()
-        month = today.month - 1 if today.day <= 10 else today.month
-        year = today.year
-        if month == 0:
-            month = 12; year -= 1
-        period_date = today.replace(year=year, month=month, day=1)
-
-    total = created_accounts = updated_accounts = created_records = updated_records = 0
+    rows = all_rows[5:]
+    total = 0
+    created = 0
     errors = []
 
-    def parse_decimal(val):
-        if val is None or str(val).strip() in ('', '—', '-'):
-            return 0
-        try:
-            return float(str(val).replace(',', '.').replace('\xa0', '').replace(' ', ''))
-        except: return 0
-
-    def get_row(row, idx):
-        if idx is None or idx >= len(row): return ''
-        return row[idx] if row[idx] is not None else ''
-
     for row in rows:
-        if not row: continue
-        account_number = str(get_row(row, 1)).strip()
-        if not account_number: continue
-
+        if not row:
+            continue
         total += 1
         try:
-            full_name = str(get_row(row, 2)).strip()
+            acc_num = str(row[mapping['account_number']]).strip() if len(row) > mapping['account_number'] and row[mapping['account_number']] else ''
+            if not acc_num or acc_num == 'None':
+                continue
 
-            # Собираем адрес в зависимости от формата
-            if fmt == 'agalatovo':
-                city = str(get_row(row, col.get('address_city', 5))).strip()
-                street = str(get_row(row, col.get('address_street', 6))).strip()
-                house = str(get_row(row, col.get('address_house', 7))).strip()
-                apt = str(get_row(row, col.get('address_apt', 8))).strip()
-                parts = []
-                if city and city != '-': parts.append(city)
-                if street and street != '-': parts.append(street)
-                if house and house != '-': parts.append(f'д. {house}')
-                if apt and apt != '-': parts.append(f'кв. {apt}')
-                address = ', '.join(parts) if parts else ''
-                
-                balance_start = parse_decimal(get_row(row, col.get('balance_start', 10)))
-                charged = parse_decimal(get_row(row, col.get('charged', 12)))
-                paid = parse_decimal(get_row(row, col.get('paid', 13)))
-                paid_percent = 0
-                balance_end = 0
-                credit = 0
-            elif fmt == 'lo':
-                address = str(get_row(row, col.get('address', 5))).strip()
-                balance_start = parse_decimal(get_row(row, col.get('balance_start', 6)))
-                charged = parse_decimal(get_row(row, col.get('charged_total', 11)) or 
-                                       get_row(row, col.get('charged', 8)))
-                paid = parse_decimal(get_row(row, col.get('paid', 12)))
-                balance_end = parse_decimal(get_row(row, col.get('balance_end', 14)))
-                paid_percent = round(paid / charged * 100, 1) if charged else 0
-                credit = parse_decimal(get_row(row, col.get('balance_end_credit', 15)))
+            name = str(row[mapping['full_name']]).strip() if len(row) > mapping['full_name'] else ''
+
+            account, _ = ErcAccount.objects.get_or_create(
+                account_number=acc_num,
+                defaults={'full_name': name, 'address': ''}
+            )
+
+            if fmt == 'lo':
+                debet = float(row[mapping['debet']]) if len(row) > mapping['debet'] and row[mapping['debet']] else 0
+                credit = float(row[mapping['credit']]) if len(row) > mapping['credit'] and row[mapping['credit']] else 0
+                ErcBillingRecord.objects.update_or_create(
+                    account=account, period=period_date or datetime.now().date().replace(day=1),
+                    defaults={'debet': debet, 'credit': credit}
+                )
             else:
-                address = str(get_row(row, col.get('address', 5))).strip()
-                residents = parse_decimal(get_row(row, col.get('residents', 7)))
-                balance_start = parse_decimal(get_row(row, col.get('balance_start', 8)))
-                charged_no_benefits = parse_decimal(get_row(row, col.get('charged_no_benefits', 9)))
-                charged = parse_decimal(get_row(row, col.get('charged', 10)))
-                paid = parse_decimal(get_row(row, col.get('paid', 11)))
-                paid_percent = parse_decimal(get_row(row, col.get('paid_percent', 12)))
-                balance_end = parse_decimal(get_row(row, col.get('balance_end', 13)))
-                credit = parse_decimal(get_row(row, col.get('credit', 14)))
-
-            account, is_new = ErcAccount.objects.update_or_create(
-                account_number=account_number,
-                defaults={'full_name': full_name, 'address': address, 'residents_count': 0, 'is_active': True}
-            )
-            if is_new: created_accounts += 1
-            else: updated_accounts += 1
-
-            Client.objects.update_or_create(
-                personal_account_number=account_number,
-                defaults={'name': full_name or 'Не определено', 'address': address, 'phone': '', 'source': 'erc'}
-            )
-
-            ErcBillingRecord.objects.update_or_create(
-                account=account, period=period_date,
-                defaults={
-                    'balance_start': balance_start, 'charged': charged,
-                    'charged_no_benefits': 0, 'paid': paid,
-                    'paid_percent': paid_percent, 'balance_end': balance_end, 'credit': credit,
-                }
-            )
-            created_records += 1
-
+                accrued = float(row[mapping['accrued']]) if len(row) > mapping['accrued'] and row[mapping['accrued']] else 0
+                paid = float(row[mapping['paid']]) if len(row) > mapping['paid'] and row[mapping['paid']] else 0
+                ErcBillingRecord.objects.update_or_create(
+                    account=account, period=period_date or datetime.now().date().replace(day=1),
+                    defaults={'accrued': accrued, 'paid': paid}
+                )
+            created += 1
         except Exception as e:
-            errors.append(f'Строка {total} (счёт {account_number}): {str(e)}')
+            errors.append(f'Строка {total}: {str(e)}')
 
     return {
-        'success': True, 'total': total, 'period': period_date.strftime('%Y-%m-%d'),
-        'column_mapping': col, 'format': fmt,
-        'accounts': {'created': created_accounts, 'updated': updated_accounts},
-        'billing_records': {'created': created_records, 'updated': updated_records},
+        'success': True,
+        'total': total,
+        'created': created,
         'errors': errors,
     }
 
 
 # ══════════════════════════════════════════════════════════════════
-# Preview (предпросмотр первых строк)
+# Предпросмотр Excel
 # ══════════════════════════════════════════════════════════════════
 
-def preview_excel(file_bytes, max_rows=10):
-    """
-    Возвращает первые N строк Excel-файла для предпросмотра.
-    """
+def preview_excel(file_bytes):
+    """Предпросмотр первых 10 строк Excel."""
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
 
-    preview = []
-    for row in ws.iter_rows(min_row=1, max_row=max_rows, values_only=True):
-        preview.append([str(cell) if cell is not None else '' for cell in row])
-
-    total_rows = ws.max_row - 1 if ws.max_row else 0  # минус заголовок
+    rows = list(ws.iter_rows(min_row=1, max_row=11, values_only=True))
+    headers = [str(c) if c else '' for c in rows[0]] if rows else []
+    data = [[str(c) if c is not None else '' for c in row] for row in rows[1:]]
 
     return {
-        'headers': preview[0] if preview else [],
-        'rows': preview[1:] if len(preview) > 1 else [],
-        'total_rows': total_rows,
+        'success': True,
+        'headers': headers,
+        'rows': data,
+        'total_rows': ws.max_row - 1,
+        'total_columns': ws.max_column,
     }
