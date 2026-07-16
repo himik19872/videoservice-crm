@@ -15,7 +15,11 @@ def generate_order_number():
 
 
 class Building(models.Model):
-    """Обслуживаемый адрес (дом)"""
+    """Обслуживаемый адрес (дом) — основа адресной системы.
+    
+    Иерархия: Город → Улица → Дом → Корпус/Литера
+    К дому привязаны клиенты (квартиры), история, оборудование.
+    """
     STREET_TYPES = [
         ('street', _('Улица')),
         ('avenue', _('Проспект')),
@@ -41,14 +45,19 @@ class Building(models.Model):
     ]
 
     region = models.ForeignKey('Region', on_delete=models.SET_NULL, null=True, related_name='buildings', verbose_name=_('Регион'))
-    city = models.CharField(max_length=100, default='Москва', verbose_name=_('Город'))
+    city = models.CharField(max_length=100, default='Санкт-Петербург', verbose_name=_('Город'))
+    district = models.CharField(max_length=200, blank=True, verbose_name=_('Район / пригород'))
     street_type = models.CharField(max_length=20, choices=STREET_TYPES, default='street', verbose_name=_('Тип улицы'))
     street_name = models.CharField(max_length=200, verbose_name=_('Название улицы'))
     house_number = models.CharField(max_length=20, verbose_name=_('Номер дома'))
-    building_number = models.CharField(max_length=20, blank=True, verbose_name=_('Корпус/строение'))
+    building_number = models.CharField(max_length=30, blank=True, verbose_name=_('Корпус/строение'))
+    liter = models.CharField(max_length=10, blank=True, verbose_name=_('Литера'))
     apartments_count = models.PositiveIntegerField(default=0, verbose_name=_('Количество квартир'))
     entrances_count = models.PositiveIntegerField(default=1, verbose_name=_('Количество подъездов'))
+    management_company = models.CharField(max_length=300, blank=True, verbose_name=_('Управляющая компания / ТСЖ'))
     equipment_type = models.CharField(max_length=30, choices=EQUIPMENT_TYPES, blank=True, verbose_name=_('Тип оборудования'))
+    equipment_list = models.TextField(blank=True, verbose_name=_('Список оборудования'))
+    programming_code = models.CharField(max_length=200, blank=True, verbose_name=_('Код программирования'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Дата обновления'))
@@ -57,13 +66,31 @@ class Building(models.Model):
         verbose_name = _('Дом')
         verbose_name_plural = _('Дома')
         ordering = ['city', 'street_name', 'house_number']
+        indexes = [
+            models.Index(fields=['city', 'street_name', 'house_number']),
+        ]
 
     def __str__(self):
-        return f"{self.get_street_type_display()} {self.street_name}, {self.house_number}{' корп.' + self.building_number if self.building_number else ''}"
+        parts = []
+        if self.city and self.city != 'Санкт-Петербург':
+            parts.append(f'г. {self.city}')
+        else:
+            parts.append(self.city)
+        if self.district and self.district != self.city:
+            parts.append(self.district)
+        if self.street_name:
+            parts.append(f'{self.get_street_type_display().lower() if self.street_type != "other" else ""} {self.street_name}'.strip())
+        if self.house_number:
+            house = f'д. {self.house_number}'
+            if self.building_number:
+                house += f' корп. {self.building_number}'
+            if self.liter:
+                house += f' лит. {self.liter}'
+            parts.append(house)
+        return ', '.join(parts)
 
     @property
     def full_address(self):
-        """Полный адрес строкой"""
         return str(self)
 
 
@@ -131,12 +158,18 @@ class Master(models.Model):
 
 
 class Client(models.Model):
-    """Клиент"""
+    """Клиент — житель квартиры в доме или юридическое лицо"""
     name = models.CharField(max_length=150, verbose_name=_('ФИО'))
     phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
     email = models.EmailField(blank=True, verbose_name=_('Email'))
-    address = models.CharField(max_length=255, blank=True, default='', verbose_name=_('Адрес'))
+    address = models.CharField(max_length=500, blank=True, default='', verbose_name=_('Адрес (строка)'))
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, related_name='clients', verbose_name=_('Район'))
+    
+    # Привязка к дому (основная адресная структура)
+    building = models.ForeignKey(Building, on_delete=models.SET_NULL, null=True, blank=True, related_name='residents', verbose_name=_('Дом'))
+    apartment = models.CharField(max_length=20, blank=True, verbose_name=_('Квартира'))
+    entrance = models.CharField(max_length=10, blank=True, verbose_name=_('Подъезд'))
+    
     max_user_id = models.CharField(max_length=100, blank=True, verbose_name=_('Max user ID'))
     max_linked_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Max привязан'))
     # Юридическое лицо клиента (для смет и КП)
@@ -148,7 +181,7 @@ class Client(models.Model):
     director_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО руководителя'))
     # Импорт из Excel — база клиентов
     personal_account_number = models.CharField(max_length=50, blank=True, null=True, db_index=True, verbose_name=_('Номер лицевого счета'))
-    entrance_number = models.CharField(max_length=20, blank=True, verbose_name=_('№ парадной/подъезда'))
+    entrance_number = models.CharField(max_length=20, blank=True, verbose_name=_('№ парадной/подъезда'))  # устаревшее, оставлено для совместимости
     management_company = models.CharField(max_length=300, blank=True, verbose_name=_('Управляющая компания/ТСЖ'))
     # Расширенный разбор адреса при импорте
     district = models.CharField(max_length=200, blank=True, verbose_name=_('Район (муниципальный)'))

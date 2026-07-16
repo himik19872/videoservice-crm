@@ -260,7 +260,7 @@ def import_clients_from_excel(file_bytes, user, column_map=None):
     
     Возвращает: dict { success, total, created, updated, errors }
     """
-    from .models import Client
+    from .models import Client, Building
 
     cm = column_map or DEFAULT_COLUMN_MAP
 
@@ -271,6 +271,7 @@ def import_clients_from_excel(file_bytes, user, column_map=None):
     total = 0
     created = 0
     updated = 0
+    buildings_created = 0
     errors = []
 
     for row in rows:
@@ -279,7 +280,6 @@ def import_clients_from_excel(file_bytes, user, column_map=None):
 
         total += 1
         try:
-            # Извлекаем значения по индексам из column_map
             def get_col(key, default=''):
                 idx = cm.get(key, -1)
                 if 0 <= idx < len(row) and row[idx] is not None:
@@ -288,7 +288,7 @@ def import_clients_from_excel(file_bytes, user, column_map=None):
 
             full_name = get_col('name', 'Не определено')
             raw_address = get_col('address', '')
-            entrance = get_col('entrance', '')
+            entrance_val = get_col('entrance', '')
             management_company = get_col('management_company', '')
             personal_account = get_col('personal_account', '')
 
@@ -299,37 +299,57 @@ def import_clients_from_excel(file_bytes, user, column_map=None):
             parsed = parse_address(raw_address)
             address = parsed['full'] if parsed['full'] else raw_address
 
-            # Ищем существующего
+            # ── Найти или создать Building (дом) ──
+            building = None
+            if parsed['street'] and parsed['house']:
+                # Чистим улицу от типа
+                street_clean = parsed['street']
+                for st in STREET_TYPES:
+                    street_clean = re.sub(r'\b' + re.escape(st) + r'\b\.?', '', street_clean, flags=re.IGNORECASE).strip()
+
+                building, _bcreated = Building.objects.get_or_create(
+                    city=parsed['city'] or 'Санкт-Петербург',
+                    street_name=street_clean or parsed['street'],
+                    house_number=parsed['house'],
+                    building_number=parsed['building'] or '',
+                    defaults={
+                        'district': parsed['district'] or '',
+                        'management_company': management_company,
+                    }
+                )
+                if _bcreated:
+                    buildings_created += 1
+
+            # Ищем существующего клиента
             existing = None
             if personal_account:
-                existing = Client.objects.filter(
-                    personal_account_number=personal_account
-                ).first()
+                existing = Client.objects.filter(personal_account_number=personal_account).first()
+            if not existing and building and parsed['apartment']:
+                existing = Client.objects.filter(building=building, apartment=parsed['apartment']).first()
             if not existing and address:
-                existing = Client.objects.filter(
-                    address=address, name=full_name
-                ).first()
+                existing = Client.objects.filter(address=address, name=full_name).first()
+
+            client_data = {
+                'name': full_name or 'Не определено',
+                'address': address,
+                'phone': '',
+                'building': building,
+                'apartment': parsed['apartment'] or '',
+                'entrance': entrance_val or '',
+                'entrance_number': entrance_val,
+                'management_company': management_company,
+                'district': parsed['district'],
+                'personal_account_number': personal_account,
+                'source': 'excel_import',
+            }
 
             if existing:
-                existing.address = address or existing.address
-                existing.entrance_number = entrance or existing.entrance_number
-                existing.management_company = management_company or existing.management_company
-                existing.district = parsed['district'] or existing.district
-                existing.personal_account_number = personal_account or existing.personal_account_number
-                existing.source = 'excel_import'
+                for k, v in client_data.items():
+                    if v: setattr(existing, k, v)
                 existing.save()
                 updated += 1
             else:
-                Client.objects.create(
-                    name=full_name if full_name else 'Не определено',
-                    address=address,
-                    phone='',
-                    entrance_number=entrance,
-                    management_company=management_company,
-                    district=parsed['district'],
-                    personal_account_number=personal_account,
-                    source='excel_import',
-                )
+                Client.objects.create(**client_data)
                 created += 1
 
         except Exception as e:
@@ -340,6 +360,7 @@ def import_clients_from_excel(file_bytes, user, column_map=None):
         'total': total,
         'created': created,
         'updated': updated,
+        'buildings_created': buildings_created,
         'errors': errors,
     }
 
