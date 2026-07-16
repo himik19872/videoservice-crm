@@ -259,13 +259,15 @@ function Root() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <OfflineProvider>
-        <AuthProvider>
-          <Root />
-        </AuthProvider>
-      </OfflineProvider>
-    </ThemeProvider>
+    <ServerProvider>
+      <ThemeProvider>
+        <OfflineProvider>
+          <AuthProvider>
+            <Root />
+          </AuthProvider>
+        </OfflineProvider>
+      </ThemeProvider>
+    </ServerProvider>
   );
 }
 

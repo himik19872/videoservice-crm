@@ -66,7 +66,7 @@ export const ServerProvider: React.FC<Props> = ({ children }) => {
       serverIp,
       serverPort,
       setServer,
-      isConfigured: !!(serverIp && serverPort),
+      isConfigured: configured,
       loading,
     }}>
       {children}
