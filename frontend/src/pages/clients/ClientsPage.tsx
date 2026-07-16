@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, Typography, Modal, Form, Input, Select, message, Tag } from 'antd';
+import { Table, Button, Space, Typography, Modal, Form, Input, Select, AutoComplete, message, Tag } from 'antd';
 import { PlusOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -25,6 +25,8 @@ const ClientsPage: React.FC = () => {
   const [form] = Form.useForm();
   const [regions, setRegions] = useState<Region[]>([]);
   const [searchText, setSearchText] = useState('');
+  const [searchOptions, setSearchOptions] = useState<{ value: string; label: string; type: string }[]>([]);
+  const [searching, setSearching] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -81,6 +83,27 @@ const ClientsPage: React.FC = () => {
     setSearchText(value);
     setPage(1);
     fetchClients(1, value, pageSize, ordering);
+    setSearchOptions([]);
+  };
+
+  const handleSearchInput = async (value: string) => {
+    setSearchText(value);
+    if (!value || value.length < 2) { setSearchOptions([]); return; }
+    setSearching(true);
+    try {
+      const [crmRes, dadataRes] = await Promise.all([
+        api.get('/clients/autocomplete/', { params: { q: value } }).then(r => r.data || []),
+        api.get('/clients/address_suggest/', { params: { q: value } }).then(r => r.data || []).catch(() => []),
+      ]);
+      const opts: any[] = [];
+      crmRes.forEach((c: any) => opts.push({ value: c.name, label: `👤 ${c.name} — ${c.address}`, type: 'client' }));
+      if (dadataRes.length > 0) {
+        if (opts.length > 0) opts.push({ value: '---divider---', label: '── 📍 Адресные подсказки ──', type: 'divider' });
+        dadataRes.forEach((d: any) => opts.push({ value: d.value, label: `📍 ${d.unrestricted_value || d.value}`, type: 'dadata' }));
+      }
+      setSearchOptions(opts);
+    } catch { setSearchOptions([]); }
+    finally { setSearching(false); }
   };
 
   const handleCreateClient = async (values: ClientFormValues) => {
@@ -173,13 +196,22 @@ const ClientsPage: React.FC = () => {
         </Space>
       </Space>
 
-      <Input.Search
-        placeholder="Поиск по адресу, ФИО, телефону..."
-        style={{ marginBottom: 16, width: 400 }}
-        onSearch={handleSearch}
-        onChange={(e) => !e.target.value && handleSearch('')}
+      <AutoComplete
+        style={{ marginBottom: 16, width: 450 }}
+        value={searchText}
+        options={searchOptions}
+        onSearch={handleSearchInput}
+        onSelect={(val: string) => { handleSearch(val); }}
         allowClear
-      />
+      >
+        <Input.Search
+          placeholder="🔍 Поиск по адресу, ФИО, телефону, ИНН..."
+          enterButton
+          allowClear
+          onSearch={handleSearch}
+          onChange={(e) => !e.target.value && handleSearch('')}
+        />
+      </AutoComplete>
 
       <Table
         columns={columns}
