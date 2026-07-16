@@ -91,14 +91,22 @@ const ClientsPage: React.FC = () => {
     if (!value || value.length < 2) { setSearchOptions([]); return; }
     setSearching(true);
     try {
-      const [crmRes, dadataRes] = await Promise.all([
+      const [crmRes, streetRes, dadataRes] = await Promise.all([
         api.get('/clients/autocomplete/', { params: { q: value } }).then(r => r.data || []),
+        api.get('/clients/street_autocomplete/', { params: { q: value } }).then(r => r.data || []).catch(() => []),
         api.get('/clients/address_suggest/', { params: { q: value } }).then(r => r.data || []).catch(() => []),
       ]);
       const opts: any[] = [];
+      // Клиенты из CRM
       crmRes.forEach((c: any) => opts.push({ value: c.name, label: `👤 ${c.name} — ${c.address}`, type: 'client' }));
+      // Улицы — зелёным
+      if (streetRes.length > 0) {
+        if (opts.length > 0) opts.push({ value: '---divider---', label: '── 🏠 Улицы в базе ──', disabled: true, type: 'divider' });
+        streetRes.forEach((s: any) => opts.push({ value: s.street || s.label, label: `🏠 ${s.label} (${s.sub})`, type: 'street' }));
+      }
+      // Адресные подсказки
       if (dadataRes.length > 0) {
-        if (opts.length > 0) opts.push({ value: '---divider---', label: '── 📍 Адресные подсказки ──', type: 'divider' });
+        if (opts.length > 0) opts.push({ value: '---divider2---', label: '── 📍 Адресные подсказки ──', disabled: true, type: 'divider' });
         dadataRes.forEach((d: any) => opts.push({ value: d.value, label: `📍 ${d.unrestricted_value || d.value}`, type: 'dadata' }));
       }
       setSearchOptions(opts);
