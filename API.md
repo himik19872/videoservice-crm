@@ -107,6 +107,7 @@ Authorization: Token <ваш_токен>
 | `POST` | `/api/clients/` | Создать |
 | `GET/PUT/PATCH/DELETE` | `/api/clients/{id}/` | CRUD |
 | `GET` | `/api/clients/{id}/erc_payments/` | История платежей ЕРЦ (по `personal_account_number`) |
+| `GET` | `/api/clients/autocomplete/` | 🆕 **Автокомплит**: быстрый поиск по адресу, ИНН, названию, ФИО, телефону (`?q=запрос`, мин. 2 символа, до 15 результатов) |
 
 **Поля клиента:** `name`, `phone`, `address`, `city`, `street`, `house`, `building`, `apartment`, `entrance`, `is_legal`, `inn`, `personal_account_number`, `max_user_id`, `source` (`manual`/`import`/`bitrix24`)
 
