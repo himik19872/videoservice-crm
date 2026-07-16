@@ -325,6 +325,40 @@ class ClientViewSet(viewsets.ModelViewSet):
             })
 
         return Response(data)
+    @action(detail=False, methods=['get'])
+    def street_autocomplete(self, request):
+        """Умный поиск: улица → номера домов из базы.
+        ?q=Стрельнин — вернёт улицы; ?q=Стрельнинское&house=6 — дома."""
+        q = request.query_params.get('q', '').strip()
+        house_filter = request.query_params.get('house', '').strip()
+        if not q or len(q) < 2:
+            return Response([])
+
+        if house_filter:
+            buildings = Building.objects.filter(
+                street_name__icontains=q, house_number__icontains=house_filter
+            ).order_by('street_name', 'house_number').distinct('street_name', 'house_number', 'building_number')[:20]
+            result, seen = [], set()
+            for b in buildings:
+                key = f'{b.house_number}|{b.building_number}'
+                if key not in seen:
+                    seen.add(key)
+                    label = f'д. {b.house_number}'
+                    if b.building_number:
+                        label += f' корп. {b.building_number}'
+                    result.append({'id': b.id, 'label': label, 'sub': f'{b.street_name}'})
+            return Response(result)
+
+        buildings = Building.objects.filter(street_name__icontains=q).order_by('street_name').distinct('street_name')[:12]
+        result, seen = [], set()
+        for b in buildings:
+            if b.street_name not in seen:
+                seen.add(b.street_name)
+                cnt = Building.objects.filter(street_name=b.street_name).count()
+                result.append({'id': b.id, 'label': b.street_name, 'sub': f'{cnt} домов', 'street': b.street_name})
+        return Response(result)
+
+
 
 
     @action(detail=True, methods=['get'])
