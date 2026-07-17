@@ -91,9 +91,7 @@ const CompaniesPage: React.FC = () => {
             { title: 'Адрес', key: 'address', render: (_: any, b: any) =>
               `г. ${b.city}, ${b.street_name}, д. ${b.house_number}${b.building_number ? ' корп. ' + b.building_number : ''}`
             },
-            { title: 'Квартир', dataIndex: 'apartments_count', key: 'apt', align: 'right' as const, width: 80 },
-            { title: 'Подъездов', dataIndex: 'entrances_count', key: 'entr', align: 'right' as const, width: 80 },
-            { title: 'Клиентов', dataIndex: 'clients_count', key: 'cl', align: 'right' as const, width: 80,
+            { title: 'Квартир', dataIndex: 'clients_count', key: 'cl', align: 'right' as const, width: 80,
               render: (v: number) => <Tag color="blue">{v}</Tag> },
           ]}
         />
