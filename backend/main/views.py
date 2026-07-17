@@ -3042,6 +3042,135 @@ def import_preview_view(request):
 
 
 # ══════════════════════════════════════════════════════════════════
+# Новые эндпоинты: Конвертация Excel → CSV + Унифицированный импорт
+# ══════════════════════════════════════════════════════════════════
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def convert_excel_view(request):
+    """
+    Конвертирует загруженный Excel (любого формата: ТСЖ, ЕРЦ СПб, ЕРЦ ЛО, ...)
+    в унифицированный CSV.
+    
+    Принимает:
+      - file: .xlsx файл
+      - period (опционально): дата периода YYYY-MM-DD для ЕРЦ
+    
+    Возвращает:
+      - converted_rows: массив строк унифицированного CSV (первые 200 для предпросмотра)
+      - total_rows: всего строк
+      - format: определённый формат (tszh, erc_spb, erc_lo, ...)
+      - csv_content: полный CSV как текст (для скачивания)
+      - csv_filename: предлагаемое имя файла
+    """
+    try:
+        if 'file' not in request.FILES:
+            return Response({'success': False, 'error': 'Файл не прикреплён'}, status=status.HTTP_400_BAD_REQUEST)
+
+        uploaded = request.FILES['file']
+        if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
+            return Response({'success': False, 'error': 'Поддерживаются только файлы .xlsx'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Период
+        from datetime import datetime
+        period_date = None
+        period_str = request.data.get('period', '')
+        if period_str:
+            try:
+                period_date = datetime.strptime(period_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'success': False, 'error': 'Формат периода: YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .converters import auto_convert
+
+        file_bytes = uploaded.read()
+        rows, fmt = auto_convert(file_bytes, period_date)
+
+        # Генерируем CSV
+        import csv, io
+        from .converters import UNIFIED_FIELDS
+
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=UNIFIED_FIELDS, quoting=csv.QUOTE_ALL)
+        writer.writeheader()
+        writer.writerows(rows)
+        csv_content = buf.getvalue()
+
+        basename = uploaded.name.rsplit('.', 1)[0]
+
+        return Response({
+            'success': True,
+            'format': fmt,
+            'total_rows': len(rows),
+            'converted_preview': rows[:200],  # первые 200 для отображения
+            'csv_content': csv_content,
+            'csv_filename': f'{basename}.csv',
+        })
+
+    except Exception as e:
+        import traceback
+        return Response({
+            'success': False,
+            'error': f'Ошибка конвертации: {str(e)}',
+            'traceback': traceback.format_exc(),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_unified_view(request):
+    """
+    Импортирует унифицированный CSV в базу данных.
+    
+    Принимает:
+      - file: .csv файл (унифицированный формат)
+      - или csv_text: CSV-текст напрямую (если конвертировали только что)
+    
+    Возвращает статистику импорта.
+    """
+    try:
+        csv_data = None
+        csv_filename = 'data.csv'
+
+        if 'file' in request.FILES:
+            uploaded = request.FILES['file']
+            csv_data = uploaded.read()
+            csv_filename = uploaded.name
+        elif 'csv_text' in request.data:
+            csv_data = request.data['csv_text'].encode('utf-8')
+        else:
+            return Response({'success': False, 'error': 'Нет файла или csv_text'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .unified_importer import import_unified_csv
+
+        stats = import_unified_csv(csv_data, request.user, dry_run=False)
+
+        return Response({
+            'success': True,
+            'file': csv_filename,
+            'total_rows': stats['total_rows'],
+            'client_rows': stats['client_rows'],
+            'payment_rows': stats['payment_rows'],
+            'buildings_created': stats['buildings_created'],
+            'clients_created': stats['clients_created'],
+            'clients_updated': stats['clients_updated'],
+            'erc_accounts_created': stats['erc_accounts_created'],
+            'erc_records_created': stats['erc_records_created'],
+            'erc_records_updated': stats['erc_records_updated'],
+            'skipped': stats['skipped'],
+            'errors': stats['errors'],
+        })
+
+    except Exception as e:
+        import traceback
+        return Response({
+            'success': False,
+            'error': f'Ошибка импорта: {str(e)}',
+            'traceback': traceback.format_exc(),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ══════════════════════════════════════════════════════════════════
 # Системная статистика, экспорт, очистка
 # ══════════════════════════════════════════════════════════════════
 

@@ -546,7 +546,18 @@ export interface ErcBillingRecord {
 
 export interface ImportResult {
   success: boolean;
-  total: number;
+  total_rows: number;
+  client_rows?: number;
+  payment_rows?: number;
+  clients_created?: number;
+  clients_updated?: number;
+  buildings_created?: number;
+  erc_accounts_created?: number;
+  erc_records_created?: number;
+  erc_records_updated?: number;
+  skipped?: number;
+  // Старые поля для обратной совместимости
+  total?: number;
   created?: number;
   updated?: number;
   accounts?: { created: number; updated: number };

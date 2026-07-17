@@ -19,6 +19,7 @@ from .views import (
     AsteriskVoicemailViewSet, AsteriskCallRecordingViewSet,
     login_view, me_view, refresh_token_view,
     import_clients_excel_view, import_erc_excel_view, import_preview_view,
+    convert_excel_view, import_unified_view,
     system_stats_view, export_clients_excel_view, cleanup_media_view,
 )
 from .bitrix24_views import bitrix24_clients_to_bitrix_view, bitrix24_clients_from_bitrix_view
@@ -85,7 +86,8 @@ urlpatterns = [
     path('import/clients/', import_clients_excel_view, name='import-clients'),
     path('import/erc/', import_erc_excel_view, name='import-erc'),
     path('import/preview/', import_preview_view, name='import-preview'),
-    path('import/preview/', import_preview_view, name='import-preview'),
+    path('import/convert/', convert_excel_view, name='import-convert'),
+    path('import/unified/', import_unified_view, name='import-unified'),
     path('bitrix24/clients/to-bitrix/', bitrix24_clients_to_bitrix_view, name='bitrix24-clients-to'),
     path('bitrix24/clients/from-bitrix/', bitrix24_clients_from_bitrix_view, name='bitrix24-clients-from'),
     path('bitrix24/products/to-bitrix/', bitrix24_products_to_bitrix_view, name='bitrix24-products-to'),
