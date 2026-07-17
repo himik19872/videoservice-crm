@@ -6,7 +6,7 @@ import {
   BarChartOutlined, SettingOutlined, ShopOutlined, DollarOutlined,
   HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined, ToolOutlined, BankOutlined, FileTextOutlined,
   UserOutlined, CheckCircleOutlined, FileExcelOutlined, HddOutlined,
-  PhoneOutlined,
+  PhoneOutlined, ApartmentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -89,6 +89,21 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/storage-locations',
       icon: <EnvironmentOutlined />,
       label: 'Места хранения',
+    },
+    {
+      key: '/management-companies',
+      icon: <BankOutlined />,
+      label: 'УК / ТСЖ',
+    },
+    {
+      key: '/tariffs',
+      icon: <DollarOutlined />,
+      label: 'Тарифы',
+    },
+    {
+      key: '/entrances',
+      icon: <ApartmentOutlined />,
+      label: 'Подъезды',
     },
     {
       key: '/finance',

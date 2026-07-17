@@ -50,6 +50,9 @@ import ImportPage from './pages/ImportPage';
 import ErcPaymentsPage from './pages/ErcPaymentsPage';
 import StorageLocationsPage from './pages/StorageLocationsPage';
 import StorageLocationDetailPage from './pages/StorageLocationDetailPage';
+import CompaniesPage from './pages/CompaniesPage';
+import TariffsPage from './pages/TariffsPage';
+import EntrancesPage from './pages/EntrancesPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
 import MasterOrdersPage from './pages/master/MasterOrdersPage';
 import MasterProfilePage from './pages/master/MasterProfilePage';
@@ -109,6 +112,9 @@ function AppContent() {
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="/storage-locations" element={<StorageLocationsPage />} />
           <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
+          <Route path="/management-companies" element={<CompaniesPage />} />
+          <Route path="/tariffs" element={<TariffsPage />} />
+          <Route path="/entrances" element={<EntrancesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -194,6 +200,9 @@ function AppContent() {
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="/storage-locations" element={<StorageLocationsPage />} />
           <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
+          <Route path="/management-companies" element={<CompaniesPage />} />
+          <Route path="/tariffs" element={<TariffsPage />} />
+          <Route path="/entrances" element={<EntrancesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AdminLayout>
@@ -247,8 +256,9 @@ function AppContent() {
         <Route path="/import" element={<ImportPage />} />
         <Route path="/erc-payments" element={<ErcPaymentsPage />} />
         <Route path="/storage-locations" element={<StorageLocationsPage />} />
-        <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />          <Route path="/management-companies" element={<CompaniesPage />} />
+          <Route path="/tariffs" element={<TariffsPage />} />
+          <Route path="/entrances" element={<EntrancesPage />} />        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>
   );
