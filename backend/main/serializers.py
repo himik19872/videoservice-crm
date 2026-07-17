@@ -155,7 +155,7 @@ class ClientSerializer(serializers.ModelSerializer):
             'monthly_payment', 'source',
             'created_at', 'notes'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'entrance_number', 'tariff_name', 'tariff_amount', 'management_company_name']
 
     def get_tariff_name(self, obj):
         return obj.tariff.name if obj.tariff else None
@@ -168,6 +168,10 @@ class ClientSerializer(serializers.ModelSerializer):
 
     def get_entrance_number(self, obj):
         return obj.entrance.number if obj.entrance else None
+
+    def update(self, instance, validated_data):
+        # full_name приходит как source='name', DRF сам распакует
+        return super().update(instance, validated_data)
 
 
 class BuildingEntranceSerializer(serializers.ModelSerializer):

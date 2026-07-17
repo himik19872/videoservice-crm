@@ -2924,6 +2924,30 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'short_name', 'inn']
 
+    @action(detail=True, methods=['get'])
+    def buildings(self, request, pk=None):
+        """Список домов, которые обслуживает эта УК"""
+        company = self.get_object()
+        # Дома, где есть client с этой УК
+        building_ids = Client.objects.filter(
+            management_company=company, building__isnull=False
+        ).values_list('building_id', flat=True).distinct()
+
+        buildings = Building.objects.filter(id__in=building_ids).order_by('street_name', 'house_number')
+
+        return Response([{
+            'id': b.id,
+            'city': b.city,
+            'street_name': b.street_name,
+            'house_number': b.house_number,
+            'building_number': b.building_number,
+            'apartments_count': b.apartments_count,
+            'entrances_count': b.entrances_count,
+            'clients_count': Client.objects.filter(
+                management_company=company, building=b
+            ).count(),
+        } for b in buildings])
+
     @action(detail=True, methods=['post'])
     def apply_tariff(self, request, pk=None):
         """Применить тариф ко всем квартирам этой УК"""
