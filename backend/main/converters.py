@@ -325,19 +325,21 @@ def convert_erc_spb(file_bytes, period_date=None):
         full_name = _clean_str(row[2]) if len(row) > 2 else ''
         raw_address = _clean_str(row[5]) if len(row) > 5 else ''
 
-        saldo_start = row[8] if len(row) > 8 and row[8] is not None else 0
-        accrued = row[9] if len(row) > 9 and row[9] is not None else 0
-        paid = row[11] if len(row) > 11 and row[11] is not None else 0
-        saldo_end_debet = row[13] if len(row) > 13 and row[13] is not None else 0
-        saldo_end_credit = row[14] if len(row) > 14 and row[14] is not None else 0
+        def _f(val):
+            """Конвертирует в float, возвращает 0 при None/пусто/ошибке."""
+            if val is None or val == '':
+                return 0.0
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return 0.0
 
-        try:
-            saldo_start = float(saldo_start)
-            accrued = float(accrued)
-            paid = float(paid)
-            saldo_end = float(saldo_end_debet) - float(saldo_end_credit)
-        except (ValueError, TypeError):
-            saldo_start = accrued = paid = saldo_end = 0
+        saldo_start = _f(row[8]) if len(row) > 8 else 0.0
+        accrued = _f(row[9]) if len(row) > 9 else 0.0
+        paid = _f(row[11]) if len(row) > 11 else 0.0
+        saldo_end_debet = _f(row[13]) if len(row) > 13 else 0.0
+        saldo_end_credit = _f(row[14]) if len(row) > 14 else 0.0
+        saldo_end = saldo_end_debet - saldo_end_credit
 
         parsed = parse_address(raw_address)
 
@@ -407,8 +409,11 @@ def convert_erc_lo(file_bytes, period_date=None):
         raw_address = _clean_str(row[5]) if len(row) > 5 else ''
 
         def _f(val):
+            """Конвертирует в float, возвращает 0 при None/пусто/ошибке."""
+            if val is None or val == '':
+                return 0.0
             try:
-                return float(val) if val is not None else 0.0
+                return float(val)
             except (ValueError, TypeError):
                 return 0.0
 
@@ -518,8 +523,11 @@ def convert_erc_agalatovo(file_bytes, period_date=None):
         }
 
         def _f(val):
+            """Конвертирует в float, возвращает 0 при None/пусто/ошибке."""
+            if val is None or val == '':
+                return 0.0
             try:
-                return float(val) if val is not None else 0.0
+                return float(val)
             except (ValueError, TypeError):
                 return 0.0
 
@@ -600,8 +608,11 @@ def convert_krasnoe_selo(file_bytes, period_date=None):
             continue
 
         def _f(val):
+            """Конвертирует в float, возвращает 0 при None/пусто/ошибке."""
+            if val is None or val == '':
+                return 0.0
             try:
-                return float(val) if val is not None else 0.0
+                return float(val)
             except (ValueError, TypeError):
                 return 0.0
 
@@ -668,8 +679,11 @@ def convert_str63(file_bytes, period_date=None):
         raw_address = re.sub(r'\s{2,}', ' ', raw_address)
 
         def _f(val):
+            """Конвертирует в float, возвращает 0 при None/пусто/ошибке."""
+            if val is None or val == '':
+                return 0.0
             try:
-                return float(val) if val is not None else 0.0
+                return float(val)
             except (ValueError, TypeError):
                 return 0.0
 
