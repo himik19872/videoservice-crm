@@ -113,8 +113,13 @@ const ImportPage: React.FC = () => {
     if (!convertResult?.csv_content) return;
     setImporting(true);
     try {
-      const res = await api.post('/import/unified/', {
-        csv_text: convertResult.csv_content,
+      // Отправляем CSV как файл (FormData), а не как JSON (слишком большой для 36K строк)
+      const blob = new Blob([convertResult.csv_content], { type: 'text/csv;charset=utf-8;' });
+      const formData = new FormData();
+      formData.append('file', blob, convertResult.csv_filename || 'data.csv');
+
+      const res = await api.post('/import/unified/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       if (res.data.success) {
         setImportResult(res.data);
