@@ -3,6 +3,9 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+// Скрываем водяной знак Leaflet в левом нижнем углу
+L.Control.Attribution.prototype.options.prefix = '';
+
 // Фикс иконок Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
