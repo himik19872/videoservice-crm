@@ -39,7 +39,7 @@ const EntrancesPage: React.FC = () => {
 
   const handleSubmit = async (values: any) => {
     try {
-      if (editing) { await api.put(`/entrances/${editing.id}/`, values); message.success('Обновлён'); }
+      if (editing) { await api.patch(`/entrances/${editing.id}/`, values); message.success('Обновлён'); }
       else { await api.post('/entrances/', values); message.success('Создан'); }
       setModalOpen(false); fetchData();
     } catch (e) { message.error('Ошибка сохранения'); }

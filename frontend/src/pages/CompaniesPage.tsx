@@ -42,7 +42,7 @@ const CompaniesPage: React.FC = () => {
 
   const handleSubmit = async (values: any) => {
     try {
-      if (editing) { await api.put(`/management-companies/${editing.id}/`, values); message.success('Обновлена'); }
+      if (editing) { await api.patch(`/management-companies/${editing.id}/`, values); message.success('Обновлена'); }
       else { await api.post('/management-companies/', values); message.success('Создана'); }
       setModalOpen(false); fetchData();
     } catch (e) { message.error('Ошибка сохранения'); }

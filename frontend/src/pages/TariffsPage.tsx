@@ -34,7 +34,7 @@ const TariffsPage: React.FC = () => {
 
   const handleSubmit = async (values: any) => {
     try {
-      if (editing) { await api.put(`/tariffs/${editing.id}/`, values); message.success('Обновлён'); }
+      if (editing) { await api.patch(`/tariffs/${editing.id}/`, values); message.success('Обновлён'); }
       else { await api.post('/tariffs/', values); message.success('Создан'); }
       setModalOpen(false); fetchData();
     } catch (e) { message.error('Ошибка сохранения'); }
