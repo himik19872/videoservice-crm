@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Tabs, Table, message, Spin, Empty, Modal, Form, Input, Select } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Tabs, Table, message, Spin, Empty, Modal, Form, Input, Select, Switch, InputNumber } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, PlusOutlined, DollarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
-import type { Client, Order, ErcBillingRecord } from '../../types';
+import type { Client, Order, ErcBillingRecord, ManagementCompany, Tariff, PaymentRecord } from '../../types';
 
 const { Title, Text } = Typography;
 
@@ -13,6 +13,18 @@ const sourceLabels: Record<string, { label: string; color: string }> = {
   erc: { label: 'ЕРЦ', color: 'green' },
 };
 
+const contractTypeLabels: Record<string, string> = {
+  erc: 'ЕРЦ',
+  uk_tszh: 'УК / ТСЖ',
+  one_time: 'Разовый выезд',
+};
+
+const contractTypeColors: Record<string, string> = {
+  erc: 'green',
+  uk_tszh: 'blue',
+  one_time: 'orange',
+};
+
 const ClientsDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -20,15 +32,18 @@ const ClientsDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<Order[]>([]);
   const [ercPayments, setErcPayments] = useState<ErcBillingRecord[]>([]);
+  const [internalPayments, setInternalPayments] = useState<PaymentRecord[]>([]);
   const [ercLoading, setErcLoading] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm] = Form.useForm();
-  const [regions, setRegions] = useState<any[]>([]);
+  const [companies, setCompanies] = useState<ManagementCompany[]>([]);
+  const [tariffs, setTariffs] = useState<Tariff[]>([]);
 
   useEffect(() => {
     fetchClient();
     fetchOrders();
-    fetchRegions();
+    fetchCompanies();
+    fetchTariffs();
   }, [id]);
 
   const fetchClient = async () => {
@@ -36,9 +51,8 @@ const ClientsDetailPage: React.FC = () => {
     try {
       const response = await api.get(`/clients/${id}/`);
       setClient(response.data);
-      if (response.data.personal_account_number) {
-        fetchErcPayments();
-      }
+      if (response.data.personal_account_number) fetchErcPayments();
+      fetchInternalPayments();
     } catch (error) {
       message.error('Ошибка загрузки клиента');
       navigate('/clients');
@@ -51,9 +65,7 @@ const ClientsDetailPage: React.FC = () => {
     try {
       const response = await api.get('/orders/', { params: { client: id } });
       setOrders(response.data.results || response.data);
-    } catch (error) {
-      console.error('Ошибка загрузки заявок:', error);
-    }
+    } catch (error) { console.error('Ошибка загрузки заявок:', error); }
   };
 
   const fetchErcPayments = async () => {
@@ -61,14 +73,28 @@ const ClientsDetailPage: React.FC = () => {
     try {
       const response = await api.get(`/clients/${id}/erc_payments/`);
       setErcPayments(response.data || []);
-    } catch (error) { console.error('Ошибка загрузки платежей ЕРЦ:', error); }
+    } catch (error) { console.error('Ошибка загрузки ЕРЦ:', error); }
     finally { setErcLoading(false); }
   };
 
-  const fetchRegions = async () => {
+  const fetchInternalPayments = async () => {
     try {
-      const r = await api.get('/regions/');
-      setRegions(r.data.results || r.data);
+      const response = await api.get('/payment-records/', { params: { client: id } });
+      setInternalPayments(response.data.results || response.data);
+    } catch (error) { /* не критично */ }
+  };
+
+  const fetchCompanies = async () => {
+    try {
+      const r = await api.get('/management-companies/');
+      setCompanies(r.data.results || r.data);
+    } catch (e) {}
+  };
+
+  const fetchTariffs = async () => {
+    try {
+      const r = await api.get('/tariffs/');
+      setTariffs(r.data.results || r.data);
     } catch (e) {}
   };
 
@@ -78,9 +104,12 @@ const ClientsDetailPage: React.FC = () => {
       full_name: client.full_name,
       phone: client.phone,
       email: client.email,
-      address: client.address,
-      management_company: client.management_company,
+      management_company: client.management_company || undefined,
       entrance_number: client.entrance_number,
+      contract_type: client.contract_type || 'erc',
+      erc_enabled: client.erc_enabled,
+      tariff: client.tariff || undefined,
+      monthly_payment: parseFloat(client.monthly_payment) || 0,
       notes: client.notes,
     });
     setEditModalOpen(true);
@@ -97,13 +126,7 @@ const ClientsDetailPage: React.FC = () => {
     }
   };
 
-  const handleCreateOrder = () => {
-    navigate(`/orders/create?client_id=${id}`);
-  };
-
-  const handleViewOrder = (order: Order) => {
-    navigate(`/orders/${order.id}`);
-  };
+  const handleCreateOrder = () => navigate(`/orders/create?client_id=${id}`);
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>;
   if (!client) return null;
@@ -144,24 +167,37 @@ const ClientsDetailPage: React.FC = () => {
           <Title level={3} style={{ margin: 0 }}>{client.full_name}</Title>
         </Space>
         <Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateOrder}>
-            Создать заявку
-          </Button>
-          <Button icon={<EditOutlined />} onClick={openEditModal}>
-            Редактировать
-          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateOrder}>Создать заявку</Button>
+          <Button icon={<EditOutlined />} onClick={openEditModal}>Редактировать</Button>
         </Space>
       </Space>
 
+      {/* Основная карточка */}
       <Card>
         <Descriptions column={2} size="small">
           <Descriptions.Item label="ФИО">{client.full_name}</Descriptions.Item>
           <Descriptions.Item label="Телефон">{client.phone || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Email">{client.email || '-'}</Descriptions.Item>
           <Descriptions.Item label="Адрес" span={2}>{client.address}</Descriptions.Item>
-          <Descriptions.Item label="УК / ТСЖ">{client.management_company || '-'}</Descriptions.Item>
-          <Descriptions.Item label="№ парадной">{client.entrance_number || '-'}</Descriptions.Item>
+          <Descriptions.Item label="УК / ТСЖ">{client.management_company_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="№ парадной / подъезда">{client.entrance_number || '-'}</Descriptions.Item>
           <Descriptions.Item label="Лицевой счёт">{client.personal_account_number || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Квартира">{client.apartment || '-'}</Descriptions.Item>
           <Descriptions.Item label="Район (мун.)">{client.district || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Тип договора">
+            <Tag color={contractTypeColors[client.contract_type] || 'default'}>
+              {contractTypeLabels[client.contract_type] || client.contract_type}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="ЕРЦ">
+            <Tag color={client.erc_enabled ? 'green' : 'default'}>{client.erc_enabled ? 'Да' : 'Нет'}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Тариф">{client.tariff_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Ежемес. платёж">
+            <Text strong style={{ color: '#1677ff', fontSize: 16 }}>
+              {parseFloat(client.monthly_payment || '0').toFixed(2)} ₽
+            </Text>
+          </Descriptions.Item>
           <Descriptions.Item label="Источник">
             {(() => {
               const s = sourceLabels[client.source] || sourceLabels.manual;
@@ -175,7 +211,7 @@ const ClientsDetailPage: React.FC = () => {
         {client.notes && <><Divider /><Text type="secondary">{client.notes}</Text></>}
       </Card>
 
-      {/* Платежи ЕРЦ — показываем для любого клиента с лицевым счётом */}
+      {/* Платежи ЕРЦ */}
       {client.personal_account_number && (
         <Card title="📊 История платежей ЕРЦ" style={{ marginTop: 16 }}>
           {ercPayments.length > 0 ? (
@@ -196,14 +232,13 @@ const ClientsDetailPage: React.FC = () => {
                   } },
                 { title: 'Сальдо кон.', dataIndex: 'balance_end', key: 'be', align: 'right' as const,
                   render: (v: any) => v != null ? `${parseFloat(v || 0).toFixed(2)} ₽` : '—' },
-                { title: 'Импорт', dataIndex: 'imported_at', key: 'ia',
-                  render: (d: string) => d ? new Date(d).toLocaleDateString('ru') : '—' },
               ]}
             />
-          ) : !ercLoading && <Empty description="Нет данных ЕРЦ. Загрузите файл ЕРЦ через Импорт." />}
+          ) : !ercLoading && <Empty description="Нет данных ЕРЦ. Загрузите файл через раздел Импорт." />}
         </Card>
       )}
 
+      {/* Заявки */}
       <div style={{ marginTop: 24 }}>
         <Title level={4}>Заявки клиента</Title>
         <Table columns={orderColumns} dataSource={orders} rowKey="id"
@@ -214,15 +249,44 @@ const ClientsDetailPage: React.FC = () => {
 
       {/* Модалка редактирования */}
       <Modal title="Редактировать клиента" open={editModalOpen} onCancel={() => setEditModalOpen(false)}
-        footer={null} width={600}
+        footer={null} width={700}
       >
         <Form form={editForm} layout="vertical" onFinish={handleEditClient}>
           <Form.Item name="full_name" label="ФИО"><Input /></Form.Item>
           <Form.Item name="phone" label="Телефон"><Input /></Form.Item>
           <Form.Item name="email" label="Email"><Input /></Form.Item>
-          <Form.Item name="address" label="Адрес"><Input /></Form.Item>
-          <Form.Item name="management_company" label="УК / ТСЖ"><Input /></Form.Item>
-          <Form.Item name="entrance_number" label="№ парадной"><Input /></Form.Item>
+          <Form.Item name="entrance_number" label="№ подъезда"><Input /></Form.Item>
+          <Form.Item name="management_company" label="УК / ТСЖ">
+            <Select
+              allowClear
+              showSearch
+              placeholder="Выберите УК"
+              filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+              options={companies.map((c) => ({ label: c.name, value: c.id }))}
+            />
+          </Form.Item>
+          <Form.Item name="contract_type" label="Тип договора">
+            <Select
+              options={[
+                { label: 'ЕРЦ', value: 'erc' },
+                { label: 'УК / ТСЖ', value: 'uk_tszh' },
+                { label: 'Разовый платный выезд', value: 'one_time' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="erc_enabled" label="ЕРЦ (да/нет)" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item name="tariff" label="Тариф">
+            <Select
+              allowClear
+              placeholder="Выберите тариф"
+              options={tariffs.map((t) => ({ label: `${t.name} — ${t.amount} ₽/мес`, value: t.id }))}
+            />
+          </Form.Item>
+          <Form.Item name="monthly_payment" label="Ежемесячный платёж (₽)">
+            <InputNumber min={0} step={1} style={{ width: '100%' }} />
+          </Form.Item>
           <Form.Item name="notes" label="Примечания"><Input.TextArea rows={3} /></Form.Item>
           <Button type="primary" htmlType="submit">Сохранить</Button>
         </Form>

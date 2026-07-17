@@ -32,11 +32,65 @@ export interface Client {
   region_id?: number;
   personal_account_number?: string;
   entrance_number?: string;
-  management_company?: string;
+  management_company?: number;
+  management_company_name?: string;
+  entrance?: number;
+  apartment?: string;
   district?: string;
+  contract_type: 'erc' | 'uk_tszh' | 'one_time';
+  erc_enabled: boolean;
+  tariff?: number;
+  tariff_name?: string;
+  tariff_amount?: string;
+  monthly_payment: string;
   source: 'manual' | 'excel_import' | 'erc';
+  is_legal?: boolean;
+  inn?: string;
+  kpp?: string;
+  ogrn?: string;
+  legal_address?: string;
+  director_name?: string;
   created_at: string;
   notes?: string;
+}
+
+export interface ManagementCompany {
+  id: number;
+  name: string;
+  short_name?: string;
+  inn?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  clients_count?: number;
+}
+
+export interface Tariff {
+  id: number;
+  name: string;
+  amount: string;
+  description?: string;
+  is_active: boolean;
+}
+
+export interface BuildingEntrance {
+  id: number;
+  building: number;
+  number: number;
+  apartment_from: number;
+  apartment_to: number;
+  apartments_count: number;
+  notes?: string;
+}
+
+export interface PaymentRecord {
+  id: number;
+  client: number;
+  client_name?: string;
+  period: string;
+  amount: string;
+  payment_type: 'accrual' | 'payment' | 'debt';
+  description?: string;
 }
 
 export interface Equipment {
