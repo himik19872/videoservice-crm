@@ -2968,8 +2968,51 @@ def import_erc_excel_view(request):
             except ValueError:
                 return Response({'success': False, 'error': 'Формат периода: YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
 
-        from .import_service import import_erc_from_excel
-        result = import_erc_from_excel(uploaded.read(), request.user, period_date)
+        from .converters import auto_convert
+        from .unified_importer import import_unified_csv
+        import csv, io
+
+        # Конвертируем Excel в унифицированные CSV-строки через автоопределение формата
+        rows, format_name = auto_convert(uploaded.read(), period_date)
+
+        if not rows:
+            return Response({
+                'success': False,
+                'error': 'Не удалось определить формат файла или файл пуст',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Создаём CSV в памяти из унифицированных строк
+        from .converters import UNIFIED_FIELDS
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=UNIFIED_FIELDS, quoting=csv.QUOTE_ALL)
+        writer.writeheader()
+        writer.writerows(rows)
+
+        # Импортируем полученный CSV в БД
+        csv_bytes = output.getvalue().encode('utf-8-sig')
+        stats = import_unified_csv(csv_bytes, request.user)
+
+        # Приводим ответ к формату, ожидаемому фронтендом
+        result = {
+            'success': True,
+            'total': stats['total_rows'],
+            'created': stats['erc_records_created'] + stats['clients_created'],
+            'updated': stats['erc_records_updated'] + stats['clients_updated'],
+            'errors': stats['errors'],
+            'format': format_name,
+            'details': {
+                'payment_rows': stats['payment_rows'],
+                'client_rows': stats['client_rows'],
+                'buildings_created': stats['buildings_created'],
+                'clients_created': stats['clients_created'],
+                'clients_updated': stats['clients_updated'],
+                'erc_accounts_created': stats['erc_accounts_created'],
+                'erc_records_created': stats['erc_records_created'],
+                'erc_records_updated': stats['erc_records_updated'],
+                'skipped': stats['skipped'],
+            },
+        }
+
         return Response(result)
     except Exception as e:
         return Response({

@@ -276,6 +276,8 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     defaults={
                         'charged': _f(charged),
                         'paid': _f(paid),
+                        'balance_start': _f(balance_start),
+                        'balance_end': _f(balance_end),
                     }
                 )
                 if rec_created:

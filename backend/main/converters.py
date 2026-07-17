@@ -434,8 +434,15 @@ def convert_erc_lo(file_bytes, period_date=None):
 
 def convert_erc_agalatovo(file_bytes, period_date=None):
     """
-    Агалатово: 19 колонок, похож на ЛО но больше колонок.
-    Ищем заголовки '№', '№', 'Фамилия И.О.'
+    Агалатово: 19 колонок, адрес разбит на отдельные колонки.
+    Структура:
+      0=№п/п, 1=л/с, 2=ФИО,
+      5=Населённый пункт, 6=Улица, 7=Дом, 8=Кв.,
+      9=Сальдо нач, 10=Сальдо пени нач,
+      11=Начислено, 12=Начислено пени,
+      13=Оплачено, 14=Оплачено пени,
+      15=Сальдо кон, 18=Сальдо пени кон
+    Данные с 14-й строки (после заголовков).
     """
     if period_date is None:
         period_date = datetime.now().date().replace(day=1)
@@ -444,13 +451,12 @@ def convert_erc_agalatovo(file_bytes, period_date=None):
     ws = wb.active
     all_rows = list(ws.iter_rows(min_row=1, values_only=True))
 
-    # Ищем строку с '№', '№', 'Фамилия И.О.'
-    data_start = 10
+    # Ищем строку с '№', '№' в колонках 0 и 1 (строка 9 в файле)
+    data_start = 14
     for i, row in enumerate(all_rows):
-        if row and row[0] and str(row[0]).strip() == '№':
-            if row[1] and '№' in str(row[1]):
-                data_start = i + 5
-                break
+        if row and len(row) > 1 and str(row[0]).strip() == '№' and '№' in str(row[1]):
+            data_start = i + 6  # +5 строк подзаголовков, i 0-based → +6 для 1-based
+            break
 
     rows_data = all_rows[data_start - 1:]
     result = []
@@ -464,7 +470,41 @@ def convert_erc_agalatovo(file_bytes, period_date=None):
             continue
 
         full_name = _clean_str(row[2]) if len(row) > 2 else ''
-        raw_address = _clean_str(row[5]) if len(row) > 5 else ''
+
+        # Адрес в отдельных колонках: населённый пункт, улица, дом, кв.
+        city_part = _clean_str(row[5]) if len(row) > 5 else ''
+        street_part = _clean_str(row[6]) if len(row) > 6 else ''
+        house_part = _clean_str(row[7]) if len(row) > 7 else ''
+        apartment_part = _clean_str(row[8]) if len(row) > 8 else ''
+
+        # Определяем город: Агалатово, Агалатово д (деревня) и т.д.
+        city_clean = city_part
+        # Убираем суффиксы "д", "п" (деревня, посёлок) для города
+        city_clean = re.sub(r'\s+[дп]$', '', city_clean).strip()
+        if not city_clean:
+            city_clean = city_part
+
+        # Собираем raw_address и parsed из частей
+        raw_address_parts = []
+        if city_part:
+            raw_address_parts.append(city_part)
+        if street_part and street_part not in ('-', ''):
+            raw_address_parts.append(street_part)
+        if house_part and house_part not in ('-', ''):
+            raw_address_parts.append(f'д. {house_part}')
+        if apartment_part and apartment_part not in ('-', ''):
+            raw_address_parts.append(f'кв. {apartment_part}')
+        raw_address = ', '.join(raw_address_parts) if raw_address_parts else city_part
+
+        # Используем части напрямую, без parse_address
+        parsed = {
+            'city': city_clean,
+            'district': '',
+            'street': street_part if street_part not in ('-', '') else '',
+            'house': house_part if house_part not in ('-', '') else '',
+            'building': '',
+            'apartment': apartment_part if apartment_part not in ('-', '') else '',
+        }
 
         def _f(val):
             try:
@@ -472,22 +512,20 @@ def convert_erc_agalatovo(file_bytes, period_date=None):
             except (ValueError, TypeError):
                 return 0.0
 
-        saldo_start = _f(row[6]) - _f(row[7]) if len(row) > 7 else 0
-        accrued = _f(row[8]) if len(row) > 8 else 0
-        paid = _f(row[12]) if len(row) > 12 else 0
-        saldo_end = _f(row[14]) - _f(row[15]) if len(row) > 15 else 0
-
-        parsed = parse_address(raw_address)
+        saldo_start = _f(row[9]) if len(row) > 9 else 0
+        accrued = _f(row[11]) if len(row) > 11 else 0
+        paid = _f(row[13]) if len(row) > 13 else 0
+        saldo_end = _f(row[15]) if len(row) > 15 else 0
 
         result.append(make_unified_row('payment',
             personal_account=acc_num,
             full_name=full_name,
-            city=parsed['city'],
+            city=parsed['city'] or city_part,
             district=parsed['district'],
-            street=parsed['street'],
-            house=parsed['house'],
+            street=parsed['street'] or street_part,
+            house=parsed['house'] or house_part,
             building=parsed['building'],
-            apartment=parsed['apartment'],
+            apartment=parsed['apartment'] or apartment_part,
             period=str(period_date),
             balance_start=str(saldo_start),
             charged=str(accrued),
@@ -686,9 +724,9 @@ def auto_convert(file_bytes, period_date=None):
     if '30.01.01' in header_text and 'еирц спб' in header_text:
         return convert_erc_spb(file_bytes, period_date), 'erc_spb'
 
-    # ЕРЦ Коммунар (30.01.01 без указания СПб)
+    # ЕРЦ Коммунар (форма 30.01.01, 15 колонок — как СПб)
     if '30.01.01' in header_text:
-        return convert_erc_lo(file_bytes, period_date), 'erc_lo'
+        return convert_erc_spb(file_bytes, period_date), 'erc_spb'
 
     # Стр.6-3: "Тех.обслуж.домофонов" в заголовках
     if 'тех.обслуж.домофонов' in header_text or 'домофон' in header_text:
