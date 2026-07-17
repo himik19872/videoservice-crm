@@ -298,15 +298,20 @@ def convert_erc_spb(file_bytes, period_date=None):
     ws = wb.active
     all_rows = list(ws.iter_rows(min_row=1, values_only=True))
 
-    # Ищем строку с заголовками колонок: '№', '№', 'Фамилия И.О.'
-    data_start = 10
-    for i, row in enumerate(all_rows):
-        if row and row[0] and str(row[0]).strip() == '№' and row[1] and str(row[1]).strip() == '№':
-            # Пропускаем 4 строки заголовка (№/лицевого/Фамилия/пусто)
-            data_start = i + 5
-            break
+    # Ищем первую строку с данными: колонка 0 — число (№ п/п), колонка 1 — л/с
+    rows_data = []
+    for row in all_rows:
+        if not row:
+            continue
+        # Первая колонка должна быть числом (порядковый номер)
+        try:
+            int(str(row[0]).strip())
+            acc_num = _clean_str(row[1])
+            if acc_num and acc_num not in ('счета', 'лицевого', 'п/п'):
+                rows_data.append(row)
+        except (ValueError, TypeError):
+            continue
 
-    rows_data = all_rows[data_start - 1:]  # 0-based, начинаем с данных
     result = []
 
     for row in rows_data:
@@ -375,13 +380,19 @@ def convert_erc_lo(file_bytes, period_date=None):
     ws = wb.active
     all_rows = list(ws.iter_rows(min_row=1, values_only=True))
 
-    data_start = 10
-    for i, row in enumerate(all_rows):
-        if row and row[0] and str(row[0]).strip() == '№':
-            data_start = i + 5  # +5 строк: заголовок сам + 4 подзаголовка
-            break
+    # Ищем строки с данными: колонка 0 — число
+    rows_data = []
+    for row in all_rows:
+        if not row:
+            continue
+        try:
+            int(str(row[0]).strip())
+            acc_num = _clean_str(row[1])
+            if acc_num and acc_num not in ('счета', 'лицевого', 'п/п'):
+                rows_data.append(row)
+        except (ValueError, TypeError):
+            continue
 
-    rows_data = all_rows[data_start - 1:]
     result = []
 
     for row in rows_data:
