@@ -67,7 +67,10 @@ const MasterMapMulti: React.FC<Props> = ({ masters, height = '400px' }) => {
   return (
     <div style={{ height, borderRadius: 8, overflow: 'hidden' }}>
       <MapContainer center={[center.lat, center.lon]} zoom={13} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
-        <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <TileLayer
+          attribution='&copy; <a href="https://videoservice.ru">VideoService</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
         <FitBounds points={masters} />
         {masters.map(m => (
           <Marker key={m.master_id} position={[m.lat, m.lon]} icon={m.is_online ? onlineIcon : offlineIcon}>

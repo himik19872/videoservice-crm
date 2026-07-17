@@ -45,7 +45,7 @@ const MasterMap: React.FC<MasterMapProps> = ({ latitude, longitude, masterName, 
         scrollWheelZoom={false}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          attribution='&copy; <a href="https://videoservice.ru">VideoService</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <RecenterMap lat={latitude} lng={longitude} />
