@@ -117,7 +117,7 @@ const ClientsDetailPage: React.FC = () => {
 
   const handleEditClient = async (values: any) => {
     try {
-      await api.put(`/clients/${id}/`, values);
+      await api.patch(`/clients/${id}/`, values);
       setEditModalOpen(false);
       message.success('Клиент обновлён');
       fetchClient();
