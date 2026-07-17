@@ -1506,12 +1506,14 @@ class SystemSettingsViewSet(viewsets.ViewSet):
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            # 3. Распаковываем
+            # 3. Распаковываем через zipfile (встроенный Python, без unzip)
             extract_dir = '/tmp/repo_extracted'
             if os.path.exists(extract_dir):
                 shutil.rmtree(extract_dir)
             os.makedirs(extract_dir)
-            subprocess.run(['unzip', '-q', tmp_zip, '-d', extract_dir], timeout=30)
+            import zipfile
+            with zipfile.ZipFile(tmp_zip, 'r') as zf:
+                zf.extractall(extract_dir)
             os.remove(tmp_zip)
 
             # 4. Копируем backend из архива
