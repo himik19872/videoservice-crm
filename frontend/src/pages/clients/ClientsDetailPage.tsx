@@ -117,12 +117,15 @@ const ClientsDetailPage: React.FC = () => {
 
   const handleEditClient = async (values: any) => {
     try {
-      await api.patch(`/clients/${id}/`, values);
+      // Не отправляем computed-поля
+      delete values.entrance_number;
+      const res = await api.patch(`/clients/${id}/`, values);
       setEditModalOpen(false);
       message.success('Клиент обновлён');
       fetchClient();
-    } catch (error) {
-      message.error('Ошибка обновления');
+    } catch (error: any) {
+      const msg = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+      message.error('Ошибка обновления: ' + msg.substring(0, 150));
     }
   };
 
