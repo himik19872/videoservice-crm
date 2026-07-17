@@ -37,7 +37,7 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
     Returns:
         dict с статистикой импорта
     """
-    from .models import Client, Building, ErcAccount, ErcBillingRecord
+    from .models import Client, Building, ErcAccount, ErcBillingRecord, ManagementCompany
 
     # Читаем CSV
     if isinstance(file_bytes_or_path, (str, Path)):
@@ -175,14 +175,17 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                 if not existing and full_address:
                     existing = Client.objects.filter(address=full_address, name=full_name).first()
 
+                # Разрешаем MC FK
+                mc_obj = None
+                if management_company:
+                    mc_obj, _ = ManagementCompany.objects.get_or_create(name=management_company)
+
                 client_data = {
                     'name': full_name or 'Не определено',
                     'address': full_address,
                     'building': building,
                     'apartment': apartment,
-                    'entrance': entrance,
-                    'entrance_number': entrance,
-                    'management_company': management_company,
+                    'management_company': mc_obj,
                     'district': district,
                     'personal_account_number': personal_account,
                     'source': 'excel_import',
@@ -222,6 +225,11 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     erc_account.full_name = full_name
                     erc_account.save(update_fields=['full_name'])
 
+                # ── Разрешаем MC FK ──
+                mc_obj = None
+                if management_company:
+                    mc_obj, _ = ManagementCompany.objects.get_or_create(name=management_company)
+
                 # ── Также создать/обновить Client для ЕРЦ ──
                 client_existing = None
                 if personal_account:
@@ -234,15 +242,13 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     'address': full_address,
                     'building': building,
                     'apartment': apartment,
-                    'entrance': entrance or '',
-                    'management_company': management_company or '',
+                    'management_company': mc_obj,
                     'district': district,
                     'personal_account_number': personal_account,
                     'source': 'erc',
                 }
 
                 if client_existing:
-                    # Обновляем source на erc и добавляем недостающие поля
                     if client_existing.source != 'erc':
                         client_existing.source = 'erc'
                     for k, v in client_data.items():

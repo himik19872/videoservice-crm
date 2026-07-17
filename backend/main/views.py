@@ -25,6 +25,7 @@ from .models import OutgoingInvoice, OutgoingInvoiceItem
 from .models import CallLog
 from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, AsteriskIvrOption
 from .models import AsteriskVoicemail, AsteriskCallRecording
+from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -47,6 +48,7 @@ from .serializers import CallLogSerializer
 from .serializers import AsteriskSipPeerSerializer, AsteriskTrunkSerializer, AsteriskRouteSerializer
 from .serializers import AsteriskIvrSerializer, AsteriskIvrOptionSerializer
 from .serializers import AsteriskVoicemailSerializer, AsteriskCallRecordingSerializer
+from .serializers import BuildingEntranceSerializer, ManagementCompanySerializer, TariffSerializer, PaymentRecordSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -2901,6 +2903,59 @@ class ErcBillingRecordViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['account', 'period']
     search_fields = ['account__account_number', 'account__full_name', 'account__address']
+
+
+# ══════════════════════════════════════════════════════════════════
+# Справочники: подъезды, УК, тарифы, внутренние платежи
+# ══════════════════════════════════════════════════════════════════
+
+class BuildingEntranceViewSet(viewsets.ModelViewSet):
+    """Подъезды домов"""
+    queryset = BuildingEntrance.objects.select_related('building').all()
+    serializer_class = BuildingEntranceSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['building']
+
+
+class ManagementCompanyViewSet(viewsets.ModelViewSet):
+    """Управляющие компании / ТСЖ"""
+    queryset = ManagementCompany.objects.all()
+    serializer_class = ManagementCompanySerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'short_name', 'inn']
+
+    @action(detail=True, methods=['post'])
+    def apply_tariff(self, request, pk=None):
+        """Применить тариф ко всем квартирам этой УК"""
+        company = self.get_object()
+        tariff_id = request.data.get('tariff_id')
+        if not tariff_id:
+            return Response({'error': 'Укажите tariff_id'}, status=400)
+        try:
+            tariff = Tariff.objects.get(id=tariff_id)
+        except Tariff.DoesNotExist:
+            return Response({'error': 'Тариф не найден'}, status=404)
+
+        updated = Client.objects.filter(management_company=company).update(
+            tariff=tariff, monthly_payment=tariff.amount
+        )
+        return Response({'ok': True, 'updated_clients': updated, 'tariff': TariffSerializer(tariff).data})
+
+
+class TariffViewSet(viewsets.ModelViewSet):
+    """Тарифы на обслуживание"""
+    queryset = Tariff.objects.all()
+    serializer_class = TariffSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name']
+
+
+class PaymentRecordViewSet(viewsets.ModelViewSet):
+    """Внутренние платежи (не ЕРЦ)"""
+    queryset = PaymentRecord.objects.select_related('client').all()
+    serializer_class = PaymentRecordSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['client', 'payment_type', 'period']
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -13,6 +13,7 @@ from .models import OutgoingInvoice, OutgoingInvoiceItem
 from .models import CallLog
 from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, AsteriskIvrOption
 from .models import AsteriskVoicemail, AsteriskCallRecording
+from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -134,6 +135,11 @@ class ClientSerializer(serializers.ModelSerializer):
     region_id = serializers.PrimaryKeyRelatedField(
         queryset=Region.objects.all(), source='region', write_only=True, required=False, allow_null=True
     )
+    tariff = serializers.PrimaryKeyRelatedField(queryset=Tariff.objects.all(), required=False, allow_null=True)
+    tariff_name = serializers.SerializerMethodField()
+    tariff_amount = serializers.SerializerMethodField()
+    management_company_name = serializers.SerializerMethodField()
+    entrance_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Client
@@ -141,11 +147,60 @@ class ClientSerializer(serializers.ModelSerializer):
             'id', 'full_name', 'phone', 'email', 'address',
             'region', 'region_id', 'is_legal', 'inn', 'kpp', 'ogrn',
             'legal_address', 'director_name',
-            'personal_account_number', 'entrance_number', 'management_company',
-            'district', 'source',
+            'personal_account_number',
+            'management_company', 'management_company_name',
+            'entrance', 'entrance_number',
+            'apartment', 'district',
+            'contract_type', 'erc_enabled', 'tariff', 'tariff_name', 'tariff_amount',
+            'monthly_payment', 'source',
             'created_at', 'notes'
         ]
         read_only_fields = ['id', 'created_at']
+
+    def get_tariff_name(self, obj):
+        return obj.tariff.name if obj.tariff else None
+
+    def get_tariff_amount(self, obj):
+        return str(obj.tariff.amount) if obj.tariff else None
+
+    def get_management_company_name(self, obj):
+        return obj.management_company.name if obj.management_company else None
+
+    def get_entrance_number(self, obj):
+        return obj.entrance.number if obj.entrance else None
+
+
+class BuildingEntranceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BuildingEntrance
+        fields = ['id', 'building', 'number', 'apartment_from', 'apartment_to', 'apartments_count', 'notes']
+
+
+class ManagementCompanySerializer(serializers.ModelSerializer):
+    clients_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ManagementCompany
+        fields = ['id', 'name', 'short_name', 'inn', 'phone', 'email', 'notes', 'clients_count']
+
+    def get_clients_count(self, obj):
+        return obj.clients.count()
+
+
+class TariffSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tariff
+        fields = ['id', 'name', 'amount', 'description', 'is_active', 'created_at']
+        read_only_fields = ['created_at']
+
+
+class PaymentRecordSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source='client.name', read_only=True)
+
+    class Meta:
+        model = PaymentRecord
+        fields = ['id', 'client', 'client_name', 'period', 'amount', 'payment_type', 'description', 'created_at']
+        read_only_fields = ['created_at']
 
 
 class EquipmentSerializer(serializers.ModelSerializer):

@@ -94,6 +94,61 @@ class Building(models.Model):
         return str(self)
 
 
+class BuildingEntrance(models.Model):
+    """Подъезд дома — детализация по подъездам."""
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='entrances', verbose_name=_('Дом'))
+    number = models.PositiveIntegerField(verbose_name=_('Номер подъезда'))
+    apartment_from = models.PositiveIntegerField(default=0, verbose_name=_('Квартиры с'))
+    apartment_to = models.PositiveIntegerField(default=0, verbose_name=_('Квартиры по'))
+    apartments_count = models.PositiveIntegerField(default=0, verbose_name=_('Кол-во квартир'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+
+    class Meta:
+        verbose_name = _('Подъезд дома')
+        verbose_name_plural = _('Подъезды домов')
+        ordering = ['building', 'number']
+        unique_together = ['building', 'number']
+
+    def __str__(self):
+        return f'{self.building}, подъезд №{self.number} (кв. {self.apartment_from}–{self.apartment_to})'
+
+
+class ManagementCompany(models.Model):
+    """Управляющая компания / ТСЖ — справочник."""
+    name = models.CharField(max_length=300, unique=True, verbose_name=_('Название'))
+    short_name = models.CharField(max_length=100, blank=True, verbose_name=_('Короткое название'))
+    inn = models.CharField(max_length=12, blank=True, verbose_name=_('ИНН'))
+    phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
+    email = models.EmailField(blank=True, verbose_name=_('Email'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
+
+    class Meta:
+        verbose_name = _('Управляющая компания')
+        verbose_name_plural = _('Управляющие компании')
+        ordering = ['name']
+
+    def __str__(self):
+        return self.short_name or self.name
+
+
+class Tariff(models.Model):
+    """Тариф на обслуживание (ежемесячный платёж с квартиры)."""
+    name = models.CharField(max_length=200, verbose_name=_('Название тарифа'))
+    amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_('Сумма (₽/мес)'))
+    description = models.TextField(blank=True, verbose_name=_('Описание'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+
+    class Meta:
+        verbose_name = _('Тариф')
+        verbose_name_plural = _('Тарифы')
+        ordering = ['amount']
+
+    def __str__(self):
+        return f'{self.name} — {self.amount} ₽/мес'
+
+
 class Region(models.Model):
     """Район обслуживания"""
     name = models.CharField(max_length=100, verbose_name=_('Название'))
@@ -167,8 +222,8 @@ class Client(models.Model):
     
     # Привязка к дому (основная адресная структура)
     building = models.ForeignKey(Building, on_delete=models.SET_NULL, null=True, blank=True, related_name='residents', verbose_name=_('Дом'))
+    entrance = models.ForeignKey(BuildingEntrance, on_delete=models.SET_NULL, null=True, blank=True, related_name='residents', verbose_name=_('Подъезд'))
     apartment = models.CharField(max_length=20, blank=True, verbose_name=_('Квартира'))
-    entrance = models.CharField(max_length=10, blank=True, verbose_name=_('Подъезд'))
     
     max_user_id = models.CharField(max_length=100, blank=True, verbose_name=_('Max user ID'))
     max_linked_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Max привязан'))
@@ -181,8 +236,17 @@ class Client(models.Model):
     director_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО руководителя'))
     # Импорт из Excel — база клиентов
     personal_account_number = models.CharField(max_length=50, blank=True, null=True, db_index=True, verbose_name=_('Номер лицевого счета'))
-    entrance_number = models.CharField(max_length=20, blank=True, verbose_name=_('№ парадной/подъезда'))  # устаревшее, оставлено для совместимости
-    management_company = models.CharField(max_length=300, blank=True, verbose_name=_('Управляющая компания/ТСЖ'))
+    management_company = models.ForeignKey(ManagementCompany, on_delete=models.SET_NULL, null=True, blank=True, related_name='clients', verbose_name=_('Управляющая компания/ТСЖ'))
+    # === НОВЫЕ ПОЛЯ ===
+    contract_type = models.CharField(max_length=30, default='erc', verbose_name=_('Тип договора'),
+        choices=[
+            ('erc', _('ЕРЦ')),
+            ('uk_tszh', _('УК / ТСЖ')),
+            ('one_time', _('Разовый платный выезд')),
+        ])
+    erc_enabled = models.BooleanField(default=True, verbose_name=_('ЕРЦ (да/нет)'))
+    tariff = models.ForeignKey(Tariff, on_delete=models.SET_NULL, null=True, blank=True, related_name='clients', verbose_name=_('Тариф'))
+    monthly_payment = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Ежемесячный платёж (₽)'))
     # Расширенный разбор адреса при импорте
     district = models.CharField(max_length=200, blank=True, verbose_name=_('Район (муниципальный)'))
     source = models.CharField(max_length=20, default='manual', verbose_name=_('Источник'),
@@ -197,6 +261,29 @@ class Client(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.phone})"
+
+
+class PaymentRecord(models.Model):
+    """Внутренний платёж / начисление (не из ЕРЦ) — от УК, ТСЖ, разовые."""
+    PAYMENT_TYPE_CHOICES = [
+        ('accrual', _('Начисление')),
+        ('payment', _('Оплата')),
+        ('debt', _('Задолженность')),
+    ]
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='payment_records', verbose_name=_('Клиент'))
+    period = models.DateField(verbose_name=_('Период'))
+    amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_('Сумма'))
+    payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPE_CHOICES, default='accrual', verbose_name=_('Тип'))
+    description = models.CharField(max_length=300, blank=True, verbose_name=_('Описание'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+
+    class Meta:
+        verbose_name = _('Платёж (внутренний)')
+        verbose_name_plural = _('Платежи (внутренние)')
+        ordering = ['-period']
+
+    def __str__(self):
+        return f'{self.client.name}: {self.get_payment_type_display()} {self.amount}₽ ({self.period.strftime("%m.%Y")})'
 
 
 class Equipment(models.Model):
