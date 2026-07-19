@@ -40,10 +40,11 @@ import MessagesPage from './pages/MessagesPage';
 import EstimatesPage from './pages/estimates/EstimatesPage';
 import EstimateDetailPage from './pages/estimates/EstimateDetailPage';
 import EstimateServicesPage from './pages/estimates/EstimateServicesPage';
-import LegalEntitiesPage from './pages/settings/LegalEntitiesPage';
+import LegalEntitiesPage from './pages/LegalEntitiesPage';
 import EstimateSettingsPage from './pages/settings/EstimateSettingsPage';
 import UpdatePage from './pages/settings/UpdatePage';
 import SystemStatsPage from './pages/settings/SystemStatsPage';
+import MigrationPage from './pages/settings/MigrationPage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import ImportPage from './pages/ImportPage';
@@ -51,8 +52,12 @@ import ErcPaymentsPage from './pages/ErcPaymentsPage';
 import StorageLocationsPage from './pages/StorageLocationsPage';
 import StorageLocationDetailPage from './pages/StorageLocationDetailPage';
 import CompaniesPage from './pages/CompaniesPage';
+import CompanyDetailPage from './pages/CompanyDetailPage';
+import CompanyCreatePage from './pages/CompanyCreatePage';
 import TariffsPage from './pages/TariffsPage';
 import EntrancesPage from './pages/EntrancesPage';
+import EntranceDetailPage from './pages/EntranceDetailPage';
+import BewardDevicesPage from './pages/BewardDevicesPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
 import MasterOrdersPage from './pages/master/MasterOrdersPage';
 import MasterProfilePage from './pages/master/MasterProfilePage';
@@ -90,6 +95,7 @@ function AppContent() {
           <Route path="/orders/create" element={<OrdersCreatePage />} />
           <Route path="/orders/:id" element={<OrdersDetailPage />} />
           <Route path="/orders/confirm" element={<OrdersConfirmPage />} />
+          <Route path="/legal-entities" element={<LegalEntitiesPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/create" element={<ClientsCreatePage />} />
           <Route path="/clients/:id" element={<ClientsDetailPage />} />
@@ -112,9 +118,17 @@ function AppContent() {
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="/storage-locations" element={<StorageLocationsPage />} />
           <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
-          <Route path="/management-companies" element={<CompaniesPage />} />
+          <Route path="/management-companies/create" element={<CompanyCreatePage />} />
+          <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+          <Route path="/management-companies/create" element={<CompanyCreatePage />} />
+        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+        <Route path="/management-companies" element={<CompaniesPage />} />
+        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+          <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
           <Route path="/tariffs" element={<TariffsPage />} />
           <Route path="/entrances" element={<EntrancesPage />} />
+          <Route path="/entrances/:id" element={<EntranceDetailPage />} />
+          <Route path="/beward-devices" element={<BewardDevicesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -152,6 +166,7 @@ function AppContent() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:id" element={<OrdersDetailPage />} />
+          <Route path="/legal-entities" element={<LegalEntitiesPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:id" element={<ClientsDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
@@ -178,6 +193,7 @@ function AppContent() {
           <Route path="/orders/create" element={<OrdersCreatePage />} />
           <Route path="/orders/:id" element={<OrdersDetailPage />} />
           <Route path="/orders/confirm" element={<OrdersConfirmPage />} />
+          <Route path="/legal-entities" element={<LegalEntitiesPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/create" element={<ClientsCreatePage />} />
           <Route path="/clients/:id" element={<ClientsDetailPage />} />
@@ -200,9 +216,17 @@ function AppContent() {
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="/storage-locations" element={<StorageLocationsPage />} />
           <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
-          <Route path="/management-companies" element={<CompaniesPage />} />
+          <Route path="/management-companies/create" element={<CompanyCreatePage />} />
+          <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+          <Route path="/management-companies/create" element={<CompanyCreatePage />} />
+        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+        <Route path="/management-companies" element={<CompaniesPage />} />
+        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+          <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
           <Route path="/tariffs" element={<TariffsPage />} />
           <Route path="/entrances" element={<EntrancesPage />} />
+          <Route path="/entrances/:id" element={<EntranceDetailPage />} />
+          <Route path="/beward-devices" element={<BewardDevicesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AdminLayout>
@@ -219,6 +243,7 @@ function AppContent() {
         <Route path="/orders/create" element={<OrdersCreatePage />} />
         <Route path="/orders/:id" element={<OrdersDetailPage />} />
         <Route path="/orders/confirm" element={<OrdersConfirmPage />} />
+        <Route path="/legal-entities" element={<LegalEntitiesPage />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/create" element={<ClientsCreatePage />} />
         <Route path="/clients/:id" element={<ClientsDetailPage />} />
@@ -237,6 +262,7 @@ function AppContent() {
         <Route path="/settings/asterisk" element={<AsteriskSettingsPage />} />
         <Route path="/settings/update" element={<UpdatePage />} />
         <Route path="/settings/stats" element={<SystemStatsPage />} />
+        <Route path="/settings/migration" element={<MigrationPage />} />
         <Route path="/settings/legal-entities" element={<LegalEntitiesPage />} />
         <Route path="/settings/estimate-template" element={<EstimateSettingsPage />} />
         <Route path="/settings/admin" element={<AdminSettingsPage />} />
@@ -256,9 +282,16 @@ function AppContent() {
         <Route path="/import" element={<ImportPage />} />
         <Route path="/erc-payments" element={<ErcPaymentsPage />} />
         <Route path="/storage-locations" element={<StorageLocationsPage />} />
-        <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />          <Route path="/management-companies" element={<CompaniesPage />} />
-          <Route path="/tariffs" element={<TariffsPage />} />
-          <Route path="/entrances" element={<EntrancesPage />} />        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
+        <Route path="/management-companies/create" element={<CompanyCreatePage />} />
+        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+        <Route path="/management-companies" element={<CompaniesPage />} />
+        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+        <Route path="/tariffs" element={<TariffsPage />} />
+        <Route path="/entrances" element={<EntrancesPage />} />
+        <Route path="/entrances/:id" element={<EntranceDetailPage />} />
+        <Route path="/beward-devices" element={<BewardDevicesPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>
   );

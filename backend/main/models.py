@@ -55,6 +55,7 @@ class Building(models.Model):
     apartments_count = models.PositiveIntegerField(default=0, verbose_name=_('Количество квартир'))
     entrances_count = models.PositiveIntegerField(default=1, verbose_name=_('Количество подъездов'))
     management_company = models.CharField(max_length=300, blank=True, verbose_name=_('Управляющая компания / ТСЖ'))
+    management_company_fk = models.ForeignKey('ManagementCompany', on_delete=models.SET_NULL, null=True, blank=True, related_name='buildings_list', verbose_name=_('УК/ТСЖ (справочник)'))
     equipment_type = models.CharField(max_length=30, choices=EQUIPMENT_TYPES, blank=True, verbose_name=_('Тип оборудования'))
     equipment_list = models.TextField(blank=True, verbose_name=_('Список оборудования'))
     programming_code = models.CharField(max_length=200, blank=True, verbose_name=_('Код программирования'))
@@ -101,6 +102,9 @@ class BuildingEntrance(models.Model):
     apartment_from = models.PositiveIntegerField(default=0, verbose_name=_('Квартиры с'))
     apartment_to = models.PositiveIntegerField(default=0, verbose_name=_('Квартиры по'))
     apartments_count = models.PositiveIntegerField(default=0, verbose_name=_('Кол-во квартир'))
+    ip_address = models.CharField(max_length=100, blank=True, verbose_name=_('IP-адрес панели'))
+    access_code = models.CharField(max_length=100, blank=True, verbose_name=_('Код открытия двери'))
+    programming_code = models.CharField(max_length=100, blank=True, verbose_name=_('Код программирования ключей'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
 
     class Meta:
@@ -113,13 +117,52 @@ class BuildingEntrance(models.Model):
         return f'{self.building}, подъезд №{self.number} (кв. {self.apartment_from}–{self.apartment_to})'
 
 
+class BewardDevice(models.Model):
+    """Справочник IP-адресов панелей Beward (умные домофоны)."""
+    region = models.CharField(max_length=200, blank=True, verbose_name=_('Район'))
+    address = models.TextField(blank=True, verbose_name=_('Адрес'))
+    entrance_number = models.CharField(max_length=20, blank=True, verbose_name=_('Номер подъезда'))
+    ip_address = models.CharField(max_length=100, blank=True, verbose_name=_('IP-адрес'))
+    access_code = models.CharField(max_length=100, blank=True, verbose_name=_('Код открытия двери'))
+    programming_code = models.CharField(max_length=100, blank=True, verbose_name=_('Код программирования ключей'))
+    door_opening_code = models.CharField(max_length=100, blank=True, verbose_name=_('Код открытия двери (доп.)'))
+    apartment_range = models.CharField(max_length=100, blank=True, verbose_name=_('Нумерация квартир'))
+    date_issued = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата выдачи ключей'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    building = models.ForeignKey(Building, on_delete=models.SET_NULL, null=True, blank=True, related_name='beward_devices', verbose_name=_('Привязанный дом'))
+    entrance = models.ForeignKey(BuildingEntrance, on_delete=models.SET_NULL, null=True, blank=True, related_name='beward_devices', verbose_name=_('Привязанный подъезд'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлён'))
+
+    class Meta:
+        verbose_name = _('Панель Beward')
+        verbose_name_plural = _('Панели Beward (справочник IP)')
+        ordering = ['address', 'entrance_number']
+
+    def __str__(self):
+        return f'Beward {self.ip_address} — {self.address}, под. {self.entrance_number}'
+
+
 class ManagementCompany(models.Model):
     """Управляющая компания / ТСЖ — справочник."""
+    PAYMENT_METHODS = [
+        ('contract', _('По договору с УК/ТСЖ')),
+        ('erc', _('Через ЕРЦ (прямые платежи жителей)')),
+        ('mixed', _('Смешанная')),
+    ]
+
     name = models.CharField(max_length=300, unique=True, verbose_name=_('Название'))
     short_name = models.CharField(max_length=100, blank=True, verbose_name=_('Короткое название'))
     inn = models.CharField(max_length=12, blank=True, verbose_name=_('ИНН'))
     phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
     email = models.EmailField(blank=True, verbose_name=_('Email'))
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default='contract', verbose_name=_('Способ оплаты за домофон'))
+    is_active = models.BooleanField(default=True, verbose_name=_('На обслуживании'))
+    contract_number = models.CharField(max_length=50, blank=True, verbose_name=_('№ договора'))
+    contract_date = models.DateField(null=True, blank=True, verbose_name=_('Дата договора'))
+    contract_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Сумма договора в мес.'))
+    terminated_at = models.DateField(null=True, blank=True, verbose_name=_('Дата расторжения'))
+    termination_reason = models.TextField(blank=True, verbose_name=_('Причина расторжения'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
 
@@ -130,6 +173,96 @@ class ManagementCompany(models.Model):
 
     def __str__(self):
         return self.short_name or self.name
+
+
+class MCContact(models.Model):
+    """Контактное лицо в УК/ТСЖ (сотрудник, с которым мы общаемся)."""
+    management_company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name='contacts')
+    name = models.CharField(max_length=200, verbose_name=_('ФИО'))
+    position = models.CharField(max_length=200, blank=True, verbose_name=_('Должность'))
+    phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
+    email = models.EmailField(blank=True, verbose_name=_('Email'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _('Контакт УК')
+        verbose_name_plural = _('Контакты УК')
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} — {self.management_company.short_name or self.management_company.name}'
+
+
+class MCPayment(models.Model):
+    """Начисление/оплата от УК (бухгалтерия)."""
+    management_company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name='payments')
+    period = models.DateField(verbose_name=_('Период (месяц)'))
+    amount_charged = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Начислено'))
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Оплачено'))
+    is_confirmed = models.BooleanField(default=False, verbose_name=_('Подтверждено бухгалтером'))
+    confirmed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Подтвердил'))
+    confirmed_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата подтверждения'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _('Платёж УК')
+        verbose_name_plural = _('Платежи УК')
+        ordering = ['-period']
+        unique_together = ['management_company', 'period']
+
+    def __str__(self):
+        return f'{self.management_company}: {self.period} — {self.amount_paid}/{self.amount_charged}'
+
+
+class MCComment(models.Model):
+    """История обращений/комментариев по УК (звонки, жалобы, письма...)"""
+    management_company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name='comments')
+    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, verbose_name=_('Автор'))
+    comment_type = models.CharField(max_length=30, default='note',
+        choices=[('call', _('Звонок')), ('email', _('Письмо')), ('complaint', _('Жалоба')),
+                 ('request', _('Запрос')), ('meeting', _('Встреча')), ('note', _('Заметка'))])
+    text = models.TextField(verbose_name=_('Текст'))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _('Комментарий УК')
+        verbose_name_plural = _('Комментарии УК')
+        ordering = ['-created_at']
+
+
+class BuildingSystem(models.Model):
+    """Система в доме (домофон, видеонаблюдение, СКУД, ворота...) со своим тарифом."""
+    SYSTEM_TYPES = [
+        ('intercom', _('Домофон')),
+        ('cctv', _('Видеонаблюдение')),
+        ('access_control', _('СКУД')),
+        ('dispatch', _('Диспетчеризация')),
+        ('auskue', _('АУСКУЭ')),
+        ('gate', _('Ворота')),
+        ('barrier', _('Шлагбаум')),
+        ('fire_alarm', _('Пожарная сигнализация')),
+        ('elevator_dispatch', _('Диспетчеризация лифтов')),
+        ('other', _('Другое')),
+    ]
+
+    building = models.ForeignKey('Building', on_delete=models.CASCADE, related_name='systems', verbose_name=_('Дом'))
+    system_type = models.CharField(max_length=30, choices=SYSTEM_TYPES, verbose_name=_('Тип системы'))
+    tariff = models.ForeignKey('Tariff', on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Тариф'))
+    monthly_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Сумма в месяц'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активна'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
+
+    class Meta:
+        verbose_name = _('Система дома')
+        verbose_name_plural = _('Системы домов')
+        ordering = ['building', 'system_type']
+        unique_together = ['building', 'system_type']
+
+    def __str__(self):
+        return f'{self.get_system_type_display()} — {self.building}'
 
 
 class Tariff(models.Model):
@@ -229,6 +362,15 @@ class Client(models.Model):
     max_linked_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Max привязан'))
     # Юридическое лицо клиента (для смет и КП)
     is_legal = models.BooleanField(default=False, verbose_name=_('Юридическое лицо'))
+    legal_type = models.CharField(max_length=30, blank=True, verbose_name=_('Тип юрлица'),
+        choices=[
+            ('uk_tszh', _('УК / ТСЖ')),
+            ('developer', _('Застройщик')),
+            ('contractor', _('Подрядчик')),
+            ('partner', _('Партнёр')),
+            ('independent', _('Самостоятельное')),
+            ('other', _('Другое')),
+        ])
     inn = models.CharField(max_length=12, blank=True, verbose_name=_('ИНН'))
     kpp = models.CharField(max_length=9, blank=True, verbose_name=_('КПП'))
     ogrn = models.CharField(max_length=15, blank=True, verbose_name=_('ОГРН'))

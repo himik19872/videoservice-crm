@@ -6,7 +6,7 @@ import {
   BarChartOutlined, SettingOutlined, ShopOutlined, DollarOutlined,
   HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined, ToolOutlined, BankOutlined, FileTextOutlined,
   UserOutlined, CheckCircleOutlined, FileExcelOutlined, HddOutlined,
-  PhoneOutlined, ApartmentOutlined,
+  PhoneOutlined, ApartmentOutlined, SwapOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,6 +44,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/orders/create',
       icon: <AppstoreOutlined />,
       label: 'Новая заявка',
+    },
+    {
+      key: '/legal-entities',
+      icon: <BankOutlined />,
+      label: 'Юрлица',
     },
     {
       key: '/clients',
@@ -104,6 +109,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/entrances',
       icon: <ApartmentOutlined />,
       label: 'Подъезды',
+    },
+    {
+      key: '/beward-devices',
+      icon: <SafetyCertificateOutlined />,
+      label: 'Beward IP',
     },
     {
       key: '/finance',
@@ -174,6 +184,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/settings/admin',
       icon: <SettingOutlined />,
       label: 'Настройки',
+    },
+    {
+      key: '/settings/migration',
+      icon: <SwapOutlined />,
+      label: 'Миграция',
     },
     {
       key: '/settings/stats',

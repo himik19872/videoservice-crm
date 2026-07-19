@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Tabs, Table, message, Spin, Empty, Modal, Form, Input, Select, Switch, InputNumber } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PlusOutlined, DollarOutlined } from '@ant-design/icons';
-import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeftOutlined, EditOutlined, PlusOutlined, DollarOutlined, HomeOutlined, ApartmentOutlined } from '@ant-design/icons';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import api from '../../services/api';
 import type { Client, Order, ErcBillingRecord, ManagementCompany, Tariff, PaymentRecord } from '../../types';
 
@@ -98,6 +98,9 @@ const ClientsDetailPage: React.FC = () => {
     } catch (e) {}
   };
 
+  const [buildings, setBuildings] = useState<any[]>([]);
+  const [entrances, setEntrances] = useState<any[]>([]);
+
   const openEditModal = () => {
     if (!client) return;
     editForm.setFieldsValue({
@@ -105,20 +108,35 @@ const ClientsDetailPage: React.FC = () => {
       phone: client.phone,
       email: client.email,
       management_company: client.management_company || undefined,
-      entrance_number: client.entrance_number,
+      building: client.building || undefined,
+      entrance: client.entrance || undefined,
       contract_type: client.contract_type || 'erc',
       erc_enabled: client.erc_enabled,
       tariff: client.tariff || undefined,
       monthly_payment: parseFloat(client.monthly_payment) || 0,
       notes: client.notes,
     });
+    // Загружаем дома и подъезды если ещё не загружены
+    if (buildings.length === 0) {
+      api.get('/buildings/').then(r => setBuildings(r.data.results || r.data || [])).catch(() => {});
+    }
+    if (client.building) {
+      api.get(`/entrances/?building=${client.building}`).then(r => setEntrances(r.data.results || r.data || [])).catch(() => {});
+    }
     setEditModalOpen(true);
+  };
+
+  const handleBuildingChange = (bldId: number | undefined) => {
+    editForm.setFieldValue('entrance', undefined);
+    setEntrances([]);
+    if (bldId) {
+      api.get(`/entrances/?building=${bldId}`).then(r => setEntrances(r.data.results || r.data || [])).catch(() => {});
+    }
   };
 
   const handleEditClient = async (values: any) => {
     try {
-      // Не отправляем computed-поля
-      delete values.entrance_number;
+      // building и entrance уже в правильном формате (ID)
       const res = await api.patch(`/clients/${id}/`, values);
       setEditModalOpen(false);
       message.success('Клиент обновлён');
@@ -181,7 +199,13 @@ const ClientsDetailPage: React.FC = () => {
           <Descriptions.Item label="ФИО">{client.full_name}</Descriptions.Item>
           <Descriptions.Item label="Телефон">{client.phone || '-'}</Descriptions.Item>
           <Descriptions.Item label="Email">{client.email || '-'}</Descriptions.Item>
-          <Descriptions.Item label="Адрес" span={2}>{client.address}</Descriptions.Item>
+          <Descriptions.Item label="Адрес" span={2}>
+            <Space>
+              <span>{client.address}</span>
+              {client.building && <Link to={`/buildings/${client.building}`}><Button size="small" icon={<HomeOutlined />} title="Карточка дома">Дом</Button></Link>}
+              {client.entrance && <Link to={`/entrances/${client.entrance}`}><Button size="small" icon={<ApartmentOutlined />} title="Карточка подъезда">Подъезд</Button></Link>}
+            </Space>
+          </Descriptions.Item>
           <Descriptions.Item label="УК / ТСЖ">{client.management_company_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="№ парадной / подъезда">{client.entrance_number || '-'}</Descriptions.Item>
           <Descriptions.Item label="Лицевой счёт">{client.personal_account_number || '-'}</Descriptions.Item>
@@ -258,7 +282,27 @@ const ClientsDetailPage: React.FC = () => {
           <Form.Item name="full_name" label="ФИО"><Input /></Form.Item>
           <Form.Item name="phone" label="Телефон"><Input /></Form.Item>
           <Form.Item name="email" label="Email"><Input /></Form.Item>
-          <Form.Item name="entrance_number" label="№ подъезда"><Input /></Form.Item>
+          <Form.Item name="building" label="Дом">
+            <Select
+              allowClear showSearch placeholder="Выберите дом"
+              filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+              onChange={handleBuildingChange}
+              options={buildings.map((b: any) => ({
+                label: `${b.street_name}, д. ${b.house_number}${b.building_number ? ' корп. ' + b.building_number : ''} (${b.city})`,
+                value: b.id,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="entrance" label="Подъезд">
+            <Select
+              allowClear showSearch placeholder="Сначала выберите дом"
+              filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+              options={entrances.map((e: any) => ({
+                label: `Подъезд №${e.number} (кв. ${e.apartment_from || '?'}–${e.apartment_to || '?'})`,
+                value: e.id,
+              }))}
+            />
+          </Form.Item>
           <Form.Item name="management_company" label="УК / ТСЖ">
             <Select
               allowClear

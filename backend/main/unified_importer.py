@@ -37,7 +37,7 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
     Returns:
         dict с статистикой импорта
     """
-    from .models import Client, Building, ErcAccount, ErcBillingRecord, ManagementCompany
+    from .models import Client, Building, ErcAccount, ErcBillingRecord, ManagementCompany, BuildingEntrance
 
     # Читаем CSV
     if isinstance(file_bytes_or_path, (str, Path)):
@@ -65,43 +65,87 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
 
     building_cache = {}  # (city, street, house, building) → Building
 
+    def smart_find_building(street_name, house_number, building_number='', city=''):
+        """
+        Умный поиск Building: не плодит дубликаты типа 'Лермонтова'/'Лермонтова ул'.
+        Стратегия:
+          1. Точный матч по городу+дому+улице
+          2. icontains по улице
+          3. Обратный матч (БД-улица содержится в нашей)
+          4. Частичный матч первого слова
+        """
+        if not street_name or not house_number:
+            return None
+        
+        qs = Building.objects.filter(house_number=house_number)
+        if city:
+            city_qs = qs.filter(city__iexact=city)
+            if city_qs.exists():
+                qs = city_qs
+        if building_number:
+            bld_qs = qs.filter(building_number=building_number)
+            if bld_qs.exists():
+                qs = bld_qs
+
+        # 1. Точный icontains
+        candidates = qs.filter(street_name__icontains=street_name)
+        
+        # 2. По первому слову
+        if not candidates.exists() and street_name.split():
+            candidates = qs.filter(street_name__icontains=street_name.split()[0])
+        
+        # 3. Обратный матч
+        if not candidates.exists():
+            for b in qs:
+                if b.street_name and b.street_name.lower() in street_name.lower():
+                    candidates = qs.filter(id=b.id)
+                    break
+        
+        # 4. Наша улица в БД-улице
+        if not candidates.exists():
+            for b in qs:
+                if street_name.lower() in (b.street_name or '').lower():
+                    candidates = qs.filter(id=b.id)
+                    break
+        
+        return candidates.first()
+
     def get_or_create_building(city, street, house, building_num, district='', management_company=''):
-        """Найти или создать Building, с кешированием."""
+        """Найти или создать Building, с кешированием. Не плодит дубликаты."""
         if not street or not house:
             return None
 
-        key = (city.lower(), street.lower(), house.lower(), building_num.lower())
-        if key in building_cache:
-            return building_cache[key]
+        cache_key = (city.lower() if city else '', street.lower(), house.lower(), (building_num or '').lower(), management_company.lower() if management_company else '')
+        if cache_key in building_cache:
+            return building_cache[cache_key]
 
         if dry_run:
-            # Возвращаем фейковый объект для dry-run
             b = Building(city=city or 'Санкт-Петербург', street_name=street,
-                         house_number=house, building_number=building_num or '',
-                         district=district or '', management_company=management_company or '')
-            building_cache[key] = b
+                         house_number=house, building_number=building_num or '')
+            building_cache[cache_key] = b
             return b
 
-        b, created = Building.objects.get_or_create(
+        # Сначала ищем умно
+        b = smart_find_building(street, house, building_num, city)
+        if b:
+            # Привязываем УК, если здание найдено но без FK
+            if management_company and not b.management_company_fk:
+                mc_obj, _ = ManagementCompany.objects.get_or_create(name=management_company)
+                b.management_company_fk = mc_obj
+                b.management_company = management_company
+                b.save(update_fields=['management_company_fk', 'management_company'])
+            building_cache[cache_key] = b
+            return b
+
+        # Не нашли — создаём новый
+        b = Building.objects.create(
             city=city or 'Санкт-Петербург',
             street_name=street,
             house_number=house,
             building_number=building_num or '',
-            defaults={
-                'district': district or '',
-                'management_company': management_company or '',
-            }
         )
-
-        # Обновляем УК если была пустая
-        if not created and management_company and not b.management_company:
-            b.management_company = management_company
-            b.save(update_fields=['management_company'])
-
-        if created:
-            stats['buildings_created'] += 1
-
-        building_cache[key] = b
+        stats['buildings_created'] += 1
+        building_cache[cache_key] = b
         return b
 
     for i, row in enumerate(rows, 1):
@@ -180,10 +224,28 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                 if management_company:
                     mc_obj, _ = ManagementCompany.objects.get_or_create(name=management_company)
 
+                # Привязываем Building к УК через FK
+                entrance_obj = None
+                if building and entrance:
+                    try:
+                        ent_num = int(float(entrance))
+                        entrance_obj, _ = BuildingEntrance.objects.get_or_create(
+                            building=building, number=ent_num,
+                            defaults={'apartments_count': 0}
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+                # Привязываем УК к дому через FK
+                if mc_obj and building and not building.management_company_fk:
+                    building.management_company_fk = mc_obj
+                    building.save(update_fields=['management_company_fk'])
+
                 client_data = {
                     'name': full_name or 'Не определено',
                     'address': full_address,
                     'building': building,
+                    'entrance': entrance_obj,
                     'apartment': apartment,
                     'management_company': mc_obj,
                     'district': district,
@@ -204,7 +266,42 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
             elif row_type == 'payment':
                 stats['payment_rows'] += 1
 
+                # Если нет personal_account — всё равно создаём клиента, но не ЕРЦ
                 if not personal_account:
+                    # Создаём клиента без ЕРЦ-привязки
+                    if dry_run:
+                        continue
+
+                    # Разрешаем MC FK
+                    mc_obj = None
+                    if management_company:
+                        mc_obj, _ = ManagementCompany.objects.get_or_create(name=management_company)
+
+                    client_existing = None
+                    if building and apartment:
+                        client_existing = Client.objects.filter(building=building, apartment=apartment).first()
+                    if not client_existing and full_address:
+                        client_existing = Client.objects.filter(address=full_address, name=full_name).first()
+
+                    client_data_pure = {
+                        'name': full_name or 'Не определено',
+                        'address': full_address,
+                        'building': building,
+                        'apartment': apartment,
+                        'management_company': mc_obj,
+                        'district': district,
+                        'personal_account_number': '',
+                        'source': 'erc',
+                    }
+                    if client_existing:
+                        for k, v in client_data_pure.items():
+                            if v:
+                                setattr(client_existing, k, v)
+                        client_existing.save()
+                        stats['clients_updated'] += 1
+                    else:
+                        Client.objects.create(**client_data_pure)
+                        stats['clients_created'] += 1
                     stats['skipped'] += 1
                     continue
 
@@ -230,6 +327,22 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                 if management_company:
                     mc_obj, _ = ManagementCompany.objects.get_or_create(name=management_company)
 
+                # Привязываем Building к УК через FK
+                entrance_obj = None
+                if building and entrance:
+                    try:
+                        ent_num = int(float(entrance))
+                        entrance_obj, _ = BuildingEntrance.objects.get_or_create(
+                            building=building, number=ent_num,
+                            defaults={'apartments_count': 0}
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+                if mc_obj and building and not building.management_company_fk:
+                    building.management_company_fk = mc_obj
+                    building.save(update_fields=['management_company_fk'])
+
                 # ── Также создать/обновить Client для ЕРЦ ──
                 client_existing = None
                 if personal_account:
@@ -241,6 +354,7 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     'name': full_name or 'Не определено',
                     'address': full_address,
                     'building': building,
+                    'entrance': entrance_obj,
                     'apartment': apartment,
                     'management_company': mc_obj,
                     'district': district,

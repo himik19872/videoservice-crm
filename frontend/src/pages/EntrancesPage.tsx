@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Table, Button, Space, Modal, Form, Input, InputNumber, message, Select, Popconfirm } from 'antd';
+import { Typography, Card, Table, Button, Space, Modal, Form, Input, InputNumber, message, Select, Popconfirm, Tag } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import api from '../services/api';
 import type { BuildingEntrance } from '../types';
@@ -13,13 +13,14 @@ const EntrancesPage: React.FC = () => {
   const [editing, setEditing] = useState<BuildingEntrance | null>(null);
   const [form] = Form.useForm();
   const [buildings, setBuildings] = useState<any[]>([]);
+  const [buildingSearch, setBuildingSearch] = useState('');
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const [er, br] = await Promise.all([
         api.get('/entrances/'),
-        api.get('/buildings/'),
+        api.get('/buildings/', { params: { page_size: 2000 } }),
       ]);
       setEntrances(er.data.results || er.data);
       setBuildings(br.data.results || br.data);
@@ -46,17 +47,24 @@ const EntrancesPage: React.FC = () => {
   };
 
   const columns = [
-    { title: 'Дом', dataIndex: 'building', key: 'building', width: 180,
-      render: (id: number) => {
-        const b = buildings.find(b => b.id === id);
-        return b ? `${b.street_name}, д. ${b.house_number}${b.building_number ? ' корп. ' + b.building_number : ''}` : `Дом #${id}`;
+    { title: 'Дом', key: 'building', width: 280, ellipsis: true,
+      render: (_: any, rec: BuildingEntrance) => {
+        if (rec.building_address) return rec.building_address;
+        const b = buildings.find(b => b.id === rec.building);
+        return b ? `${b.street_name}, д. ${b.house_number}${b.building_number ? ' корп. ' + b.building_number : ''}` : `Дом #${rec.building}`;
       }
     },
     { title: 'Подъезд №', dataIndex: 'number', key: 'number', width: 90 },
+    { title: 'IP', dataIndex: 'ip_address', key: 'ip', width: 130, ellipsis: true },
+    { title: 'Код доступа', dataIndex: 'access_code', key: 'access_code', width: 110,
+      render: (c: string) => c ? <Tag color="green">{c}</Tag> : ''
+    },
+    { title: 'Код прогр.', dataIndex: 'programming_code', key: 'prog_code', width: 100,
+      render: (c: string) => c ? <Tag color="orange">{c}</Tag> : ''
+    },
     { title: 'Кв. с', dataIndex: 'apartment_from', key: 'from', width: 70, align: 'right' as const },
     { title: 'Кв. по', dataIndex: 'apartment_to', key: 'to', width: 70, align: 'right' as const },
     { title: 'Кол-во кв.', dataIndex: 'apartments_count', key: 'count', width: 90, align: 'right' as const },
-    { title: 'Примечания', dataIndex: 'notes', key: 'notes', ellipsis: true },
     {
       title: '', key: 'actions', width: 100,
       render: (_: any, rec: BuildingEntrance) => (
@@ -99,6 +107,15 @@ const EntrancesPage: React.FC = () => {
           </Form.Item>
           <Form.Item name="number" label="Номер подъезда" rules={[{ required: true }]}>
             <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="ip_address" label="IP-адрес панели">
+            <Input placeholder="10.80.0.20" />
+          </Form.Item>
+          <Form.Item name="access_code" label="Код открытия двери">
+            <Input placeholder="77780" />
+          </Form.Item>
+          <Form.Item name="programming_code" label="Код программирования ключей">
+            <Input placeholder="18684" />
           </Form.Item>
           <Form.Item name="apartment_from" label="Квартиры с №">
             <InputNumber min={1} style={{ width: '100%' }} />

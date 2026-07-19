@@ -13,7 +13,8 @@ from .models import OutgoingInvoice, OutgoingInvoiceItem
 from .models import CallLog
 from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, AsteriskIvrOption
 from .models import AsteriskVoicemail, AsteriskCallRecording
-from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord
+from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem
+from .models import MCContact, MCPayment, MCComment
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -140,20 +141,22 @@ class ClientSerializer(serializers.ModelSerializer):
     tariff_amount = serializers.SerializerMethodField()
     management_company_name = serializers.SerializerMethodField()
     entrance_number = serializers.SerializerMethodField()
+    building = serializers.PrimaryKeyRelatedField(queryset=Building.objects.all(), required=False, allow_null=True)
+    entrance = serializers.PrimaryKeyRelatedField(queryset=BuildingEntrance.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = Client
         fields = [
             'id', 'full_name', 'phone', 'email', 'address',
-            'region', 'region_id', 'is_legal', 'inn', 'kpp', 'ogrn',
+            'region', 'region_id', 'is_legal', 'legal_type', 'inn', 'kpp', 'ogrn',
             'legal_address', 'director_name',
             'personal_account_number',
             'management_company', 'management_company_name',
-            'entrance', 'entrance_number',
+            'building', 'entrance', 'entrance_number',
             'apartment', 'district',
             'contract_type', 'erc_enabled', 'tariff', 'tariff_name', 'tariff_amount',
-            'monthly_payment', 'source',
-            'created_at', 'notes'
+            'monthly_payment', 'source', 'notes',
+            'created_at',
         ]
         read_only_fields = ['id', 'created_at', 'entrance_number', 'tariff_name', 'tariff_amount', 'management_company_name']
 
@@ -175,20 +178,73 @@ class ClientSerializer(serializers.ModelSerializer):
 
 
 class BuildingEntranceSerializer(serializers.ModelSerializer):
+    building_address = serializers.SerializerMethodField()
+
     class Meta:
         model = BuildingEntrance
-        fields = ['id', 'building', 'number', 'apartment_from', 'apartment_to', 'apartments_count', 'notes']
+        fields = ['id', 'building', 'building_address', 'number', 'apartment_from', 'apartment_to',
+                  'apartments_count', 'ip_address', 'access_code', 'programming_code', 'notes']
+
+    def get_building_address(self, obj):
+        return str(obj.building) if obj.building else ''
 
 
 class ManagementCompanySerializer(serializers.ModelSerializer):
     clients_count = serializers.SerializerMethodField()
+    payment_method_display = serializers.CharField(source='get_payment_method_display', read_only=True)
+    buildings_count = serializers.SerializerMethodField()
+    apartments_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ManagementCompany
-        fields = ['id', 'name', 'short_name', 'inn', 'phone', 'email', 'notes', 'clients_count']
+        fields = ['id', 'name', 'short_name', 'inn', 'phone', 'email',
+                  'payment_method', 'payment_method_display',
+                  'is_active', 'contract_number', 'contract_date', 'contract_amount',
+                  'terminated_at', 'termination_reason',
+                  'notes', 'clients_count', 'buildings_count', 'apartments_count']
 
     def get_clients_count(self, obj):
         return obj.clients.count()
+
+    def get_buildings_count(self, obj):
+        return obj.buildings_list.count()
+
+    def get_apartments_count(self, obj):
+        from django.db.models import Sum
+        result = obj.buildings_list.aggregate(s=Sum('apartments_count'))
+        return result['s'] or 0
+
+
+class MCContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MCContact
+        fields = ['id', 'management_company', 'name', 'position', 'phone', 'email', 'notes', 'created_at']
+        read_only_fields = ['created_at']
+
+
+class MCPaymentSerializer(serializers.ModelSerializer):
+    confirmed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MCPayment
+        fields = ['id', 'management_company', 'period', 'amount_charged', 'amount_paid',
+                  'is_confirmed', 'confirmed_by', 'confirmed_by_name', 'confirmed_at', 'notes', 'created_at']
+        read_only_fields = ['created_at', 'confirmed_at']
+
+    def get_confirmed_by_name(self, obj):
+        return obj.confirmed_by.get_full_name() or obj.confirmed_by.username if obj.confirmed_by else None
+
+
+class MCCommentSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MCComment
+        fields = ['id', 'management_company', 'author', 'author_name', 'comment_type', 'text', 'created_at']
+        read_only_fields = ['created_at']
+
+    def get_author_name(self, obj):
+        return obj.author.get_full_name() or obj.author.username if obj.author else None
 
 
 class TariffSerializer(serializers.ModelSerializer):
@@ -205,6 +261,26 @@ class PaymentRecordSerializer(serializers.ModelSerializer):
         model = PaymentRecord
         fields = ['id', 'client', 'client_name', 'period', 'amount', 'payment_type', 'description', 'created_at']
         read_only_fields = ['created_at']
+
+
+class BewardDeviceSerializer(serializers.ModelSerializer):
+    building_name = serializers.SerializerMethodField()
+    entrance_info = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BewardDevice
+        fields = ['id', 'region', 'address', 'entrance_number', 'ip_address',
+                  'access_code', 'programming_code', 'door_opening_code',
+                  'apartment_range', 'date_issued', 'notes',
+                  'building', 'building_name', 'entrance', 'entrance_info',
+                  'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_building_name(self, obj):
+        return str(obj.building) if obj.building else ''
+
+    def get_entrance_info(self, obj):
+        return str(obj.entrance) if obj.entrance else ''
 
 
 class EquipmentSerializer(serializers.ModelSerializer):
@@ -280,6 +356,10 @@ class OrderSerializer(serializers.ModelSerializer):
     history = OrderHistorySerializer(many=True, read_only=True)
     media = OrderMediaSerializer(many=True, read_only=True)
     issue_orders = serializers.SerializerMethodField()
+    # Данные умного домофона из подъезда клиента
+    entrance_ip = serializers.SerializerMethodField()
+    entrance_access_code = serializers.SerializerMethodField()
+    entrance_programming_code = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -293,7 +373,9 @@ class OrderSerializer(serializers.ModelSerializer):
             'photo_report_required', 'deadline',
             'assigned_at', 'scheduled_at', 'accepted_at', 'started_at', 'paused_at',
             'completed_at', 'confirmed_at', 'confirmed_by',
-            'helpers', 'history', 'media', 'issue_orders', 'created_at', 'updated_at'
+            'helpers', 'history', 'media', 'issue_orders',
+            'entrance_ip', 'entrance_access_code', 'entrance_programming_code',
+            'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'number', 'assigned_at', 'scheduled_at', 'accepted_at', 'started_at',
@@ -369,6 +451,32 @@ class OrderSerializer(serializers.ModelSerializer):
             })
         return result
 
+    def _get_client_entrance(self, obj):
+        """Находит подъезд клиента: сначала через client.entrance, потом через building + номер."""
+        if obj.client and obj.client.entrance:
+            return obj.client.entrance
+        if obj.client and obj.client.building and obj.entrance:
+            try:
+                return BuildingEntrance.objects.get(
+                    building=obj.client.building,
+                    number=int(obj.entrance)
+                )
+            except (ValueError, BuildingEntrance.DoesNotExist):
+                pass
+        return None
+
+    def get_entrance_ip(self, obj):
+        e = self._get_client_entrance(obj)
+        return e.ip_address if e else None
+
+    def get_entrance_access_code(self, obj):
+        e = self._get_client_entrance(obj)
+        return e.access_code if e else None
+
+    def get_entrance_programming_code(self, obj):
+        e = self._get_client_entrance(obj)
+        return e.programming_code if e else None
+
 
 class ReportSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
@@ -417,6 +525,11 @@ class OrderCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         helper_ids = validated_data.pop('helper_ids', [])
+        # Авто-заполняем building из клиента, если не передан
+        if not validated_data.get('building'):
+            client = validated_data.get('client')
+            if client and client.building:
+                validated_data['building'] = client.building
         order = Order.objects.create(**validated_data)
         if helper_ids:
             order.helpers.set(helper_ids)
@@ -436,21 +549,19 @@ class OrderStatusUpdateSerializer(serializers.ModelSerializer):
 
 class BuildingSerializer(serializers.ModelSerializer):
     region = RegionSerializer(read_only=True)
-    region_id = serializers.PrimaryKeyRelatedField(
-        queryset=Region.objects.all(), source='region', write_only=True
-    )
+    region_id = serializers.PrimaryKeyRelatedField(queryset=Region.objects.all(), source='region', write_only=True)
     street_type_display = serializers.SerializerMethodField()
     equipment_type_display = serializers.SerializerMethodField()
+    management_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Building
-        fields = [
-            'id', 'region', 'region_id', 'city', 'street_type',
-            'street_type_display', 'street_name', 'house_number',
-            'building_number', 'apartments_count', 'entrances_count',
-            'equipment_type', 'equipment_type_display', 'notes',
-            'created_at', 'updated_at'
-        ]
+        fields = ['id', 'region', 'region_id', 'city', 'street_type',
+                  'street_type_display', 'street_name', 'house_number',
+                  'building_number', 'apartments_count', 'entrances_count',
+                  'management_company', 'management_company_fk', 'management_company_name',
+                  'equipment_type', 'equipment_type_display', 'notes',
+                  'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_street_type_display(self, obj):
@@ -459,25 +570,53 @@ class BuildingSerializer(serializers.ModelSerializer):
     def get_equipment_type_display(self, obj):
         return obj.get_equipment_type_display() if obj.equipment_type else ''
 
+    def get_management_company_name(self, obj):
+        return obj.management_company_fk.name if obj.management_company_fk else ''
+
 
 class BuildingDetailSerializer(BuildingSerializer):
     orders = serializers.SerializerMethodField()
+    entrances = serializers.SerializerMethodField()
+    systems = serializers.SerializerMethodField()
 
     class Meta(BuildingSerializer.Meta):
-        fields = BuildingSerializer.Meta.fields + ['orders']
+        fields = BuildingSerializer.Meta.fields + ['orders', 'entrances', 'systems']
 
     def get_orders(self, obj):
         orders = obj.orders.select_related('master__user').order_by('-created_at')
-        return [{
-            'id': o.id,
-            'number': o.number,
-            'order_type': o.order_type,
-            'order_type_display': o.get_order_type_display(),
-            'status': o.status,
-            'status_display': o.get_status_display(),
-            'master_name': o.master.user.get_full_name() or o.master.user.username if o.master else '—',
-            'created_at': o.created_at.isoformat(),
-        } for o in orders]
+        return [{'id': o.id, 'number': o.number, 'order_type': o.order_type,
+                 'order_type_display': o.get_order_type_display(), 'status': o.status,
+                 'status_display': o.get_status_display(),
+                 'master_name': o.master.user.get_full_name() or o.master.user.username if o.master else '—',
+                 'created_at': o.created_at.isoformat()} for o in orders]
+
+    def get_entrances(self, obj):
+        entrances = obj.entrances.all().order_by('number')
+        return [{'id': e.id, 'number': e.number, 'apartment_from': e.apartment_from,
+                 'apartment_to': e.apartment_to, 'apartments_count': e.apartments_count,
+                 'ip_address': e.ip_address, 'access_code': e.access_code,
+                 'programming_code': e.programming_code, 'notes': e.notes} for e in entrances]
+
+    def get_systems(self, obj):
+        systems = obj.systems.filter(is_active=True)
+        return [{'id': s.id, 'system_type': s.system_type,
+                 'system_type_display': s.get_system_type_display(),
+                 'tariff_id': s.tariff_id, 'tariff_name': s.tariff.name if s.tariff else '',
+                 'monthly_amount': str(s.monthly_amount), 'notes': s.notes} for s in systems]
+
+
+class BuildingSystemSerializer(serializers.ModelSerializer):
+    system_type_display = serializers.CharField(source='get_system_type_display', read_only=True)
+    tariff_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BuildingSystem
+        fields = ['id', 'building', 'system_type', 'system_type_display',
+                  'tariff', 'tariff_name', 'monthly_amount', 'notes', 'is_active', 'created_at']
+        read_only_fields = ['created_at']
+
+    def get_tariff_name(self, obj):
+        return obj.tariff.name if obj.tariff else ''
 
 
 class TraccarSettingsSerializer(serializers.ModelSerializer):

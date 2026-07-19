@@ -12,6 +12,7 @@ from .views import (
     IssueOrderViewSet, PurchaseRequestViewSet,
     ErcAccountViewSet, ErcBillingRecordViewSet,
     BuildingEntranceViewSet, ManagementCompanyViewSet, TariffViewSet, PaymentRecordViewSet,
+    BewardDeviceViewSet,
     StorageLocationViewSet,
     OutgoingInvoiceViewSet,
     CallLogViewSet,
@@ -21,6 +22,7 @@ from .views import (
     login_view, me_view, refresh_token_view,
     import_clients_excel_view, import_erc_excel_view, import_preview_view,
     convert_excel_view, import_unified_view,
+    import_beward_ip_view, import_beward_codes_view,
     system_stats_view, export_clients_excel_view, cleanup_media_view,
 )
 from .bitrix24_views import bitrix24_clients_to_bitrix_view, bitrix24_clients_from_bitrix_view
@@ -72,6 +74,7 @@ router.register(r'entrances', BuildingEntranceViewSet, basename='entrances')
 router.register(r'management-companies', ManagementCompanyViewSet, basename='management-companies')
 router.register(r'tariffs', TariffViewSet, basename='tariffs')
 router.register(r'payment-records', PaymentRecordViewSet, basename='payment-records')
+router.register(r'beward-devices', BewardDeviceViewSet, basename='beward-devices')
 router.register(r'storage-locations', StorageLocationViewSet, basename='storage-locations')
 router.register(r'outgoing-invoices', OutgoingInvoiceViewSet, basename='outgoing-invoices')
 router.register(r'call-logs', CallLogViewSet, basename='call-logs')
@@ -93,6 +96,8 @@ urlpatterns = [
     path('import/preview/', import_preview_view, name='import-preview'),
     path('import/convert/', convert_excel_view, name='import-convert'),
     path('import/unified/', import_unified_view, name='import-unified'),
+    path('import/beward-ip/', import_beward_ip_view, name='import-beward-ip'),
+    path('import/beward-codes/', import_beward_codes_view, name='import-beward-codes'),
     path('bitrix24/clients/to-bitrix/', bitrix24_clients_to_bitrix_view, name='bitrix24-clients-to'),
     path('bitrix24/clients/from-bitrix/', bitrix24_clients_from_bitrix_view, name='bitrix24-clients-from'),
     path('bitrix24/products/to-bitrix/', bitrix24_products_to_bitrix_view, name='bitrix24-products-to'),

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Typography, Card, Table, Button, Space, Modal, Form, Input, message, Tag, Popconfirm, Select } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, HomeOutlined, DollarOutlined } from '@ant-design/icons';
 import api from '../services/api';
+import { Link } from 'react-router-dom';
 import type { ManagementCompany, Tariff } from '../types';
 
 const { Title, Text } = Typography;
@@ -100,12 +101,17 @@ const CompaniesPage: React.FC = () => {
     return <BuildingsTable />;
   };
 
+  const paymentColors: Record<string, string> = { contract: 'green', erc: 'orange', mixed: 'purple' };
+
   const columns = [
-    { title: 'Название', dataIndex: 'name', key: 'name', width: 260, ellipsis: true },
-    { title: 'Короткое', dataIndex: 'short_name', key: 'short_name', width: 130 },
-    { title: 'ИНН', dataIndex: 'inn', key: 'inn', width: 130 },
-    { title: 'Телефон', dataIndex: 'phone', key: 'phone', width: 140 },
-    { title: 'Клиентов', dataIndex: 'clients_count', key: 'count', width: 90, align: 'right' as const,
+    { title: 'Название', dataIndex: 'name', key: 'name', width: 220, ellipsis: true,
+      render: (n: string, rec: ManagementCompany) => <Link to={`/management-companies/${rec.id}`}>{n}</Link> },
+    { title: 'Оплата', dataIndex: 'payment_method_display', key: 'pm', width: 140,
+      render: (v: string, rec: ManagementCompany) => v ? <Tag color={paymentColors[rec.payment_method || ''] || 'default'}>{v}</Tag> : <Tag>По договору</Tag>
+    },
+    { title: 'ИНН', dataIndex: 'inn', key: 'inn', width: 120 },
+    { title: 'Телефон', dataIndex: 'phone', key: 'phone', width: 130 },
+    { title: 'Клиентов', dataIndex: 'clients_count', key: 'count', width: 85, align: 'right' as const,
       render: (v: number) => <Tag color="blue">{v}</Tag> },
     {
       title: '', key: 'actions', width: 140,
@@ -125,7 +131,12 @@ const CompaniesPage: React.FC = () => {
     <div>
       <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={3} style={{ margin: 0 }}>🏢 Управляющие компании / ТСЖ</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Добавить</Button>
+        <Space>
+          <Link to="/management-companies/create">
+            <Button type="primary" icon={<PlusOutlined />}>Создать с домами</Button>
+          </Link>
+          <Button icon={<PlusOutlined />} onClick={openCreate}>Быстрое добавление</Button>
+        </Space>
       </Space>
 
       <Card>
@@ -153,6 +164,13 @@ const CompaniesPage: React.FC = () => {
           <Form.Item name="inn" label="ИНН"><Input maxLength={12} /></Form.Item>
           <Form.Item name="phone" label="Телефон"><Input /></Form.Item>
           <Form.Item name="email" label="Email"><Input /></Form.Item>
+          <Form.Item name="payment_method" label="Способ оплаты за домофон">
+            <Select allowClear placeholder="По договору" options={[
+              { label: 'По договору с УК/ТСЖ', value: 'contract' },
+              { label: 'Через ЕРЦ (прямые платежи жителей)', value: 'erc' },
+              { label: 'Смешанная', value: 'mixed' },
+            ]} />
+          </Form.Item>
           <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
           <Button type="primary" htmlType="submit">{editing ? 'Сохранить' : 'Создать'}</Button>
         </Form>

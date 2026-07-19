@@ -45,6 +45,7 @@ export interface Client {
   monthly_payment: string;
   source: 'manual' | 'excel_import' | 'erc';
   is_legal?: boolean;
+  legal_type?: string;
   inn?: string;
   kpp?: string;
   ogrn?: string;
@@ -61,6 +62,8 @@ export interface ManagementCompany {
   inn?: string;
   phone?: string;
   email?: string;
+  payment_method?: string;
+  payment_method_display?: string;
   notes?: string;
   clients_count?: number;
 }
@@ -76,11 +79,35 @@ export interface Tariff {
 export interface BuildingEntrance {
   id: number;
   building: number;
+  building_address?: string;
   number: number;
   apartment_from: number;
   apartment_to: number;
   apartments_count: number;
+  ip_address?: string;
+  access_code?: string;
+  programming_code?: string;
   notes?: string;
+}
+
+export interface BewardDevice {
+  id: number;
+  region: string;
+  address: string;
+  entrance_number: string;
+  ip_address: string;
+  access_code?: string;
+  programming_code?: string;
+  door_opening_code?: string;
+  apartment_range?: string;
+  date_issued?: string;
+  notes?: string;
+  building?: number | null;
+  building_name?: string;
+  entrance?: number | null;
+  entrance_info?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PaymentRecord {
@@ -151,6 +178,9 @@ export interface Order {
   media?: OrderMedia[];
   helpers?: { id: number; username: string; full_name: string }[];
   issue_orders?: IssueOrderInfo[];
+  entrance_ip?: string | null;
+  entrance_access_code?: string | null;
+  entrance_programming_code?: string | null;
 }
 
 export interface IssueOrderInfo {
@@ -347,6 +377,19 @@ export interface Building {
   created_at: string;
   updated_at: string;
   orders?: BuildingOrder[];
+  entrances?: BuildingEntranceInfo[];
+}
+
+export interface BuildingEntranceInfo {
+  id: number;
+  number: number;
+  apartment_from: number;
+  apartment_to: number;
+  apartments_count: number;
+  ip_address?: string;
+  access_code?: string;
+  programming_code?: string;
+  notes?: string;
 }
 
 export interface BuildingOrder {

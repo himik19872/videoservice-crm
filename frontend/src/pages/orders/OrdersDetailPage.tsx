@@ -374,6 +374,20 @@ const OrdersDetailPage: React.FC = () => {
         </Descriptions.Item>
         <Descriptions.Item label="Телефон клиента">{order.client_info?.phone || '-'}</Descriptions.Item>
         <Descriptions.Item label="Адрес">{order.address}</Descriptions.Item>
+        {/* Умный домофон: IP и коды */}
+        {(order.entrance_ip || order.entrance_access_code || order.entrance_programming_code) && (
+          <>
+            <Descriptions.Item label="🔌 IP панели">
+              {order.entrance_ip ? <Tag color="blue">{order.entrance_ip}</Tag> : '—'}
+            </Descriptions.Item>
+            <Descriptions.Item label="🔑 Код доступа">
+              {order.entrance_access_code ? <Tag color="green">{order.entrance_access_code}</Tag> : '—'}
+            </Descriptions.Item>
+            <Descriptions.Item label="⚙️ Код программирования">
+              {order.entrance_programming_code ? <Tag color="orange">{order.entrance_programming_code}</Tag> : '—'}
+            </Descriptions.Item>
+          </>
+        )}
         <Descriptions.Item label="Район">{order.region_info?.name || '-'}</Descriptions.Item>
         <Descriptions.Item label="Исполнитель">{order.master_info?.full_name || 'Не назначен'}</Descriptions.Item>
         <Descriptions.Item label="Описание">{order.description}</Descriptions.Item>
