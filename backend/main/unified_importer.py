@@ -246,7 +246,7 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     'address': full_address,
                     'building': building,
                     'entrance': entrance_obj,
-                    'apartment': apartment,
+                    'apartment': apartment or '',
                     'management_company': mc_obj,
                     'district': district,
                     'personal_account_number': personal_account,
@@ -260,8 +260,17 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     existing.save()
                     stats['clients_updated'] += 1
                 else:
-                    Client.objects.create(**client_data)
+                    Client.objects.create(**{k: v for k, v in client_data.items() if v or k == 'apartment'})
                     stats['clients_created'] += 1
+
+                # Также создать ErcAccount для client-строк, если есть personal_account
+                if personal_account and not ErcAccount.objects.filter(account_number=personal_account).exists():
+                    ErcAccount.objects.create(
+                        account_number=personal_account,
+                        full_name=full_name,
+                        address=raw_address or full_address,
+                    )
+                    stats['erc_accounts_created'] += 1
 
             elif row_type == 'payment':
                 stats['payment_rows'] += 1
@@ -349,13 +358,39 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     client_existing = Client.objects.filter(personal_account_number=personal_account).first()
                 if not client_existing and building and apartment:
                     client_existing = Client.objects.filter(building=building, apartment=apartment).first()
+                if not client_existing and full_address and full_name:
+                    client_existing = Client.objects.filter(address=full_address, name=full_name).first()
+
+                # Попытка найти Building по raw_address, если не нашли через парсинг
+                if not building and raw_address:
+                    import re
+                    raw = raw_address.strip()
+                    if raw.startswith('г. '):
+                        rest = raw[3:]
+                        fallback_city = rest.split(',')[0].strip() if ',' in rest else 'Санкт-Петербург'
+                    elif raw.startswith('Санкт-Петербург'):
+                        rest = raw[len('Санкт-Петербург'):].lstrip(', ')
+                        fallback_city = 'Санкт-Петербург'
+                    else:
+                        rest = raw
+                        fallback_city = 'Санкт-Петербург'
+                    house_match = re.search(r'д\.\s*(\d+[\w]*)', rest)
+                    if house_match:
+                        fallback_house = house_match.group(1)
+                        fallback_street = rest[:house_match.start()].rstrip(', ').strip()
+                        bld_match = re.search(r'(?:корп\.|литера|стр\.)\s*([\w\d]+)', rest, re.IGNORECASE)
+                        fallback_bld = bld_match.group(1) if bld_match else ''
+                        if fallback_street and fallback_house:
+                            building = get_or_create_building(fallback_city, fallback_street, fallback_house, fallback_bld)
+                            if building and apartment:
+                                client_existing = client_existing or Client.objects.filter(building=building, apartment=apartment).first()
 
                 client_data = {
                     'name': full_name or 'Не определено',
                     'address': full_address,
                     'building': building,
                     'entrance': entrance_obj,
-                    'apartment': apartment,
+                    'apartment': apartment or '',
                     'management_company': mc_obj,
                     'district': district,
                     'personal_account_number': personal_account,
@@ -371,7 +406,8 @@ def import_unified_csv(file_bytes_or_path, user=None, dry_run=False):
                     client_existing.save()
                     stats['clients_updated'] += 1
                 else:
-                    Client.objects.create(**client_data)
+                    # ВСЕГДА создаём клиента, даже без building
+                    Client.objects.create(**{k: v for k, v in client_data.items() if v or k == 'apartment'})
                     stats['clients_created'] += 1
 
                 # ── Создать/обновить ErcBillingRecord ──

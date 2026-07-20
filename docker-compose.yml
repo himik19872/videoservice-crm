@@ -31,6 +31,7 @@ services:
     volumes:
       - ./backend:/app
       - ./.git:/app/.git
+      - ./тест-ипорт:/app/тест-ипорт
     ports:
       - "8000:8000"
     depends_on:
