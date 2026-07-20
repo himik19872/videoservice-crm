@@ -33,6 +33,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -42,6 +43,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
+    'channels',
     'main',
 ]
 
@@ -75,6 +77,14 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'crm.wsgi.application'
+ASGI_APPLICATION = 'crm.asgi.application'
+
+# Channels — in-memory layer (не требует Redis для одного процесса)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 
 # Database

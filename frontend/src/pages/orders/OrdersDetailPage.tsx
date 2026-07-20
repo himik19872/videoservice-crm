@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -31,6 +31,11 @@ const OrdersDetailPage: React.FC = () => {
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
   const [materialForm, setMaterialForm] = useState<Record<number, { qty: number; needReturn: boolean; oldDesc: string }>>({});
   const [materialSaving, setMaterialSaving] = useState(false);
+  // Объединение заявок
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkSearchText, setLinkSearchText] = useState('');
+  const [linkSearchResults, setLinkSearchResults] = useState<any[]>([]);
+  const [selectedLinkIds, setSelectedLinkIds] = useState<number[]>([]);
 
   useEffect(() => {
     fetchOrder();
@@ -134,6 +139,66 @@ const OrdersDetailPage: React.FC = () => {
     } finally {
       setUpdating(false);
     }
+  };
+
+  const handleNotifyMaster = async () => {
+    if (!order) return;
+    Modal.confirm({
+      title: 'Отправить уведомление',
+      content: `Мастер ${order.master_info?.full_name || ''} получит push-уведомление о заявке #${order.number}. Отправить?`,
+      okText: '📣 Отправить',
+      cancelText: 'Отмена',
+      onOk: async () => {
+        try {
+          await api.post(`/orders/${order.id}/notify_master/`);
+          message.success(`Уведомление отправлено мастеру`);
+        } catch (e: any) {
+          message.error(e?.response?.data?.error || 'Ошибка');
+        }
+      },
+    });
+  };
+
+  const searchOrdersForLink = async (text: string) => {
+    setLinkSearchText(text);
+    if (text.length < 2) { setLinkSearchResults([]); return; }
+    try {
+      const res = await api.get(`/orders/?search=${text}&page_size=20`);
+      const all = res.data.results || res.data || [];
+      // Исключаем текущую и уже привязанные
+      setLinkSearchResults(all.filter((o: any) => o.id !== order?.id && !o.parent_order));
+    } catch {}
+  };
+
+  const handleLinkOrders = async () => {
+    if (!order || selectedLinkIds.length === 0) return;
+    try {
+      const res = await api.post(`/orders/${order.id}/link_orders/`, { child_ids: selectedLinkIds });
+      message.success(`Объединено заявок: ${res.data.linked_count}`);
+      setLinkModalOpen(false);
+      setSelectedLinkIds([]);
+      setLinkSearchText('');
+      fetchOrder();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка');
+    }
+  };
+
+  const handleUnlinkOrders = async () => {
+    if (!order) return;
+    Modal.confirm({
+      title: 'Разъединить заявки',
+      content: `Все дочерние заявки будут отвязаны от #${order.number}. Продолжить?`,
+      onOk: async () => {
+        try {
+          const res = await api.post(`/orders/${order.id}/unlink_orders/`);
+          message.success(`Отвязано заявок: ${res.data.unlinked_count}`);
+          fetchOrder();
+        } catch (e: any) {
+          message.error(e?.response?.data?.error || 'Ошибка');
+        }
+      },
+    });
   };
 
   const openAssignModal = () => {
@@ -318,6 +383,12 @@ const OrdersDetailPage: React.FC = () => {
     urgent: 'Срочный',
   };
 
+  const statusLabels: Record<string, string> = {
+    new: 'Новая', assigned: 'Назначена', accepted: 'Принята',
+    in_progress: 'В работе', paused: 'На паузе', need_help: 'Нужна помощь',
+    completed: 'Выполнена', confirmed: 'Подтверждена', cancelled: 'Отменена',
+  };
+
   const formatDateTime = (dateString: string | null) => {
     if (!dateString) return '-';
     return new Date(dateString).toLocaleString('ru-RU', {
@@ -389,13 +460,66 @@ const OrdersDetailPage: React.FC = () => {
           </>
         )}
         <Descriptions.Item label="Район">{order.region_info?.name || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Исполнитель">{order.master_info?.full_name || 'Не назначен'}</Descriptions.Item>
+        <Descriptions.Item label="Исполнитель">
+          <Space>
+            <span>{order.master_info?.full_name || 'Не назначен'}</span>
+            {order.master_info && isStaff && (
+              <Button
+                size="small"
+                type="primary"
+                ghost
+                icon={<SendOutlined />}
+                onClick={handleNotifyMaster}
+              >
+                Уведомить
+              </Button>
+            )}
+          </Space>
+        </Descriptions.Item>
         <Descriptions.Item label="Описание">{order.description}</Descriptions.Item>
         {order.cost != null && <Descriptions.Item label="Стоимость">{order.cost} ₽</Descriptions.Item>}
         {order.payment_type && <Descriptions.Item label="Тип оплаты">{order.payment_type_display}</Descriptions.Item>}
         {order.photo_report_required && <Descriptions.Item label="Фотоотчёт"><Tag color="orange">Требуется</Tag></Descriptions.Item>}
         {order.deadline && <Descriptions.Item label="Срок">{new Date(order.deadline).toLocaleDateString('ru-RU')}</Descriptions.Item>}
       </Descriptions>
+
+      {/* Объединённые заявки */}
+      {isStaff && (
+        <>
+          <Divider />
+          <Space>
+            <Text strong>🔗 Объединённые заявки:</Text>
+            <Button size="small" icon={<LinkOutlined />} onClick={() => { setSelectedLinkIds([]); setLinkSearchText(''); setLinkSearchResults([]); setLinkModalOpen(true); }}>Объединить</Button>
+            {order.linked_orders && order.linked_orders.length > 0 && (
+              <Button size="small" icon={<DisconnectOutlined />} danger onClick={handleUnlinkOrders}>Разъединить</Button>
+            )}
+          </Space>
+          {order.linked_orders && order.linked_orders.length > 0 ? (
+            <Table
+              size="small"
+              pagination={false}
+              style={{ marginTop: 8 }}
+              dataSource={order.linked_orders}
+              rowKey="id"
+              columns={[
+                { title: 'Номер', dataIndex: 'number', key: 'number', render: (v: string, r: any) => <a onClick={() => navigate(`/orders/${r.id}`)}>{v}</a> },
+                { title: 'Адрес', dataIndex: 'address', key: 'address' },
+                { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => <Tag>{statusLabels[s] || s}</Tag> },
+              ]}
+            />
+          ) : (
+            <Text type="secondary" style={{ marginLeft: 8 }}>Нет</Text>
+          )}
+          {order.parent_order && (
+            <div style={{ marginTop: 4 }}>
+              <Text type="secondary">↳ Входит в заявку: </Text>
+              <a onClick={() => order.parent_order && navigate(`/orders/${order.parent_order.id}`)}>
+                #{order.parent_order.number}
+              </a>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Диалог / комментарии внутри заявки */}
       <Divider />
@@ -810,6 +934,47 @@ const OrdersDetailPage: React.FC = () => {
             },
           ]}
         />
+      </Modal>
+
+      {/* Модалка объединения заявок */}
+      <Modal
+        title="🔗 Объединение заявок"
+        open={linkModalOpen}
+        onOk={handleLinkOrders}
+        onCancel={() => setLinkModalOpen(false)}
+        okText="Объединить"
+        cancelText="Отмена"
+        okButtonProps={{ disabled: selectedLinkIds.length === 0 }}
+        width={600}
+      >
+        <Text type="secondary">Главная заявка: <Text strong>#{order?.number}</Text> — {order?.address}</Text>
+        <Divider style={{ margin: '12px 0' }} />
+        <Input.Search
+          placeholder="Поиск заявок по номеру или адресу..."
+          value={linkSearchText}
+          onChange={e => searchOrdersForLink(e.target.value)}
+          style={{ marginBottom: 12 }}
+        />
+        <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+          {linkSearchResults.length === 0 && linkSearchText.length >= 2 && (
+            <Text type="secondary">Ничего не найдено</Text>
+          )}
+          {linkSearchResults.map((o: any) => (
+            <div key={o.id} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center' }}>
+              <Checkbox
+                checked={selectedLinkIds.includes(o.id)}
+                onChange={e => {
+                  if (e.target.checked) setSelectedLinkIds([...selectedLinkIds, o.id]);
+                  else setSelectedLinkIds(selectedLinkIds.filter(x => x !== o.id));
+                }}
+              />
+              <span style={{ marginLeft: 8 }}>
+                <Text strong>#{o.number}</Text> — {o.address} &nbsp;
+                <Tag>{statusLabels[o.status] || o.status}</Tag>
+              </span>
+            </div>
+          ))}
+        </div>
       </Modal>
     </Card>
   );

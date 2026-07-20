@@ -257,6 +257,27 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         <Text style={[styles.desc, { color: theme.text, backgroundColor: theme.inputBg }]}>{order.description}</Text>
       ) : null}
 
+      {/* Умный домофон: IP и коды */}
+      {(order.entrance_ip || order.entrance_access_code || order.entrance_programming_code) && (
+        <View style={[styles.desc, { backgroundColor: '#e6f7ff', borderLeftWidth: 3, borderLeftColor: '#1890ff' }]}>
+          {order.entrance_ip ? (
+            <Text style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
+              🔌 IP панели: <Text style={{ color: '#1890ff' }}>{order.entrance_ip}</Text>
+            </Text>
+          ) : null}
+          {order.entrance_access_code ? (
+            <Text style={{ color: theme.text, fontWeight: '600', fontSize: 14, marginTop: 4 }}>
+              🔑 Код доступа: <Text style={{ color: '#52c41a' }}>{order.entrance_access_code}</Text>
+            </Text>
+          ) : null}
+          {order.entrance_programming_code ? (
+            <Text style={{ color: theme.text, fontWeight: '600', fontSize: 14, marginTop: 4 }}>
+              ⚙️ Код программирования: <Text style={{ color: '#fa8c16' }}>{order.entrance_programming_code}</Text>
+            </Text>
+          ) : null}
+        </View>
+      )}
+
       {/* Финансовая информация */}
       {order.cost != null && (
         <View style={[styles.financeRow, { backgroundColor: theme.card }]}>

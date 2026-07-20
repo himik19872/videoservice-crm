@@ -15,6 +15,7 @@ app.use((req, res, next) => {
   next();
 });
 
+// === HTTP proxy (ручной, не обрезает префикс) ===
 function proxyRequest(req, res) {
   const options = {
     hostname: API_HOST, port: API_PORT, path: req.originalUrl,
@@ -56,12 +57,13 @@ function proxyRequest(req, res) {
 
 app.use('/api', proxyRequest);
 app.use('/admin', proxyRequest);
+app.use('/ws', proxyRequest);
 app.use('/media', proxyRequest);
 
+// Статика фронтенда
 const buildPath = path.join(__dirname, '..', 'frontend', 'build');
 app.use(express.static(buildPath, {
   setHeaders: (res) => {
-    // Отключаем кеширование для index.html и JS/CSS файлов
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
@@ -69,4 +71,37 @@ app.use(express.static(buildPath, {
 }));
 app.get('*', (req, res) => res.sendFile(path.join(buildPath, 'index.html')));
 
-app.listen(PORT, '0.0.0.0', () => console.log('CRM on 0.0.0.0:' + PORT));
+const server = http.createServer(app);
+
+// === WebSocket proxy (Daphne) ===
+server.on('upgrade', (req, socket, head) => {
+  if (!req.url) { socket.destroy(); return; }
+  console.log('[WS] Upgrade:', req.url);
+
+  const proxySocket = http.request({
+    hostname: API_HOST,
+    port: API_PORT,
+    path: req.url,
+    method: 'GET',
+    headers: { ...req.headers },
+  });
+
+  proxySocket.on('upgrade', (proxyRes, proxySocketOut, proxyHead) => {
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      Object.entries(proxyRes.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') +
+      '\r\n\r\n'
+    );
+    proxySocketOut.pipe(socket);
+    socket.pipe(proxySocketOut);
+  });
+
+  proxySocket.on('error', (e) => {
+    console.error('[WS] Proxy error:', e.message);
+    socket.destroy();
+  });
+
+  proxySocket.end();
+});
+
+server.listen(PORT, '0.0.0.0', () => console.log(`CRM on 0.0.0.0:${PORT}`));

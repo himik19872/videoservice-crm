@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Table, Button, Space, Modal, Form, Input, InputNumber, message, Select, Popconfirm, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import api from '../services/api';
 import type { BuildingEntrance } from '../types';
 
@@ -13,13 +13,15 @@ const EntrancesPage: React.FC = () => {
   const [editing, setEditing] = useState<BuildingEntrance | null>(null);
   const [form] = Form.useForm();
   const [buildings, setBuildings] = useState<any[]>([]);
-  const [buildingSearch, setBuildingSearch] = useState('');
+  const [search, setSearch] = useState('');
 
   const fetchData = async () => {
     setLoading(true);
     try {
+      const params: any = {};
+      if (search) params.search = search;
       const [er, br] = await Promise.all([
-        api.get('/entrances/'),
+        api.get('/entrances/', { params }),
         api.get('/buildings/', { params: { page_size: 2000 } }),
       ]);
       setEntrances(er.data.results || er.data);
@@ -28,7 +30,7 @@ const EntrancesPage: React.FC = () => {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [search]);
 
   const openCreate = () => { setEditing(null); form.resetFields(); setModalOpen(true); };
   const openEdit = (rec: BuildingEntrance) => { setEditing(rec); form.setFieldsValue(rec); setModalOpen(true); };
@@ -47,14 +49,14 @@ const EntrancesPage: React.FC = () => {
   };
 
   const columns = [
-    { title: 'Дом', key: 'building', width: 280, ellipsis: true,
+    { title: 'Дом', key: 'building', width: 280, ellipsis: true, sorter: true,
       render: (_: any, rec: BuildingEntrance) => {
         if (rec.building_address) return rec.building_address;
         const b = buildings.find(b => b.id === rec.building);
         return b ? `${b.street_name}, д. ${b.house_number}${b.building_number ? ' корп. ' + b.building_number : ''}` : `Дом #${rec.building}`;
       }
     },
-    { title: 'Подъезд №', dataIndex: 'number', key: 'number', width: 90 },
+    { title: 'Подъезд №', dataIndex: 'number', key: 'number', width: 90, sorter: true },
     { title: 'IP', dataIndex: 'ip_address', key: 'ip', width: 130, ellipsis: true },
     { title: 'Код доступа', dataIndex: 'access_code', key: 'access_code', width: 110,
       render: (c: string) => c ? <Tag color="green">{c}</Tag> : ''
@@ -82,12 +84,26 @@ const EntrancesPage: React.FC = () => {
     <div>
       <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={3} style={{ margin: 0 }}>🚪 Подъезды домов</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Добавить</Button>
+        <Space>
+          <Input
+            placeholder="Поиск по адресу, IP, коду..."
+            prefix={<SearchOutlined />}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ width: 280 }}
+            allowClear
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Добавить</Button>
+        </Space>
       </Space>
 
       <Card>
         <Table columns={columns} dataSource={entrances} rowKey="id" loading={loading}
-          pagination={{ pageSize: 20, showSizeChanger: true }} size="small" />
+          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t: number) => `Всего: ${t}` }}
+          size="small"
+          scroll={{ x: 1000 }}
+          locale={{ emptyText: search ? 'Ничего не найдено' : 'Нет подъездов' }}
+        />
       </Card>
 
       <Modal title={editing ? 'Редактировать подъезд' : 'Новый подъезд'} open={modalOpen}
@@ -95,10 +111,7 @@ const EntrancesPage: React.FC = () => {
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item name="building" label="Дом" rules={[{ required: true }]}>
-            <Select
-              showSearch
-              placeholder="Выберите дом"
-              filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+            <Select showSearch placeholder="Выберите дом" filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
               options={buildings.map((b: any) => ({
                 label: `${b.street_name}, д. ${b.house_number}${b.building_number ? ' корп. ' + b.building_number : ''} (${b.city})`,
                 value: b.id,
@@ -108,27 +121,13 @@ const EntrancesPage: React.FC = () => {
           <Form.Item name="number" label="Номер подъезда" rules={[{ required: true }]}>
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="ip_address" label="IP-адрес панели">
-            <Input placeholder="10.80.0.20" />
-          </Form.Item>
-          <Form.Item name="access_code" label="Код открытия двери">
-            <Input placeholder="77780" />
-          </Form.Item>
-          <Form.Item name="programming_code" label="Код программирования ключей">
-            <Input placeholder="18684" />
-          </Form.Item>
-          <Form.Item name="apartment_from" label="Квартиры с №">
-            <InputNumber min={1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="apartment_to" label="Квартиры по №">
-            <InputNumber min={1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="apartments_count" label="Кол-во квартир">
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="notes" label="Примечания">
-            <Input.TextArea rows={2} />
-          </Form.Item>
+          <Form.Item name="ip_address" label="IP-адрес панели"><Input placeholder="10.80.0.20" /></Form.Item>
+          <Form.Item name="access_code" label="Код открытия двери"><Input placeholder="77780" /></Form.Item>
+          <Form.Item name="programming_code" label="Код программирования ключей"><Input placeholder="18684" /></Form.Item>
+          <Form.Item name="apartment_from" label="Квартиры с №"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="apartment_to" label="Квартиры по №"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="apartments_count" label="Кол-во квартир"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
           <Button type="primary" htmlType="submit">{editing ? 'Сохранить' : 'Создать'}</Button>
         </Form>
       </Modal>

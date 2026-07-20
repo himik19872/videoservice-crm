@@ -162,17 +162,3 @@ const OrdersEditPage: React.FC = () => {
 };
 
 export default OrdersEditPage;
-          </Button>
-        </Form.Item>
-
-        <Form.Item>
-          <Button type="default" onClick={() => navigate(`/orders/${id}`)} block>
-            Отмена
-          </Button>
-        </Form.Item>
-      </Form>
-    </Card>
-  );
-};
-
-export default OrdersEditPage;

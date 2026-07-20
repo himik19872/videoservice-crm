@@ -538,6 +538,10 @@ class Order(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Дата обновления'))
     deadline = models.DateTimeField(blank=True, null=True, verbose_name=_('Срок выполнения'))
 
+    # Группировка заявок
+    parent_order = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='linked_orders', verbose_name=_('Главная заявка (объединение)'))
+
     class Meta:
         verbose_name = _('Заявка')
         verbose_name_plural = _('Заявки')

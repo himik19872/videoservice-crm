@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { OfflineProvider, setOfflineApi, useOffline } from './src/contexts/OfflineContext';
 import { ServerProvider, useServer } from './src/contexts/ServerContext';
+import { NotificationsProvider } from './src/contexts/NotificationsContext';
 import api from './src/services/api';
 
 // Screens
@@ -263,7 +264,9 @@ export default function App() {
       <ThemeProvider>
         <OfflineProvider>
           <AuthProvider>
-            <Root />
+            <NotificationsProvider>
+              <Root />
+            </NotificationsProvider>
           </AuthProvider>
         </OfflineProvider>
       </ThemeProvider>

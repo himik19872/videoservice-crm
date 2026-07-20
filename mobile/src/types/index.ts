@@ -60,6 +60,9 @@ export interface Order {
   house_number?: string;
   building_number?: string;
   apartment?: string;
+  entrance_ip?: string | null;
+  entrance_access_code?: string | null;
+  entrance_programming_code?: string | null;
   created_at: string;
   updated_at: string;
   completed_at?: string;

@@ -616,6 +616,25 @@ class OrderViewSet(viewsets.ModelViewSet):
 
             order.save()
 
+        # Каскадное закрытие: если заявка завершена/отменена/подтверждена → дочерние тоже
+        if order.status in ('completed', 'confirmed', 'cancelled') and order.linked_orders.exists():
+            linked = order.linked_orders.exclude(status__in=('completed', 'confirmed', 'cancelled'))
+            for child in linked:
+                child.status = order.status
+                now = timezone.now()
+                if order.status == 'completed':
+                    child.completed_at = now
+                elif order.status == 'confirmed':
+                    child.confirmed_at = now
+                    child.confirmed_by = request.user
+                child.save()
+                OrderHistory.objects.create(
+                    order=child, changed_by=request.user,
+                    old_status=old_status, new_status=order.status,
+                    notes=f'Автоматически: главная заявка #{order.number} закрыта'
+                )
+            print(f'[Orders] Cascaded close: {linked.count()} children for #{order.number}')
+
         # Если переназначили мастера
         if order.master_id and order.master_id != old_master_id:
             old_master_name = str(Master.objects.get(id=old_master_id)) if old_master_id else '—'
@@ -649,6 +668,94 @@ class OrderViewSet(viewsets.ModelViewSet):
             'scheduled_at': o.scheduled_at.isoformat() if o.scheduled_at else None,
             'priority': o.priority,
         } for o in qs.order_by('scheduled_at')])
+
+    @action(detail=True, methods=['post'])
+    def link_orders(self, request, pk=None):
+        """Объединить дочерние заявки в эту (главную)."""
+        order = self.get_object()
+        child_ids = request.data.get('child_ids', [])
+        reason = request.data.get('reason', '')
+        if not child_ids:
+            return Response({'error': 'Укажите child_ids — список ID заявок для объединения'}, status=400)
+
+        # Привязываем заявки к этой
+        linked = Order.objects.filter(id__in=child_ids).exclude(id=order.id).exclude(
+            parent_order__isnull=False  # уже привязанные не трогаем
+        )
+
+        # Пишем историю в каждую дочернюю заявку
+        for child in linked:
+            OrderHistory.objects.create(
+                order=child, changed_by=request.user,
+                old_status=child.status, new_status=child.status,
+                notes=f'🔗 Объединена с заявкой #{order.number}' + (f': {reason}' if reason else '')
+            )
+        # История в главной
+        child_nums = ', '.join(f'#{o.number}' for o in linked)
+        OrderHistory.objects.create(
+            order=order, changed_by=request.user,
+            old_status=order.status, new_status=order.status,
+            notes=f'🔗 Объединены заявки: {child_nums}' + (f' — {reason}' if reason else '')
+        )
+
+        count = linked.update(parent_order=order)
+
+        # Назначаем того же мастера, если у главной есть
+        if order.master:
+            linked.filter(master__isnull=True).update(master=order.master)
+
+        return Response({'ok': True, 'linked_count': count})
+
+    @action(detail=True, methods=['post'])
+    def unlink_orders(self, request, pk=None):
+        """Отвязать все дочерние заявки от этой."""
+        order = self.get_object()
+        children = list(order.linked_orders.all())
+        for child in children:
+            OrderHistory.objects.create(
+                order=child, changed_by=request.user,
+                old_status=child.status, new_status=child.status,
+                notes=f'🔗 Отвязана от заявки #{order.number}'
+            )
+        OrderHistory.objects.create(
+            order=order, changed_by=request.user,
+            old_status=order.status, new_status=order.status,
+            notes=f'🔗 Дочерние заявки отвязаны ({len(children)} шт.)'
+        )
+        count = order.linked_orders.update(parent_order=None)
+        return Response({'ok': True, 'unlinked_count': count})
+
+    @action(detail=False, methods=['get'])
+    def find_similar(self, request):
+        """Поиск похожих открытых заявок по дому/подъезду."""
+        building_id = request.query_params.get('building_id')
+        entrance = request.query_params.get('entrance', '')
+        city = request.query_params.get('city', '')
+        street = request.query_params.get('street_name', '')
+        house = request.query_params.get('house_number', '')
+
+        if not building_id and not (city and street and house):
+            return Response([], status=200)
+
+        qs = Order.objects.exclude(status__in=['completed', 'confirmed', 'cancelled']).exclude(
+            parent_order__isnull=False
+        )
+
+        if building_id:
+            qs = qs.filter(building_id=building_id)
+        elif city and street and house:
+            qs = qs.filter(city__iexact=city, street_name__iexact=street, house_number__iexact=house)
+
+        if entrance:
+            qs = qs.filter(entrance=entrance)
+
+        results = qs.order_by('-created_at')[:10]
+        return Response([{
+            'id': o.id, 'number': o.number, 'status': o.status,
+            'order_type': o.get_order_type_display(), 'address': o.address,
+            'description': o.description[:100], 'apartment': o.apartment,
+            'created_at': o.created_at.isoformat() if o.created_at else None,
+        } for o in results])
 
     @action(detail=True, methods=['post'])
     def assign(self, request, pk=None):
@@ -718,6 +825,23 @@ class OrderViewSet(viewsets.ModelViewSet):
                 pass
 
         return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
+    def notify_master(self, request, pk=None):
+        """Повторно отправить уведомление мастеру (напоминание)."""
+        order = self.get_object()
+        if not order.master:
+            return Response({'error': 'У заявки нет назначенного сотрудника'}, status=400)
+        if order.status in ('completed', 'confirmed', 'cancelled'):
+            return Response({'error': 'Заявка уже закрыта'}, status=400)
+
+        send_push_notification(
+            order.master.user_id,
+            '📣 Напоминание о заявке',
+            f'#{order.number} — {order.get_order_type_display()}, {order.address}',
+            data={'order_id': order.id},
+        )
+        return Response({'ok': True, 'message': f'Уведомление отправлено мастеру {order.master}'})
 
     @action(detail=True, methods=['post'])
     def start(self, request, pk=None):
@@ -1507,8 +1631,8 @@ class SystemSettingsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def check_update(self, request):
-        """Проверить наличие обновлений на GitHub"""
-        import requests, re, os
+        """Проверить наличие обновлений: сравниваем origin/branch с GitHub."""
+        import requests, re, os, subprocess
         settings = SystemSettings.objects.first()
         if not settings or not settings.git_repo_url:
             return Response({'has_update': False, 'error': 'Не настроен GitHub репозиторий'})
@@ -1530,34 +1654,35 @@ class SystemSettingsViewSet(viewsets.ViewSet):
             resp = requests.get(api_url, headers=headers, timeout=15)
             if resp.status_code != 200:
                 return Response({'has_update': False, 'error': f'GitHub API: {resp.status_code} {resp.json().get("message", "")}'})
-            remote_sha = resp.json().get('sha', '')[:7]
             remote_full = resp.json().get('sha', '')
+            remote_sha = remote_full[:7]
 
-            # Читаем локальный HEAD из .git
-            head_path = '/app/.git/refs/heads/' + branch
+            # Получаем локальный origin/branch — то, что уже запушено
             local_sha = ''
-            if os.path.exists(head_path):
-                with open(head_path) as f:
+            origin_ref = f'origin/{branch}'
+            origin_path = os.path.join('/app/.git/refs/remotes/origin', branch)
+            if os.path.exists(origin_path):
+                with open(origin_path) as f:
                     local_sha = f.read().strip()[:7]
             else:
-                # Пробуем HEAD или packed-refs
-                head_file = '/app/.git/HEAD'
-                if os.path.exists(head_file):
-                    with open(head_file) as f:
-                        ref = f.read().strip()
-                    if ref.startswith('ref: '):
-                        ref_path = '/app/.git/' + ref[5:]
-                        if os.path.exists(ref_path):
-                            with open(ref_path) as f:
-                                local_sha = f.read().strip()[:7]
+                # Пробуем через git rev-parse
+                try:
+                    r = subprocess.run(['git', 'rev-parse', '--short', origin_ref],
+                        cwd='/app', capture_output=True, text=True, timeout=5)
+                    if r.returncode == 0:
+                        local_sha = r.stdout.strip()
+                except:
+                    pass
 
             has_update = bool(remote_full and local_sha and remote_full[:7] != local_sha[:7])
+
             settings.last_update_check = timezone.now()
             settings.latest_commit = local_sha or ''
             settings.save(update_fields=['last_update_check', 'latest_commit'])
+
             return Response({
                 'has_update': has_update,
-                'local': local_sha[:7] if local_sha else '?',
+                'local': local_sha or '?',
                 'remote': remote_sha,
                 'checked_at': settings.last_update_check.isoformat(),
             })
@@ -1566,91 +1691,60 @@ class SystemSettingsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'])
     def update_now(self, request):
-        """Обновить CRM из GitHub (скачивание архива репозитория)"""
-        import requests, re, tempfile, shutil, os, subprocess
+        """Обновить CRM через git pull (требуется смонтированный .git)."""
+        import subprocess, os
         settings = SystemSettings.objects.first()
-        if not settings or not settings.git_repo_url:
-            return Response({'ok': False, 'error': 'Не настроен GitHub репозиторий'})
-
-        repo_url = settings.git_repo_url.rstrip('/').replace('.git', '')
-        branch = settings.git_branch or 'main'
-        headers = {'Accept': 'application/vnd.github.v3+json'}
-        if settings.git_token:
-            headers['Authorization'] = f'Bearer {settings.git_token}'
-
-        m = re.search(r'github\.com[:/]([^/]+)/([^/\s]+)', repo_url)
-        if not m:
-            return Response({'ok': False, 'error': 'Неверный формат URL репозитория'})
-        owner, repo = m.group(1), m.group(2)
 
         try:
-            # 1. Бэкап текущего backend
-            backup_dir = '/app_backup_' + timezone.now().strftime('%Y%m%d_%H%M%S')
-            shutil.copytree('/app', backup_dir, dirs_exist_ok=True, symlinks=True)
-            settings.backup_path = backup_dir
-            settings.save(update_fields=['backup_path'])
+            # Проверяем, что .git доступен
+            git_dir = '/app/.git'
+            if not os.path.isdir(git_dir):
+                return Response({'ok': False, 'error': '.git не найден в /app — смонтируйте репозиторий через volume'})
 
-            # 2. Скачиваем архив
-            archive_url = f'https://api.github.com/repos/{owner}/{repo}/zipball/{branch}'
-            resp = requests.get(archive_url, headers=headers, timeout=120, stream=True)
-            if resp.status_code != 200:
-                return Response({'ok': False, 'error': f'GitHub API: {resp.status_code}'})
+            # Делаем git fetch + git reset --hard (сбрасываем все локальные изменения)
+            result = subprocess.run(
+                ['git', 'fetch', 'origin'],
+                cwd='/app', capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                return Response({'ok': False, 'error': f'git fetch: {result.stderr.strip() or result.stdout.strip()}'})
 
-            tmp_zip = '/tmp/repo.zip'
-            with open(tmp_zip, 'wb') as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            branch = settings.git_branch or 'main'
+            result = subprocess.run(
+                ['git', 'reset', '--hard', f'origin/{branch}'],
+                cwd='/app', capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                return Response({'ok': False, 'error': f'git reset: {result.stderr.strip() or result.stdout.strip()}'})
 
-            # 3. Распаковываем через zipfile (встроенный Python, без unzip)
-            extract_dir = '/tmp/repo_extracted'
-            if os.path.exists(extract_dir):
-                shutil.rmtree(extract_dir)
-            os.makedirs(extract_dir)
-            import zipfile
-            with zipfile.ZipFile(tmp_zip, 'r') as zf:
-                zf.extractall(extract_dir)
-            os.remove(tmp_zip)
+            output = result.stdout.strip() or 'Updated'
 
-            # 4. Копируем backend из архива
-            src = extract_dir
-            dirs = os.listdir(src)
-            if dirs:
-                src = os.path.join(src, dirs[0])  # GitHub вкладывает в папку owner-repo-hash
+            # Получаем новый HEAD
+            result = subprocess.run(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                cwd='/app', capture_output=True, text=True, timeout=5
+            )
+            new_commit = result.stdout.strip()
 
-            backend_src = os.path.join(src, 'backend')
-            if not os.path.exists(backend_src):
-                return Response({'ok': False, 'error': 'В архиве нет папки backend'})
+            # Применяем миграции
+            subprocess.run(
+                ['python', 'manage.py', 'migrate'],
+                cwd='/app', capture_output=True, timeout=30
+            )
 
-            # Копируем все кроме models.py (чтобы не затереть данные)
-            for item in os.listdir(backend_src):
-                s = os.path.join(backend_src, item)
-                d = os.path.join('/app', item)
-                if os.path.isdir(s):
-                    if item == 'migrations':
-                        continue  # Не заменяем миграции
-                    if os.path.exists(d):
-                        shutil.rmtree(d)
-                    shutil.copytree(s, d)
-                else:
-                    shutil.copy2(s, d)
-
-            # Очистка
-            shutil.rmtree(extract_dir)
-
-            # 5. Собираем фронтенд если есть node
-            if os.path.exists('/app/../frontend/package.json'):
-                subprocess.run(
-                    'cd /app/.. && npm install && npm run build',
-                    shell=True, timeout=120, capture_output=True
-                )
-
-            # 6. Перезапускаем Django
-            subprocess.run(['touch', '/app/main/wsgi.py'], timeout=5)
+            # Перезапуск Daphne: трогаем asgi.py
+            subprocess.run(['touch', '/app/crm/asgi.py'], timeout=5)
 
             settings.last_update_check = timezone.now()
-            settings.latest_commit = ''
+            settings.latest_commit = new_commit
             settings.save(update_fields=['last_update_check', 'latest_commit'])
-            return Response({'ok': True, 'message': 'CRM обновлена! Бэкенд перезапущен.', 'backup': backup_dir})
+
+            return Response({
+                'ok': True,
+                'message': f'Обновлено до {new_commit}',
+                'commit': new_commit,
+                'output': output,
+            })
         except Exception as e:
             return Response({'ok': False, 'error': str(e)})
 
@@ -2063,11 +2157,102 @@ class PushTokenViewSet(viewsets.ModelViewSet):
 
 
 def send_push_notification(user_id, title, body, data=None):
-    """Отправить уведомление: сначала Max, затем Expo Push"""
+    """Отправить уведомление: Max (Telegram) + Expo Push + WebSocket"""
     from .max_service import send_notification_to_user
     print(f'[Push] Sending to user_id={user_id}: title="{title}"')
-    result = send_notification_to_user(user_id, title, body)
-    print(f'[Push] Result for user_id={user_id}: via_max={result}')
+    # Max (Telegram-бот)
+    result_max = send_notification_to_user(user_id, title, body)
+    # Expo Push — мобильное приложение мастеров
+    result_expo = _send_expo_push(user_id, title, body, data)
+    # WebSocket — мгновенная доставка (Channels)
+    result_ws = _send_ws_notification(user_id, title, body, data)
+    print(f'[Push] Result for user_id={user_id}: via_max={result_max}, via_expo={result_expo}, via_ws={result_ws}')
+
+
+def _send_ws_notification(user_id, title, body, data=None):
+    """Отправить уведомление через WebSocket (Channels layer)."""
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return False
+        async_to_sync(channel_layer.group_send)(
+            f'user_{user_id}',
+            {
+                'type': 'notification_message',
+                'title': title,
+                'body': body,
+                'data': data or {},
+            }
+        )
+        return True
+    except Exception as e:
+        print(f'[WS] Layer error: {e}')
+        return False
+
+
+def _send_expo_push(user_id, title, body, data=None):
+    """Отправить push-уведомление через Expo Push API на все активные токены пользователя."""
+    import requests as expo_requests
+    tokens = PushToken.objects.filter(user_id=user_id, is_active=True)
+    if not tokens:
+        return False
+
+    messages = []
+    for pt in tokens:
+        msg = {
+            'to': pt.token,
+            'title': title,
+            'body': body,
+            'sound': 'default',
+            'priority': 'high',
+        }
+        if data:
+            msg['data'] = data
+        messages.append(msg)
+
+    if not messages:
+        return False
+
+    try:
+        # Expo Push API может принимать до 100 сообщений за раз
+        # Отправляем чанками по 50 для надёжности
+        chunk_size = 50
+        all_ok = True
+        for i in range(0, len(messages), chunk_size):
+            chunk = messages[i:i + chunk_size]
+            resp = expo_requests.post(
+                'https://exp.host/--/api/v2/push/send',
+                json=chunk,
+                headers={
+                    'Accept': 'application/json',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Content-Type': 'application/json',
+                },
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                print(f'[ExpoPush] HTTP {resp.status_code}: {resp.text[:200]}')
+                all_ok = False
+                continue
+
+            result = resp.json()
+            if 'data' in result:
+                for item in result['data']:
+                    if item.get('status') == 'error':
+                        err = item.get('message', '')
+                        print(f'[ExpoPush] Token error: {err}')
+                        # Деактивируем невалидные токены
+                        if 'DeviceNotRegistered' in err:
+                            expo_token = item.get('id') or messages[0].get('to', '')
+                            PushToken.objects.filter(token=expo_token).update(is_active=False)
+                            print(f'[ExpoPush] Deactivated token: {expo_token[:20]}...')
+                        all_ok = False
+        return all_ok
+    except Exception as e:
+        print(f'[ExpoPush] Error: {e}')
+        return False
 
 
 # ==================== Auth endpoints ====================
@@ -3245,10 +3430,14 @@ class ErcBillingRecordViewSet(viewsets.ModelViewSet):
 
 class BuildingEntranceViewSet(viewsets.ModelViewSet):
     """Подъезды домов"""
-    queryset = BuildingEntrance.objects.select_related('building').all()
+    queryset = BuildingEntrance.objects.select_related('building', 'building__management_company_fk', 'building__region').all()
     serializer_class = BuildingEntranceSerializer
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['building']
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['building', 'building__management_company_fk', 'building__region']
+    search_fields = ['building__street_name', 'building__city', 'ip_address', 'access_code', 'programming_code', 'notes']
+    ordering_fields = ['building__street_name', 'building__city', 'building__apartments_count', 'building__management_company_fk__name', 'number']
+    ordering = ['building__street_name']
+    pagination_class = None
 
     @action(detail=True, methods=['get'])
     def orders(self, request, pk=None):

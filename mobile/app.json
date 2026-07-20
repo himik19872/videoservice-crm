@@ -45,6 +45,15 @@
           "icon": "./assets/icon.png",
           "color": "#1677ff"
         }
+      ],
+      [
+        "expo-background-fetch",
+        {
+          "startOnBoot": true
+        }
+      ],
+      [
+        "expo-task-manager"
       ]
     ],
     "extra": {

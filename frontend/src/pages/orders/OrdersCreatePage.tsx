@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Button, Select, Typography, Card, message, Divider, Row, Col, Radio } from 'antd';
+import { Form, Input, Button, Select, Typography, Card, message, Divider, Row, Col, Radio, Modal, Tag, Space, Checkbox } from 'antd';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import AddressSuggest from '../../components/AddressSuggest';
 import InnSuggest from '../../components/InnSuggest';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const OrdersCreatePage: React.FC = () => {
   const navigate = useNavigate();
@@ -20,6 +20,12 @@ const OrdersCreatePage: React.FC = () => {
   const [clientType, setClientType] = useState<'individual' | 'legal'>('individual');
   const [creatingClient, setCreatingClient] = useState(false);
   const [clientSearching, setClientSearching] = useState(false);
+  // Похожие заявки (предложение объединить)
+  const [similarOrders, setSimilarOrders] = useState<any[]>([]);
+  const [similarModalOpen, setSimilarModalOpen] = useState(false);
+  const [newOrderId, setNewOrderId] = useState<number | null>(null);
+  const [selectedSimilarIds, setSelectedSimilarIds] = useState<number[]>([]);
+  const [linkingOrders, setLinkingOrders] = useState(false);
 
   useEffect(() => {
     fetchRegions();
@@ -196,8 +202,34 @@ const OrdersCreatePage: React.FC = () => {
         deadline: values.deadline || undefined,
       };
 
-      await api.post('/orders/', orderPayload);
+      const orderRes = await api.post('/orders/', orderPayload);
+      const newOrder = orderRes.data;
       message.success('Заявка создана');
+
+      // Проверяем похожие открытые заявки в том же доме/подъезде
+      const buildingId = values.building_id;
+      const entrance = values.entrance || '';
+      const city = values.city || '';
+      const street = values.street_name || '';
+      const house = values.house_number || '';
+
+      if (buildingId || (city && street && house)) {
+        const params: any = {};
+        if (buildingId) params.building_id = buildingId;
+        else { params.city = city; params.street_name = street; params.house_number = house; }
+        if (entrance) params.entrance = entrance;
+
+        const similarRes = await api.get('/orders/find_similar/', { params });
+        const similar = (similarRes.data || []).filter((o: any) => o.id !== newOrder.id);
+
+        if (similar.length > 0) {
+          setSimilarOrders(similar);
+          setNewOrderId(newOrder.id);
+          setSimilarModalOpen(true);
+          return; // не уходим со страницы, пока пользователь не решит
+        }
+      }
+
       navigate('/orders');
     } catch (error: any) {
       message.error(error.response?.data?.detail || error.response?.data?.error || 'Ошибка создания заявки');
@@ -205,6 +237,26 @@ const OrdersCreatePage: React.FC = () => {
       setLoading(false);
       setCreatingClient(false);
     }
+  };
+
+  const handleLinkSimilar = async () => {
+    if (!newOrderId || selectedSimilarIds.length === 0) return;
+    setLinkingOrders(true);
+    try {
+      await api.post(`/orders/${newOrderId}/link_orders/`, { child_ids: selectedSimilarIds, reason: 'Одинаковая неисправность в подъезде' });
+      message.success(`Объединено заявок: ${selectedSimilarIds.length}`);
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка объединения');
+    } finally {
+      setLinkingOrders(false);
+      setSimilarModalOpen(false);
+      navigate('/orders');
+    }
+  };
+
+  const skipLinking = () => {
+    setSimilarModalOpen(false);
+    navigate('/orders');
   };
 
   return (
@@ -344,6 +396,49 @@ const OrdersCreatePage: React.FC = () => {
           Создать заявку
         </Button>
       </Form>
+
+      {/* Модалка: похожие заявки */}
+      <Modal
+        title="🔍 Найдены похожие заявки в этом доме/подъезде"
+        open={similarModalOpen}
+        onOk={handleLinkSimilar}
+        onCancel={skipLinking}
+        okText={selectedSimilarIds.length > 0 ? `Объединить (${selectedSimilarIds.length})` : 'Пропустить'}
+        cancelText="Пропустить"
+        confirmLoading={linkingOrders}
+        width={650}
+      >
+        <Text type="secondary">
+          Новая заявка <Text strong>#{newOrderId}</Text>. Возможно, это одна и та же проблема — объедините заявки, чтобы мастер закрыл их одновременно.
+        </Text>
+        <Divider style={{ margin: '12px 0' }} />
+        <div style={{ maxHeight: 350, overflowY: 'auto' }}>
+          {similarOrders.map((o: any) => (
+            <div key={o.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'flex-start' }}>
+              <Checkbox
+                checked={selectedSimilarIds.includes(o.id)}
+                onChange={e => {
+                  if (e.target.checked) setSelectedSimilarIds([...selectedSimilarIds, o.id]);
+                  else setSelectedSimilarIds(selectedSimilarIds.filter(x => x !== o.id));
+                }}
+                style={{ marginTop: 2 }}
+              />
+              <div style={{ marginLeft: 8, flex: 1 }}>
+                <Space>
+                  <Text strong>#{o.number}</Text>
+                  <Tag color={o.status === 'assigned' ? 'purple' : 'blue'}>
+                    {o.status === 'new' ? 'Новая' : o.status === 'assigned' ? 'Назначена' : o.status}
+                  </Tag>
+                  <Tag>{o.order_type}</Tag>
+                </Space>
+                <div><Text type="secondary">{o.address}</Text></div>
+                {o.apartment && <div>Кв. {o.apartment}</div>}
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{o.description}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </Card>
   );
 };

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1058196447524",
+    "project_id": "videoservice-crm",
+    "storage_bucket": "videoservice-crm.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1058196447524:android:3350ef504eafa3e36013b1",
+        "android_client_info": {
+          "package_name": "com.videoservice.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCSUcj5pzk3VkHcglL1FwIpyQatuvQFumA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -22,8 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create entrypoint script
-RUN echo '#!/bin/bash\npython manage.py migrate\npython manage.py loaddata regions.json\npython manage.py loaddata users.json\npython manage.py loaddata masters.json\npython manage.py loaddata user_profiles.json\npython manage.py runserver 0.0.0.0:8000' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+RUN echo '#!/bin/bash\npython manage.py migrate\npython manage.py loaddata regions.json\npython manage.py loaddata users.json\npython manage.py loaddata masters.json\npython manage.py loaddata user_profiles.json\ndaphne -b 0.0.0.0 -p 8000 crm.asgi:application' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "crm.asgi:application"]

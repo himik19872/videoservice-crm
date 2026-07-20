@@ -148,6 +148,7 @@ function AppContent() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:id" element={<OrdersDetailPage />} />
+          <Route path="/orders/:id/edit" element={<OrdersEditPage />} />
           <Route path="/equipment" element={<EquipmentPage />} />
           <Route path="/equipment/:id" element={<EquipmentDetailPage />} />
           <Route path="/masters" element={<MastersPage />} />
@@ -166,6 +167,7 @@ function AppContent() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:id" element={<OrdersDetailPage />} />
+          <Route path="/orders/:id/edit" element={<OrdersEditPage />} />
           <Route path="/legal-entities" element={<LegalEntitiesPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:id" element={<ClientsDetailPage />} />
@@ -192,6 +194,7 @@ function AppContent() {
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/create" element={<OrdersCreatePage />} />
           <Route path="/orders/:id" element={<OrdersDetailPage />} />
+          <Route path="/orders/:id/edit" element={<OrdersEditPage />} />
           <Route path="/orders/confirm" element={<OrdersConfirmPage />} />
           <Route path="/legal-entities" element={<LegalEntitiesPage />} />
           <Route path="/clients" element={<ClientsPage />} />
@@ -242,6 +245,7 @@ function AppContent() {
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/orders/create" element={<OrdersCreatePage />} />
         <Route path="/orders/:id" element={<OrdersDetailPage />} />
+        <Route path="/orders/:id/edit" element={<OrdersEditPage />} />
         <Route path="/orders/confirm" element={<OrdersConfirmPage />} />
         <Route path="/legal-entities" element={<LegalEntitiesPage />} />
         <Route path="/clients" element={<ClientsPage />} />

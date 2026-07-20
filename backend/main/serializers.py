@@ -360,6 +360,12 @@ class OrderSerializer(serializers.ModelSerializer):
     entrance_ip = serializers.SerializerMethodField()
     entrance_access_code = serializers.SerializerMethodField()
     entrance_programming_code = serializers.SerializerMethodField()
+    # Группировка заявок
+    parent_order_id = serializers.PrimaryKeyRelatedField(
+        queryset=Order.objects.all(), source='parent_order', write_only=True, required=False, allow_null=True
+    )
+    parent_order = serializers.SerializerMethodField()
+    linked_orders = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -375,6 +381,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'completed_at', 'confirmed_at', 'confirmed_by',
             'helpers', 'history', 'media', 'issue_orders',
             'entrance_ip', 'entrance_access_code', 'entrance_programming_code',
+            'parent_order', 'parent_order_id', 'linked_orders',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -476,6 +483,16 @@ class OrderSerializer(serializers.ModelSerializer):
     def get_entrance_programming_code(self, obj):
         e = self._get_client_entrance(obj)
         return e.programming_code if e else None
+
+    def get_parent_order(self, obj):
+        if obj.parent_order:
+            return {'id': obj.parent_order.id, 'number': obj.parent_order.number}
+        return None
+
+    def get_linked_orders(self, obj):
+        """Дочерние заявки (объединённые в эту)."""
+        return [{'id': o.id, 'number': o.number, 'status': o.status, 'address': o.address}
+                for o in obj.linked_orders.all()]
 
 
 class ReportSerializer(serializers.ModelSerializer):
