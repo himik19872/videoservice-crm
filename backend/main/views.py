@@ -5131,34 +5131,36 @@ _migration_lock = threading.Lock()
 
 # Порядок переноса моделей (зависимости: сначала справочники, потом основные)
 MIGRATION_MODELS = [
-    # Справочники
+    # Базовые сущности (без FK на другие модели)
+    {'model': 'User', 'label': 'Пользователи (auth)'},
     {'model': 'Region', 'label': 'Регионы'},
     {'model': 'ManagementCompany', 'label': 'УК/ТСЖ'},
+    {'model': 'Supplier', 'label': 'Поставщики'},
     {'model': 'Tariff', 'label': 'Тарифы'},
+    {'model': 'LegalEntity', 'label': 'Юрлица'},
+    {'model': 'SystemSettings', 'label': 'Системные настройки'},
+    # Пользователи (FK → User)
+    {'model': 'UserProfile', 'label': 'Профили'},
+    {'model': 'Master', 'label': 'Мастера'},
+    # Адреса (FK → Region, ManagementCompany)
     {'model': 'Building', 'label': 'Дома'},
     {'model': 'BuildingEntrance', 'label': 'Подъезды'},
-    # Клиенты и ЕРЦ
+    # Клиенты и ЕРЦ (FK → Building, Entrance)
     {'model': 'Client', 'label': 'Клиенты'},
     {'model': 'ErcAccount', 'label': 'Лицевые счета'},
     {'model': 'ErcBillingRecord', 'label': 'ЕРЦ-записи'},
     {'model': 'PaymentRecord', 'label': 'Внутренние платежи'},
-    # Пользователи
-    {'model': 'UserProfile', 'label': 'Профили'},
-    {'model': 'Master', 'label': 'Мастера'},
-    # Оборудование
+    # Оборудование (FK → Supplier, StorageLocation)
+    {'model': 'StorageLocation', 'label': 'Места хранения'},
     {'model': 'InventoryItem', 'label': 'Оборудование'},
     {'model': 'InventoryMovement', 'label': 'Движения'},
-    {'model': 'StorageLocation', 'label': 'Места хранения'},
-    {'model': 'Supplier', 'label': 'Поставщики'},
-    # Заявки
+    # Заявки (FK → Client, Master, Building)
     {'model': 'Order', 'label': 'Заявки'},
     {'model': 'OrderHistory', 'label': 'История'},
     {'model': 'OrderMedia', 'label': 'Медиа'},
     {'model': 'Payment', 'label': 'Оплаты'},
-    # Настройки
-    {'model': 'SystemSettings', 'label': 'Настройки'},
+    # Остальное
     {'model': 'BewardDevice', 'label': 'Beward'},
-    {'model': 'LegalEntity', 'label': 'Юрлица'},
     {'model': 'CallLog', 'label': 'Звонки'},
 ]
 
@@ -5168,11 +5170,11 @@ MIGRATION_MODEL_NAMES = [m['model'] for m in MIGRATION_MODELS]
 SECTION_TO_MODELS = {
     'clients': ['Region', 'Building', 'BuildingEntrance', 'Client'],
     'orders': ['Order', 'OrderHistory', 'OrderMedia', 'Payment'],
-    'users': ['UserProfile', 'Master'],
+    'users': ['User', 'UserProfile', 'Master'],
     'buildings': ['ManagementCompany', 'Building', 'BuildingEntrance'],
     'tariffs': ['Tariff', 'PaymentRecord'],
     'erc': ['ErcAccount', 'ErcBillingRecord'],
-    'equipment': ['InventoryItem', 'InventoryMovement', 'StorageLocation', 'Supplier'],
+    'equipment': ['Supplier', 'StorageLocation', 'InventoryItem', 'InventoryMovement'],
     'settings': ['SystemSettings', 'BewardDevice', 'LegalEntity', 'CallLog'],
     'all': MIGRATION_MODEL_NAMES,
 }
@@ -5327,7 +5329,11 @@ def _run_migration(source_host, source_port, username, password, sections):
                 page += 1
                 from django.apps import apps
                 try:
-                    Model = apps.get_model('main', model_name)
+                    if model_name == 'User':
+                        from django.contrib.auth.models import User as AuthUser
+                        Model = AuthUser
+                    else:
+                        Model = apps.get_model('main', model_name)
                 except LookupError:
                     with _migration_lock:
                         _migration_state['errors'].append(f'{label}: модель не найдена')
@@ -5335,6 +5341,30 @@ def _run_migration(source_host, source_port, username, password, sections):
 
                 for item in items:
                     pk = item.pop('id', None)
+                    # User — особая модель, используем update_or_create по username
+                    if model_name == 'User':
+                        try:
+                            username = item.pop('username', '')
+                            # хеш пароля и даты сохраняем как есть
+                            user, created = Model.objects.update_or_create(
+                                username=username,
+                                defaults={k: v for k, v in item.items() if k not in ('password', 'last_login', 'date_joined')}
+                            )
+                            # Пароль — отдельно, если передан
+                            if 'password' in item and item['password']:
+                                user.password = item['password']
+                            # Даты
+                            for date_field in ('last_login', 'date_joined'):
+                                if date_field in item and item[date_field]:
+                                    setattr(user, date_field, item[date_field])
+                            user.save()
+                            created_total += 1
+                        except Exception as e:
+                            with _migration_lock:
+                                _migration_state['errors'].append(f'{label} pk={pk}: {str(e)[:100]}')
+                        continue
+
+                    # Обычные модели
                     try:
                         if pk and Model.objects.filter(pk=pk).exists():
                             Model.objects.filter(pk=pk).update(**item)
