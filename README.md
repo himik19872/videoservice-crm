@@ -377,7 +377,7 @@ sudo ss -tlnp | grep -E "5038|5060|8088"
 
 ## 🚀 Быстрый старт
 
-### Одна команда (новый сервер)
+### Ubuntu / Debian
 
 ```bash
 git clone https://github.com/himik19872/videoservice-crm.git
@@ -385,10 +385,41 @@ cd videoservice-crm
 sudo chmod +x install.sh && sudo ./install.sh
 ```
 
+### Astra Linux (Special Edition / Common Edition)
+
+```bash
+git clone https://github.com/himik19872/videoservice-crm.git
+cd videoservice-crm
+sudo chmod +x install_astra.sh && sudo ./install_astra.sh
+```
+
+> **Особенности Astra Linux:** Node.js может быть без npm — скрипт установит оба пакета. Используются флаги `--no-audit --no-fund` для экономии памяти при `npm install`.
+
+### С ключами DaData (нормализация адресов)
+
+```bash
+export DADATA_API_KEY=ваш_ключ DADATA_SECRET=ваш_секрет
+sudo -E ./install.sh        # Ubuntu
+sudo -E ./install_astra.sh  # Astra
+```
+
 После установки:
 - CRM: **http://ВАШ_IP:3000**
 - API: **http://ВАШ_IP:3000/api/**
 - Логин: **admin** / **admin123**
+
+### 🔄 Перенос данных с сервера на сервер
+
+1. Установите CRM на новом сервере (см. выше)
+2. На **новом** сервере откройте: **Настройки → Миграция данных → 🚀 Прямой перенос**
+3. Введите:
+   - **IP** старого сервера (например `192.168.1.38`)
+   - **Порт** `8000`
+   - **Логин** и **Пароль** от старого сервера
+4. Выберите секции данных → **Начать перенос**
+5. Наблюдайте за прогресс-баром в реальном времени
+
+Альтернативно: экспорт в JSON-файл на старом сервере → скачать → импорт на новом через вкладку «Импорт из файла».
 
 ### Локальная разработка
 
