@@ -1,4 +1,6 @@
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
@@ -60,6 +62,8 @@ class Building(models.Model):
     equipment_list = models.TextField(blank=True, verbose_name=_('Список оборудования'))
     programming_code = models.CharField(max_length=200, blank=True, verbose_name=_('Код программирования'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    is_dormitory = models.BooleanField(default=False, verbose_name=_('Общежитие'), help_text=_('В одной квартире может быть несколько лицевых счетов'))
+    dadata_verified = models.BooleanField(default=False, verbose_name=_('Адрес проверен через Dadata'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Дата обновления'))
 
@@ -283,16 +287,19 @@ class Tariff(models.Model):
 
 
 class Region(models.Model):
-    """Район обслуживания"""
+    """Регион (субъект РФ) с кодом."""
     name = models.CharField(max_length=100, verbose_name=_('Название'))
+    code = models.CharField(max_length=3, default='', verbose_name=_('Код региона'), help_text=_('Напр. 78 (СПб), 47 (ЛО), 77 (Москва)'))
+    country = models.CharField(max_length=100, default='Россия', verbose_name=_('Страна'))
     description = models.TextField(blank=True, verbose_name=_('Описание'))
 
     class Meta:
-        verbose_name = _('Район')
-        verbose_name_plural = _('Районы')
+        verbose_name = _('Регион')
+        verbose_name_plural = _('Регионы')
+        ordering = ['code']
 
     def __str__(self):
-        return self.name
+        return f'{self.code} — {self.name}'
 
 
 class UserProfile(models.Model):
@@ -2105,3 +2112,42 @@ class StorageLocation(models.Model):
         if self.capacity <= 0:
             return False
         return self.items_count >= self.capacity
+
+
+# ── Сигналы ──────────────────────────────────────────────────────────────
+
+def _build_client_address(building, client):
+    """Формирует строку адреса клиента из данных дома + квартира."""
+    parts = [f'г. {building.city}' if building.city else 'Санкт-Петербург']
+    if building.district and building.district != building.city:
+        parts.append(building.district)
+    if building.street_name:
+        street = building.get_street_type_display().lower() if building.street_type != 'other' else ''
+        parts.append(f'{street} {building.street_name}'.strip())
+    house = f'д. {building.house_number}'
+    if building.building_number:
+        house += f' корп. {building.building_number}'
+    if building.liter:
+        house += f' лит. {building.liter}'
+    parts.append(house)
+    if client.apartment:
+        parts.append(f'кв. {client.apartment}')
+    return ', '.join(parts)
+
+
+@receiver(post_save, sender=Building)
+def update_residents_on_building_change(sender, instance, **kwargs):
+    """
+    При сохранении дома — обновить address, region, district у всех привязанных клиентов.
+    """
+    from .models import Client  # локальный импорт для избежания цикла
+    residents = Client.objects.filter(building=instance)
+    if residents.exists():
+        for client in residents:
+            new_address = _build_client_address(instance, client)
+            update_fields = {'address': new_address}
+            if instance.region_id:
+                update_fields['region'] = instance.region
+            if instance.district:
+                update_fields['district'] = instance.district
+            Client.objects.filter(pk=client.pk).update(**update_fields)

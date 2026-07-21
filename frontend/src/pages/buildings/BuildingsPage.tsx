@@ -112,6 +112,13 @@ const BuildingsPage: React.FC = () => {
     },
     {
       title: 'Район',
+      dataIndex: 'district',
+      key: 'district',
+      width: 150,
+      render: (v: string) => v || '-',
+    },
+    {
+      title: 'Регион',
       dataIndex: 'region',
       key: 'region',
       width: 150,

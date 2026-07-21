@@ -159,11 +159,24 @@ def parse_address(raw):
     if street_idx >= 0:
         result['street'] = parts[street_idx]
     elif parts:
+        # Специальный случай: "Агалатово д 15" → город=Агалатово, дом=15
+        # Ищем "д ХХ" в первом remaining-part
         for i, p in enumerate(parts):
-            if not re.search(r'д\.\s*\d|дом\s*\d|корп|кв\.?\s*\d|^\d+$', p.lower()):
-                result['street'] = p
+            house_match = re.search(r'д\.?\s*(\d+[а-яa-z]*)', p.lower())
+            if house_match:
+                result['house'] = _parse_house_number('д ' + house_match.group(1))
+                # Всё до "д" — возможно улица или ничего
+                before = p[:house_match.start()].strip().rstrip(', ').strip()
+                if before and not any(c in before.lower() for c in SPB_SUBURBS):
+                    result['street'] = before
                 street_idx = i
                 break
+        if street_idx < 0:
+            for i, p in enumerate(parts):
+                if not re.search(r'д\.\s*\d|дом\s*\d|корп|кв\.?\s*\d|^\d+$', p.lower()):
+                    result['street'] = p
+                    street_idx = i
+                    break
 
     # 5. Дом, корпус, квартира
     remaining = parts[max(street_idx + 1, 0):]

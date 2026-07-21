@@ -275,6 +275,16 @@ class ClientViewSet(viewsets.ModelViewSet):
         queryset = Client.objects.all()
         user = self.request.user
 
+        # Фильтр по источнику
+        source = self.request.query_params.get('source', '').strip()
+        if source:
+            queryset = queryset.filter(source=source)
+
+        # Фильтр «без дома»
+        no_building = self.request.query_params.get('no_building', '').strip()
+        if no_building == 'true':
+            queryset = queryset.filter(building__isnull=True)
+
         # Если не администратор, показываем только клиентов своего региона
         if user.is_authenticated and not user.is_staff:
             try:
@@ -1424,6 +1434,103 @@ class BuildingViewSet(viewsets.ModelViewSet):
                 created += 1
             return Response({'ok': True, 'entrances_created': created})
         return Response({'error': 'Укажите entrances_count и apartments_count'}, status=400)
+
+    @action(detail=True, methods=['post'])
+    def apply_to_residents(self, request, pk=None):
+        """
+        Кнопка «Применить ко всем квартирам»: переносит адрес дома
+        на всех привязанных клиентов (address, region, district).
+        """
+        building = self.get_object()
+        residents = Client.objects.filter(building=building)
+        count = 0
+        for client in residents:
+            changed = False
+            # Формируем адрес как в _build_client_address
+            parts = [f'г. {building.city}' if building.city else 'Санкт-Петербург']
+            if building.district and building.district != building.city:
+                parts.append(building.district)
+            if building.street_name:
+                street = building.get_street_type_display().lower()
+                parts.append(f'{street} {building.street_name}'.strip())
+            house = f'д. {building.house_number}'
+            if building.building_number:
+                house += f' корп. {building.building_number}'
+            if building.liter:
+                house += f' лит. {building.liter}'
+            parts.append(house)
+            if client.apartment:
+                parts.append(f'кв. {client.apartment}')
+            new_address = ', '.join(parts)
+
+            if client.address != new_address:
+                client.address = new_address
+                changed = True
+            if building.region_id and client.region_id != building.region_id:
+                client.region = building.region
+                changed = True
+            if building.district and client.district != building.district:
+                client.district = building.district
+                changed = True
+
+            if changed:
+                client.save(update_fields=['address', 'region', 'district'])
+                count += 1
+
+        return Response({'ok': True, 'residents_updated': count, 'total_residents': residents.count()})
+
+    @action(detail=True, methods=['post'])
+    def dadata_verify(self, request, pk=None):
+        """
+        Проверить/нормализовать адрес дома через Dadata.
+        Принимает опционально address (строка) или использует full_address дома.
+        Возвращает нормализованные поля.
+        """
+        building = self.get_object()
+        raw = request.data.get('address', '') or str(building)
+
+        from .dadata_service import normalize_address as dadata_normalize
+        result = dadata_normalize(raw)
+
+        if result['success']:
+            # Обновляем дом
+            if result['region']:
+                from .models import Region
+                region_name = result['region']
+                region_code = '78' if 'спб' in region_name.lower() or 'санкт' in region_name.lower() or 'петербург' in region_name.lower() else ('47' if 'ленин' in region_name.lower() else '')
+                region_obj = None
+                if region_name:
+                    region_obj, _ = Region.objects.get_or_create(
+                        name=region_name,
+                        defaults={'code': region_code, 'country': 'Россия'}
+                    )
+                    building.region = region_obj
+            if result['district']:
+                building.district = result['district']
+            if result['city']:
+                building.city = result['city']
+            if result['street_name']:
+                building.street_name = result['street_name']
+            if result['street_type']:
+                building.street_type = result['street_type']
+            if result['house_number']:
+                building.house_number = result['house_number']
+            if result['building_number']:
+                building.building_number = result['building_number']
+            building.dadata_verified = True
+            building.save()
+            return Response({
+                'success': True,
+                'building': BuildingSerializer(building).data,
+                'dadata': {
+                    'city': result['city'], 'region': result['region'],
+                    'district': result['district'], 'street_name': result['street_name'],
+                    'street_type': result['street_type'], 'house_number': result['house_number'],
+                    'building_number': result['building_number'],
+                    'full_address': result['full_address'],
+                }
+            })
+        return Response({'success': False, 'error': 'Не удалось нормализовать адрес через Dadata'}, status=400)
 
 
 class TraccarSettingsViewSet(viewsets.ModelViewSet):
@@ -4035,6 +4142,483 @@ def import_unified_view(request):
 
 
 # ══════════════════════════════════════════════════════════════════
+# Универсальный импорт клиентов (CSV) — единый формат
+# 14 полей клиента + 5 полей ЕРЦ (опционально)
+# ══════════════════════════════════════════════════════════════════
+
+UNIVERSAL_CLIENT_FIELDS = [
+    'city', 'region', 'district', 'street_name', 'house_number',
+    'building_number', 'apartment', 'entrance_number',
+    'full_name', 'personal_account', 'phone', 'source', 'source_file',
+    'period', 'balance_start', 'charged', 'paid', 'balance_end',
+]
+
+SAMPLE_CSV_CONTENT = """city,region,district,street_name,house_number,building_number,apartment,entrance_number,full_name,personal_account,phone,source,source_file,period,balance_start,charged,paid,balance_end
+Коммунар,Ленинградская обл,Гатчинский р-н,Бумажников,2,,3,1,Небензя Эдуард Александрович,070000081442,,АО ЕИРЦ коммунар,05_ЕИРЦ Коммунар_май 2026.xlsx,2026-05-01,0,0,0,0
+Коммунар,Ленинградская обл,Гатчинский р-н,Бумажников,2,,5,1,Смородинов Валентин Николаевич,070000081444,,АО ЕИРЦ коммунар,05_ЕИРЦ Коммунар_май 2026.xlsx,2026-05-01,0,0,0,0
+Агалатово,Ленинградская обл,Всеволожский р-н,,144,1,34,1,Иванов Петр Сергеевич,050000123456,,"ТСЖ Агалатово",агалатово_май.xlsx,2026-05-01,1200.50,300,300,1200.50
+Санкт-Петербург,Ленинградская обл,,Ленина,5,,1,1,Иванова Мария,120000012345,79111234567,ТСЖ Пример,example.xlsx,2026-06-01,500,250,250,500
+Санкт-Петербург,Ленинградская обл,,Мира,10,корп.1,42,1,Сидоров Алексей,120000012346,79330001122,Жилкомсервис,example.xlsx,,0,0,0,0"""
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def download_sample_csv_view(request):
+    """Скачать образец CSV для импорта клиентов (без авторизации)."""
+    response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    response['Content-Disposition'] = 'attachment; filename="clients_sample.csv"'
+    response.write('\uFEFF')  # BOM для Excel
+    response.write(SAMPLE_CSV_CONTENT)
+    return response
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_clients_csv_view(request):
+    """
+    Единый импорт: клиенты + начисления ЕРЦ из одного CSV.
+
+    Поля (19):
+      city, region, district, street_name, house_number, building_number,
+      apartment, entrance_number, full_name, personal_account, phone,
+      source, source_file, period, balance_start, charged, paid, balance_end
+
+    Уникальность клиента — по personal_account.
+    Здание — по city + street_name + house_number.
+    Если period заполнен — создаётся ErcBillingRecord.
+    """
+    try:
+        csv_data = None
+        if 'file' in request.FILES:
+            csv_data = request.FILES['file'].read().decode('utf-8-sig')
+        elif 'csv_text' in request.data:
+            csv_data = request.data['csv_text']
+        else:
+            return Response({'success': False, 'error': 'Нет файла или csv_text'}, status=400)
+
+        import csv as csv_mod, io
+        reader = csv_mod.DictReader(io.StringIO(csv_data))
+        rows = list(reader)
+
+        if not rows:
+            return Response({'success': False, 'error': 'CSV пустой'}, status=400)
+
+        from .models import (
+            Client as ClientModel, Building, ManagementCompany, BuildingEntrance,
+            ErcAccount, ErcBillingRecord,
+        )
+        from datetime import datetime
+
+        created_clients = 0
+        updated_clients = 0
+        created_buildings = 0
+        created_entrances = 0
+        created_erc = 0
+        updated_erc = 0
+        errors = []
+        skipped_no_account = 0
+
+        for i, row in enumerate(rows, 2):
+            try:
+                city = (row.get('city') or row.get('город') or '').strip()
+                region = (row.get('region') or row.get('область') or '').strip()
+                district = (row.get('district') or row.get('район') or '').strip()
+                street_name = (row.get('street_name') or row.get('street') or row.get('улица') or '').strip()
+                house_number = (row.get('house_number') or row.get('house') or row.get('дом') or '').strip()
+                building_number = (row.get('building_number') or row.get('building') or row.get('корпус') or row.get('строение') or '').strip()
+                apartment = (row.get('apartment') or row.get('квартира') or row.get('кв') or '').strip()
+                entrance = (row.get('entrance_number') or row.get('entrance') or row.get('подъезд') or row.get('под') or '').strip()
+                full_name = (row.get('full_name') or row.get('фио') or row.get('name') or '').strip()
+                personal_account = (row.get('personal_account') or row.get('лицевой_счет') or row.get('лс') or row.get('account') or '').strip()
+                phone = (row.get('phone') or row.get('телефон') or row.get('тел') or '').strip()
+                source = (row.get('source') or row.get('источник') or row.get('ук') or row.get('management_company') or '').strip()
+                source_file = (row.get('source_file') or row.get('файл') or '').strip()
+
+                # --- ЕРЦ поля ---
+                period_str = (row.get('period') or '').strip()
+                balance_start = (row.get('balance_start') or '0').strip()
+                charged = (row.get('charged') or '0').strip()
+                paid = (row.get('paid') or '0').strip()
+                balance_end = (row.get('balance_end') or '0').strip()
+
+                # --- Пропуск мусора ---
+                if not personal_account or len(personal_account) < 5:
+                    skipped_no_account += 1
+                    continue
+                if not personal_account.isdigit():
+                    skipped_no_account += 1
+                    continue
+                skip_words = ['лицевого', 'счета', 'лицевой', 'номер', 'счёт', 'полное', 'фио', 'account']
+                if full_name.lower() in skip_words:
+                    continue
+                if not full_name:
+                    full_name = 'Не определено'
+
+                # --- Нормализация ---
+                if not city:
+                    city = 'Санкт-Петербург'
+                import re as _re
+                clean_street = _re.sub(r'^(ул\.?|улица)\s+', '', street_name, flags=_re.IGNORECASE).strip()
+
+                # --- Адресная строка ---
+                address_parts = [f'г. {city}']
+                if region:
+                    address_parts.append(region)
+                if district:
+                    address_parts.append(district)
+                if clean_street:
+                    address_parts.append(f'ул. {clean_street}')
+                if house_number:
+                    addr_house = f'д. {house_number}'
+                    if building_number:
+                        addr_house += f' корп. {building_number}'
+                    address_parts.append(addr_house)
+                if apartment:
+                    address_parts.append(f'кв. {apartment}')
+                full_address = ', '.join(address_parts)
+
+                # --- Здание ---
+                building = None
+                if clean_street and house_number:
+                    building = Building.objects.filter(
+                        city__icontains=city,
+                        street_name__icontains=clean_street,
+                        house_number=house_number,
+                    ).first()
+                    if not building:
+                        building = Building.objects.create(
+                            city=city,
+                            street_name=clean_street,
+                            house_number=house_number,
+                            building_number=building_number,
+                        )
+                        created_buildings += 1
+                    elif not building.city:
+                        building.city = city
+                        building.save(update_fields=['city'])
+                elif house_number:
+                    # Деревня/посёлок без улицы
+                    building = Building.objects.filter(
+                        city__icontains=city,
+                        street_name='',
+                        house_number=house_number,
+                    ).first()
+                    if not building:
+                        building = Building.objects.create(
+                            city=city,
+                            street_name='',
+                            house_number=house_number,
+                            building_number=building_number,
+                        )
+                        created_buildings += 1
+
+                # --- Подъезд ---
+                entrance_obj = None
+                if building and entrance:
+                    try:
+                        ent_num = int(float(entrance))
+                        entrance_obj, ent_created = BuildingEntrance.objects.get_or_create(
+                            building=building, number=ent_num,
+                            defaults={'apartments_count': 0}
+                        )
+                        if ent_created:
+                            created_entrances += 1
+                    except (ValueError, TypeError):
+                        pass
+
+                # --- УК ---
+                mc_obj = None
+                if source:
+                    mc_obj, _ = ManagementCompany.objects.get_or_create(name=source)
+                    if building and mc_obj and not building.management_company_fk:
+                        building.management_company_fk = mc_obj
+                        building.save(update_fields=['management_company_fk'])
+
+                # --- Клиент (КЛЮЧ = personal_account) ---
+                existing = ClientModel.objects.filter(personal_account_number=personal_account).first()
+
+                if existing:
+                    if building and not existing.building:
+                        existing.building = building
+                    if entrance_obj and not existing.entrance:
+                        existing.entrance = entrance_obj
+                    if not existing.address or existing.address == 'г. , д. ':
+                        existing.address = full_address
+                    if phone and not existing.phone:
+                        existing.phone = phone
+                    if full_name and existing.name == 'Не определено':
+                        existing.name = full_name
+                    existing.save()
+                    updated_clients += 1
+                else:
+                    ClientModel.objects.create(
+                        name=full_name,
+                        phone=phone,
+                        address=full_address,
+                        building=building,
+                        entrance=entrance_obj,
+                        apartment=apartment,
+                        management_company=mc_obj,
+                        personal_account_number=personal_account,
+                        source='erc' if 'ерц' in (source + source_file).lower() else 'manual',
+                    )
+                    created_clients += 1
+
+                # --- ЕРЦ начисление (если есть period) ---
+                if period_str:
+                    try:
+                        period_date = datetime.strptime(period_str, '%Y-%m-%d').date()
+                        if period_date.day != 1:
+                            period_date = period_date.replace(day=1)
+
+                        erc_account, _ = ErcAccount.objects.get_or_create(
+                            account_number=personal_account,
+                            defaults={'full_name': full_name, 'address': full_address}
+                        )
+
+                        billing, billing_created = ErcBillingRecord.objects.update_or_create(
+                            account=erc_account,
+                            period=period_date,
+                            defaults={
+                                'balance_start': float(balance_start) if balance_start else 0,
+                                'charged': float(charged) if charged else 0,
+                                'paid': float(paid) if paid else 0,
+                                'balance_end': float(balance_end) if balance_end else 0,
+                            }
+                        )
+                        if billing_created:
+                            created_erc += 1
+                        else:
+                            updated_erc += 1
+                    except Exception:
+                        pass  # не фатально
+
+            except Exception as e:
+                errors.append(f'Строка {i}: {str(e)}')
+
+        import logging
+        logging.warning(
+            f'[IMPORT] rows={len(rows)} clients: +{created_clients} ~{updated_clients} '
+            f'skip={skipped_no_account} bld={created_buildings} entr={created_entrances} '
+            f'erc: +{created_erc} ~{updated_erc}'
+        )
+
+        return Response({
+            'success': True,
+            'total_rows': len(rows),
+            'clients_created': created_clients,
+            'clients_updated': updated_clients,
+            'skipped_no_account': skipped_no_account,
+            'buildings_created': created_buildings,
+            'entrances_created': created_entrances,
+            'erc_billing_created': created_erc,
+            'erc_billing_updated': updated_erc,
+            'errors': errors[:20],
+        })
+
+    except Exception as e:
+        import traceback
+        return Response({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+        }, status=500)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Прямой импорт XLSX с Dadata (все форматы ЕРЦ)
+# ══════════════════════════════════════════════════════════════════
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_xlsx_preview_view(request):
+    """
+    Предпросмотр XLSX: возвращает первые 20 строк в унифицированном формате БЕЗ импорта в базу.
+    """
+    try:
+        if 'file' not in request.FILES:
+            return Response({'success': False, 'error': 'Файл не прикреплён'}, status=400)
+        uploaded = request.FILES['file']
+        if not uploaded.name.lower().endswith('.xlsx'):
+            return Response({'success': False, 'error': 'Только .xlsx'}, status=400)
+
+        import tempfile, os
+        from openpyxl import load_workbook
+        from .xlsx_importer import _detect_format, _extract_row, _find_data_start
+        from .dadata_service import normalize_address
+
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+            for chunk in uploaded.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+
+        wb = load_workbook(tmp_path, data_only=True)
+        ws = wb.active
+        fmt = _detect_format(ws)
+        data_start = _find_data_start(ws, fmt)
+        preview = []
+
+        for r in range(data_start, min(data_start + 20, ws.max_row + 1)):
+            row_data = _extract_row(ws, r, fmt)
+            if not row_data:
+                continue
+
+            personal_account = row_data.get('personal_account', '')
+            name = row_data.get('name', '')
+            raw_address = row_data.get('raw_address', '')
+
+            if not personal_account or len(personal_account) < 5 or not personal_account.isdigit():
+                continue
+            skip_words = ['лицевого', 'счета', 'лицевой', 'номер', 'фамилия', 'фио']
+            if any(w in name.lower() for w in skip_words):
+                continue
+
+            # Парсим адрес как при импорте
+            pre_city = row_data.get('_city', '')
+            pre_street = row_data.get('_street_name', '')
+            pre_house = row_data.get('_house_number', '')
+            pre_apt = row_data.get('_apartment', '')
+            pre_district = row_data.get('_district', '')
+            pre_region = row_data.get('_region', '')
+
+            if pre_city or pre_house:
+                city = pre_city or 'Санкт-Петербург'
+                region_str = pre_region
+                district = pre_district
+                street_name = pre_street
+                house_number = pre_house
+                apartment = pre_apt
+            else:
+                addr = normalize_address(raw_address) if raw_address else {'success': False}
+                city = addr.get('city', '') or 'Санкт-Петербург'
+                region_str = addr.get('region', '')
+                district = addr.get('district', '')
+                street_name = addr.get('street_name', '')
+                house_number = addr.get('house_number', '')
+                apartment = row_data.get('apartment', '') or addr.get('apartment', '')
+
+            preview.append({
+                'л/с': personal_account,
+                'ФИО': name,
+                'регион': region_str,
+                'район': district,
+                'город': city,
+                'улица': street_name,
+                'дом': house_number,
+                'квартира': apartment,
+                'подъезд': row_data.get('entrance', '1') or '1',
+                'сальдо': row_data.get('balance_start', 0),
+                'начислено': row_data.get('charged', 0),
+                'оплачено': row_data.get('paid', 0),
+                '_raw': raw_address[:100],
+            })
+
+        os.unlink(tmp_path)
+        return Response({'success': True, 'format': fmt, 'preview': preview, 'preview_count': len(preview)})
+    except Exception as e:
+        import traceback
+        return Response({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_xlsx_direct_view(request):
+    """
+    Прямой импорт XLSX-файлов ЕРЦ с нормализацией адресов через Dadata.
+    Поддерживает: Коммунар, СПб, Агалатово, ЛО, Красное Село, Стр.6-3, ТСЖ Битрикс.
+    
+    Принимает multipart: file (.xlsx)
+    """
+    try:
+        if 'file' not in request.FILES:
+            return Response({'success': False, 'error': 'Файл не прикреплён'}, status=400)
+        
+        uploaded = request.FILES['file']
+        if not uploaded.name.lower().endswith('.xlsx'):
+            return Response({'success': False, 'error': 'Только .xlsx'}, status=400)
+        
+        import tempfile, os
+        from .xlsx_importer import import_xlsx_file
+        
+        # Сохраняем во временный файл
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+            for chunk in uploaded.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+        
+        try:
+            period_str = request.data.get('period', '')
+            from datetime import datetime
+            period_date = None
+            if period_str:
+                period_date = datetime.strptime(period_str, '%Y-%m-%d').date()
+            
+            stats = import_xlsx_file(tmp_path, source_filename=uploaded.name, period_date=period_date)
+        finally:
+            os.unlink(tmp_path)
+        
+        return Response({
+            'success': True,
+            **stats,
+        })
+    
+    except Exception as e:
+        import traceback
+        return Response({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+        }, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def import_erc_update_view(request):
+    """
+    Обновление ЕРЦ: обновляет ТОЛЬКО начисления по номеру лицевого счёта.
+    Не создаёт клиентов, не парсит адреса. 
+    Принимает: file (.xlsx) + period (YYYY-MM-DD)
+    """
+    try:
+        if 'file' not in request.FILES:
+            return Response({'success': False, 'error': 'Файл не прикреплён'}, status=400)
+        uploaded = request.FILES['file']
+        if not uploaded.name.lower().endswith('.xlsx'):
+            return Response({'success': False, 'error': 'Только .xlsx'}, status=400)
+
+        import tempfile, os
+        from .xlsx_importer import import_erc_update_only
+
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+            for chunk in uploaded.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+
+        try:
+            period_str = request.data.get('period', '')
+            from datetime import datetime
+            period_date = None
+            if period_str:
+                period_date = datetime.strptime(period_str, '%Y-%m-%d').date()
+
+            stats = import_erc_update_only(tmp_path, period_date=period_date)
+        finally:
+            os.unlink(tmp_path)
+
+        return Response({
+            'success': True,
+            **stats,
+        })
+    except Exception as e:
+        import traceback
+        return Response({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+        }, status=500)
+
+
+# ══════════════════════════════════════════════════════════════════
 # Импорт справочника Beward (IP-адреса и коды)
 # ══════════════════════════════════════════════════════════════════
 
@@ -4051,16 +4635,24 @@ def import_beward_ip_view(request):
 
         uploaded = request.FILES['file']
         if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
-            return Response({'success': False, 'error': 'Поддерживаются только .xlsx'}, status=400)
+            return Response({'success': False, 'error': 'Поддерживаются .xlsx/.xls'}, status=400)
 
-        import openpyxl, re
-        from .models import Building
+        import openpyxl, re, tempfile, os
 
-        wb = openpyxl.load_workbook(uploaded.read(), data_only=True)
-        ws = wb.active
+        # Сохраняем во временный файл (openpyxl требует путь к файлу)
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+            for chunk in uploaded.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
 
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
-        created, updated, skipped, with_building = 0, 0, 0, 0
+        try:
+            wb = openpyxl.load_workbook(tmp_path, data_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(min_row=2, values_only=True))
+        finally:
+            os.unlink(tmp_path)
+
+        created, skipped, with_building = 0, 0, 0
 
         for row in rows:
             region = str(row[0]).strip() if row[0] else ''
@@ -4112,7 +4704,7 @@ def import_beward_ip_view(request):
             'success': True,
             'total_rows': len(rows),
             'created': created,
-            'updated': updated,
+            'updated': 0,
             'skipped': skipped,
             'with_building': with_building,
             'message': f'Импортировано {created} IP-адресов, {with_building} привязано к домам, пропущено {skipped}',
@@ -4145,13 +4737,20 @@ def import_beward_codes_view(request):
         if not uploaded.name.lower().endswith(('.xlsx', '.xls')):
             return Response({'success': False, 'error': 'Поддерживаются только .xlsx'}, status=400)
 
-        import openpyxl, re
+        import openpyxl, re, tempfile, os
         from .models import Building, BuildingEntrance
 
-        wb = openpyxl.load_workbook(uploaded.read(), data_only=True)
-        ws = wb.active
-
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        # Сохраняем во временный файл (openpyxl требует путь к файлу)
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+            for chunk in uploaded.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+        try:
+            wb = openpyxl.load_workbook(tmp_path, data_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(min_row=2, values_only=True))
+        finally:
+            os.unlink(tmp_path)
         stats = {
             'total_rows': len(rows),
             'entrances_created': 0,
@@ -4176,36 +4775,34 @@ def import_beward_codes_view(request):
                 stats['skipped'] += 1
                 continue
 
-            # Парсим адрес
-            addr = re.sub(r',(?!\s)', ', ', address)
-            # Ищем дом
-            m = re.search(r'(?:дом|дсм|д\.)\s*(\d+[а-яА-Я/]?\d*)', addr)
+            # Парсим адрес — улучшенный поиск улицы и дома
+            addr = address
+
+            # Ищем дом: «дом 21», «дом 8», «д. 15»
+            m = re.search(r'(?:дом|д\.)\s*(\d+[а-яА-Я]?)', addr.lower())
             house = m.group(1) if m else ''
-            # Улица
-            parts = [p.strip() for p in addr.split(',')]
-            street = ''
-            for p in parts:
-                for kw in ['улица', 'проспект', 'переулок', 'шоссе', 'бульвар', 'пер', 'пр-кт', 'ул', 'ш', 'тер']:
-                    if kw in p.lower() and 'дом' not in p.lower() and 'корп' not in p.lower():
-                        street = p
-                        break
-                if street:
-                    break
-            if not street and len(parts) > 1:
-                street = parts[1]
-            for prefix in ['улица ', 'проспект ', 'переулок ', 'шоссе ', 'бульвар ', 'территория ']:
-                if street.lower().startswith(prefix):
-                    street = street[len(prefix):]
 
             # Ищем корпус
-            m = re.search(r'корпус\s*(\d+[а-яА-Я]?)', addr)
+            m = re.search(r'корпус\s*(\d+[а-яА-Я]?)', addr.lower())
             bldg = m.group(1) if m else ''
+
+            # Улица — ищем «улица XXX», «шоссе XXX», «проспект XXX»
+            street = ''
+            for pattern in [r'(?:улица|шоссе|проспект|переулок|бульвар)\s+([^,]+)', r'(?:ул\.|ш\.)\s+([^,]+)']:
+                m = re.search(pattern, addr, re.IGNORECASE)
+                if m:
+                    street = m.group(1).strip()
+                    break
 
             # Находим Building
             building = None
-            if street and house:
-                qs = Building.objects.filter(house_number=house, street_name__icontains=street.strip())
-                if bldg:
+            if house:
+                qs = Building.objects.filter(house_number=house)
+                if street:
+                    qs_street = qs.filter(street_name__icontains=street.strip())
+                    if qs_street.exists():
+                        qs = qs_street
+                if bldg and qs.count() > 1:
                     qs_b = qs.filter(building_number=bldg)
                     if qs_b.exists():
                         qs = qs_b
@@ -4295,6 +4892,68 @@ def import_beward_codes_view(request):
 # ══════════════════════════════════════════════════════════════════
 # Системная статистика, экспорт, очистка
 # ══════════════════════════════════════════════════════════════════
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def erc_report_summary_view(request):
+    """
+    Отчёт ЕРЦ: агрегация начислений и оплат по месяцам.
+    Возвращает:
+      - months: список { period, charged_total, paid_total, records_count, paid_percent }
+      - totals: { charged_total, paid_total, balance_start, balance_end }
+    """
+    from django.db.models import Sum, Count
+    from datetime import date
+
+    records = ErcBillingRecord.objects.values('period').annotate(
+        charged_total=Sum('charged'),
+        paid_total=Sum('paid'),
+        balance_start_total=Sum('balance_start'),
+        balance_end_total=Sum('balance_end'),
+        records_count=Count('id'),
+    ).order_by('-period')
+
+    months = []
+    for r in records[:24]:  # последние 24 месяца
+        ch = float(r['charged_total'] or 0)
+        pd = float(r['paid_total'] or 0)
+        months.append({
+            'period': r['period'].strftime('%Y-%m-%d') if r['period'] else '',
+            'period_label': r['period'].strftime('%B %Y') if r['period'] else '',
+            'charged_total': round(ch, 2),
+            'paid_total': round(pd, 2),
+            'balance_start_total': round(float(r['balance_start_total'] or 0), 2),
+            'balance_end_total': round(float(r['balance_end_total'] or 0), 2),
+            'records_count': r['records_count'],
+            'paid_percent': round(pd / ch * 100, 1) if ch > 0 else 0,
+        })
+
+    # Итоги за всё время
+    agg = ErcBillingRecord.objects.aggregate(
+        total_charged=Sum('charged'),
+        total_paid=Sum('paid'),
+        total_balance_start=Sum('balance_start'),
+        total_balance_end=Sum('balance_end'),
+        total_records=Count('id'),
+    )
+
+    ch_all = float(agg['total_charged'] or 0)
+    pd_all = float(agg['total_paid'] or 0)
+
+    return Response({
+        'months': months,
+        'totals': {
+            'charged_total': round(ch_all, 2),
+            'paid_total': round(pd_all, 2),
+            'balance_start_total': round(float(agg['total_balance_start'] or 0), 2),
+            'balance_end_total': round(float(agg['total_balance_end'] or 0), 2),
+            'records_count': agg['total_records'],
+            'paid_percent': round(pd_all / ch_all * 100, 1) if ch_all > 0 else 0,
+        },
+        'accounts_count': ErcAccount.objects.count(),
+        'clients_with_erc': Client.objects.filter(personal_account_number__isnull=False).exclude(personal_account_number='').count(),
+    })
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

@@ -31,6 +31,8 @@ const ClientsPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [ordering, setOrdering] = useState<string>('');
+  const [filterSource, setFilterSource] = useState<string>('');
+  const [filterNoBuilding, setFilterNoBuilding] = useState<boolean>(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -39,12 +41,14 @@ const ClientsPage: React.FC = () => {
     }
   }, [isAuthenticated]);
 
-  const fetchClients = async (pg: number, search: string, size: number, order?: string) => {
+  const fetchClients = async (pg: number, search: string, size: number, order?: string, source?: string, noBuilding?: boolean) => {
     setLoading(true);
     try {
       const params: any = { page: pg, page_size: size };
       if (search) params.search = search;
       if (order) params.ordering = order;
+      if (source) params.source = source;
+      if (noBuilding) params.no_building = 'true';
       const response = await api.get('/clients/', { params });
       setClients(response.data.results || response.data);
       setTotal(response.data.count || 0);
@@ -76,13 +80,13 @@ const ClientsPage: React.FC = () => {
       newOrdering = s.order === 'ascend' ? s.field as string : `-${s.field}`;
     }
     setOrdering(newOrdering);
-    fetchClients(newPage, searchText, newSize, newOrdering);
+    fetchClients(newPage, searchText, newSize, newOrdering, filterSource, filterNoBuilding);
   };
 
   const handleSearch = (value: string) => {
     setSearchText(value);
     setPage(1);
-    fetchClients(1, value, pageSize, ordering);
+    fetchClients(1, value, pageSize, ordering, filterSource, filterNoBuilding);
     setSearchOptions([]);
   };
 
@@ -200,6 +204,29 @@ const ClientsPage: React.FC = () => {
         <Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)}>
             Новый клиент
+          </Button>
+          <Select
+            style={{ width: 160 }}
+            placeholder="Источник"
+            allowClear
+            value={filterSource || undefined}
+            onChange={(v) => { setFilterSource(v || ''); setPage(1); fetchClients(1, searchText, pageSize, ordering, v || '', filterNoBuilding); }}
+          >
+            <Select.Option value="erc">ЕРЦ</Select.Option>
+            <Select.Option value="excel_import">ТСЖ/УК</Select.Option>
+            <Select.Option value="manual">Ручной ввод</Select.Option>
+          </Select>
+          <Button
+            type={filterNoBuilding ? 'primary' : 'default'}
+            danger={filterNoBuilding}
+            onClick={() => {
+              const v = !filterNoBuilding;
+              setFilterNoBuilding(v);
+              setPage(1);
+              fetchClients(1, searchText, pageSize, ordering, filterSource, v);
+            }}
+          >
+            🏚️ Без дома
           </Button>
         </Space>
       </Space>

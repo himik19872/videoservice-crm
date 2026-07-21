@@ -23,6 +23,17 @@ build/
 # Django media/uploads
 media/
 staticfiles/
+backend/media/
+
+# CSV / Excel data files (не храним в git)
+*.csv
+*.xlsx
+*.xls
+!frontend/public/*.csv
+
+# Временные скрипты конвертации
+backend/convert_csv.py
+backend/debug_addr.py
 
 # ======================
 # Node.js / Frontend

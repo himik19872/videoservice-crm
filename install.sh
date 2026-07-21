@@ -29,10 +29,16 @@ APP_DIR="/opt/videoservice-crm"
 GITHUB_REPO="https://github.com/himik19872/videoservice-crm.git"
 DOMAIN="${1:-}"            # Можно передать домен: sudo ./install.sh crm.mydomain.ru
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+DADATA_API_KEY="${DADATA_API_KEY:-}"
+DADATA_SECRET="${DADATA_SECRET:-}"
 
 # ─── Проверка прав ───────────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
     error "Запустите от root: sudo ./install.sh"
+fi
+
+if [[ -z "$DADATA_API_KEY" ]]; then
+    warn "DADATA_API_KEY не задан. Адреса не будут нормализоваться. Установи: export DADATA_API_KEY=... && sudo ./install.sh"
 fi
 
 echo ""
@@ -85,18 +91,17 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 # Шаг 3: Клонирование репозитория
 # ══════════════════════════════════════════════════════════════════════════════
-step "Шаг 3/7: Клонирование репозитория"
+step "Шаг 3/8: Клонирование репозитория"
 
 if [ -d "$APP_DIR/.git" ]; then
     info "Репозиторий уже существует: $APP_DIR"
     cd "$APP_DIR"
     git pull 2>/dev/null || warn "Не удалось выполнить git pull (продолжаем)"
-elif [ -d "/home/himik/crm" ]; then
-    info "Использую локальную копию: /home/himik/crm → $APP_DIR"
+elif [ -d "/home/himik/crm" ] && [ -f "/home/himik/crm/docker-compose.yml" ]; then
+    warn "Найдена локальная копия /home/himik/crm, копирую в $APP_DIR..."
     cp -r /home/himik/crm "$APP_DIR"
 else
     info "Клонирую из GitHub..."
-    mkdir -p "$APP_DIR"
     git clone "$GITHUB_REPO" "$APP_DIR" 2>/dev/null || \
         error "Не удалось клонировать репозиторий. Проверь GITHUB_REPO в скрипте."
 fi
@@ -104,9 +109,25 @@ fi
 cd "$APP_DIR"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Шаг 4: Сборка фронтенда
+# Шаг 3.5: Настройка .env с Dadata ключами
 # ══════════════════════════════════════════════════════════════════════════════
-step "Шаг 4/7: Сборка React фронтенда"
+step "Шаг 4/8: Настройка переменных окружения"
+
+# Создаём .env файл если есть ключи
+if [[ -n "$DADATA_API_KEY" ]]; then
+    cat > "$APP_DIR/.env" << ENVEOF
+DADATA_API_KEY=${DADATA_API_KEY}
+DADATA_SECRET=${DADATA_SECRET}
+ENVEOF
+    info "Файл .env создан с ключами Dadata"
+else
+    warn "Ключи Dadata не заданы — адреса не будут нормализоваться"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Шаг 5: Сборка фронтенда
+# ══════════════════════════════════════════════════════════════════════════════
+step "Шаг 5/8: Сборка React фронтенда"
 
 if [ -f "$APP_DIR/frontend/package.json" ]; then
     cd "$APP_DIR/frontend"
@@ -119,9 +140,9 @@ fi
 cd "$APP_DIR"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Шаг 5: Установка Node-сервера (Express прокси)
+# Шаг 6: Установка Node-сервера (Express прокси)
 # ══════════════════════════════════════════════════════════════════════════════
-step "Шаг 5/7: Настройка Express-прокси"
+step "Шаг 6/8: Настройка Express-прокси"
 
 if [ -f "$APP_DIR/server/package.json" ]; then
     cd "$APP_DIR/server"
@@ -133,16 +154,21 @@ fi
 cd "$APP_DIR"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Шаг 6: Запуск Docker-контейнеров (PostgreSQL + Django)
+# Шаг 7: Запуск Docker-контейнеров (PostgreSQL + Django)
 # ══════════════════════════════════════════════════════════════════════════════
-step "Шаг 6/7: Запуск Docker-контейнеров"
+step "Шаг 7/8: Запуск Docker-контейнеров"
 
 # Останавливаем старые контейнеры если есть
 docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
 
-# Пересобираем образ (важно после обновления кода!)
+# Собираем образ (без --no-cache для скорости, с .env для ключей)
 info "Собираю Docker-образ..."
-docker compose build --no-cache 2>&1 || docker-compose build --no-cache 2>&1
+if [[ -n "$DADATA_API_KEY" ]]; then
+    DADATA_API_KEY="${DADATA_API_KEY}" DADATA_SECRET="${DADATA_SECRET}" docker compose build 2>&1 || \
+        DADATA_API_KEY="${DADATA_API_KEY}" DADATA_SECRET="${DADATA_SECRET}" docker-compose build 2>&1
+else
+    docker compose build 2>&1 || docker-compose build 2>&1
+fi
 
 # Запускаем
 docker compose up -d 2>&1 || docker-compose up -d 2>&1
@@ -166,9 +192,9 @@ docker exec crm_web python manage.py loaddata user_profiles.json 2>/dev/null || 
 info "Начальные данные загружены"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Шаг 7: Запуск Express-прокси (фронтенд + API)
+# Шаг 8: Запуск Express-прокси (фронтенд + API)
 # ══════════════════════════════════════════════════════════════════════════════
-step "Шаг 7/7: Запуск веб-сервера"
+step "Шаг 8/8: Запуск веб-сервера"
 
 # Создаём systemd-сервис для автозапуска
 cat > /etc/systemd/system/videoservice-crm.service << 'SERVICEEOF'
@@ -224,9 +250,10 @@ echo -e "  ${BOLD}Max webhook:${NC}"
 echo -e "    🤖 http://${SERVER_IP}:3000/api/max/webhook/"
 echo ""
 echo -e "  ${BOLD}Полезные команды:${NC}"
-echo -e "    docker compose logs web     — логи Django"
+echo -e "    cd $APP_DIR && docker compose logs web     — логи Django"
 echo -e "    systemctl status videoservice-crm — статус прокси"
 echo -e "    docker exec -it crm_web python manage.py shell — Django shell"
+echo -e "    cd $APP_DIR && git pull && sudo ./install.sh — обновить CRM"
 echo ""
 echo -e "  ${YELLOW}⚠️  Не забудь настроить Max-бота в разделе «Системные настройки»!${NC}"
 echo ""

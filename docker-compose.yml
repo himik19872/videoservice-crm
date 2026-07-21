@@ -21,17 +21,21 @@ services:
     command: >
       sh -c "git config --global --add safe.directory /app &&
              python manage.py migrate &&
-             daphne -b 0.0.0.0 -p 8000 crm.asgi:application"
+             daphne -b 0.0.0.0 -p 8000 --websocket_timeout 86400 -t 86400 crm.asgi:application"
     environment:
       - DB_NAME=crm
       - DB_USER=crm_user
       - DB_PASSWORD=crm_pass
       - DB_HOST=db
       - DB_PORT=5432
+      - DADATA_API_KEY=8a60efff694ae3df362cc294f22a0f7864dfa102
+      - DADATA_SECRET=595cc634c5873628232cc159c3497ac8b1b8c255
     volumes:
       - ./backend:/app
       - ./.git:/app/.git
       - ./тест-ипорт:/app/тест-ипорт
+      - ./подьезды:/app/подьезды
+      - .:/app/host
     ports:
       - "8000:8000"
     depends_on:

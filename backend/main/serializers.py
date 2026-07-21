@@ -573,11 +573,12 @@ class BuildingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Building
-        fields = ['id', 'region', 'region_id', 'city', 'street_type',
+        fields = ['id', 'region', 'region_id', 'city', 'district', 'street_type',
                   'street_type_display', 'street_name', 'house_number',
-                  'building_number', 'apartments_count', 'entrances_count',
+                  'building_number', 'liter', 'apartments_count', 'entrances_count',
                   'management_company', 'management_company_fk', 'management_company_name',
-                  'equipment_type', 'equipment_type_display', 'notes',
+                  'equipment_type', 'equipment_type_display', 'equipment_list',
+                  'programming_code', 'is_dormitory', 'dadata_verified', 'notes',
                   'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 

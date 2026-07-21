@@ -148,6 +148,10 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Dadata API для подстановки адресов
+DADATA_API_KEY = config('DADATA_API_KEY', default='')
+DADATA_SECRET = config('DADATA_SECRET', default='')
+
 # REST Framework settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

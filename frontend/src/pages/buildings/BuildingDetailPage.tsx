@@ -71,21 +71,75 @@ const BuildingDetailPage: React.FC = () => {
 
   const openEdit = () => {
     form.setFieldsValue({
-      city: building.city, region_id: building.region_id,
-      street_name: building.street_name, house_number: building.house_number,
+      city: building.city,
+      region_id: building.region_id,
+      district: building.district,
+      street_type: building.street_type,
+      street_name: building.street_name,
+      house_number: building.house_number,
       building_number: building.building_number,
+      liter: building.liter,
       apartments_count: building.apartments_count,
       entrances_count: building.entrances_count,
-      equipment_type: building.equipment_type, notes: building.notes,
+      equipment_type: building.equipment_type,
+      equipment_list: building.equipment_list,
+      programming_code: building.programming_code,
+      is_dormitory: building.is_dormitory,
+      notes: building.notes,
     });
     setEditModalOpen(true);
   };
 
   const handleSave = async (values: any) => {
     setSaving(true);
-    try { await api.patch(`/buildings/${id}/`, values); message.success('Обновлён'); setEditModalOpen(false); fetchAll(); }
-    catch { message.error('Ошибка'); }
+    try {
+      const res = await api.patch(`/buildings/${id}/`, values);
+      message.success('Дом обновлён');
+      // Заменяем building-объект свежими данными, чтобы регион/район обновились в карточке
+      setBuilding((prev: any) => ({ ...prev, ...res.data }));
+      setEditModalOpen(false);
+      fetchAll();
+    }
+    catch { message.error('Ошибка сохранения'); }
     finally { setSaving(false); }
+  };
+
+  // Применить адрес дома ко всем квартирам
+  const [applyLoading, setApplyLoading] = useState(false);
+  const handleApplyToResidents = async () => {
+    setApplyLoading(true);
+    try {
+      const res = await api.post(`/buildings/${id}/apply_to_residents/`);
+      message.success(`Обновлено жителей: ${res.data.residents_updated} из ${res.data.total_residents}`);
+    } catch { message.error('Ошибка'); }
+    finally { setApplyLoading(false); }
+  };
+
+  // Dadata-нормализация адреса дома
+  const [dadataLoading, setDadataLoading] = useState(false);
+  const handleDadataVerify = async () => {
+    setDadataLoading(true);
+    try {
+      const res = await api.post(`/buildings/${id}/dadata_verify/`);
+      if (res.data.success) {
+        const d = res.data.dadata;
+        const b = res.data.building;
+        form.setFieldsValue({
+          city: d.city || b.city,
+          region_id: b.region?.id || b.region_id,
+          district: d.district || b.district,
+          street_type: d.street_type || b.street_type,
+          street_name: d.street_name || b.street_name,
+          house_number: d.house_number || b.house_number,
+          building_number: d.building_number || b.building_number,
+        });
+        setBuilding(res.data.building);
+        message.success(`Адрес проверен: ${d.full_address}`);
+      } else {
+        message.warning(res.data.error || 'Не удалось нормализовать');
+      }
+    } catch { message.error('Ошибка Dadata'); }
+    finally { setDadataLoading(false); }
   };
 
   // Смена УК
@@ -214,13 +268,15 @@ const BuildingDetailPage: React.FC = () => {
         </Title>
         <Button type="primary" icon={<EditOutlined />} onClick={openEdit}>Редактировать</Button>
         <Button icon={<EnvironmentOutlined />} onClick={() => window.open(gisUrl, '_blank')}>2GIS</Button>
+        {building.dadata_verified && <Tag color="green" icon={<EnvironmentOutlined />}>Dadata ✓</Tag>}
       </Space>
 
       {/* Основная информация */}
       <Card>
         <Descriptions column={3} size="small">
           <Descriptions.Item label="Город">{building.city}</Descriptions.Item>
-          <Descriptions.Item label="Район">{building.region?.name || building.region_id || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Район">{building.district || building.region?.name || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Регион">{building.region?.name || '—'}</Descriptions.Item>
           <Descriptions.Item label="Квартир / Подъездов">{building.apartments_count} / {building.entrances_count}</Descriptions.Item>
           <Descriptions.Item label="Тип оборудования">{building.equipment_type_display ? <Tag>{building.equipment_type_display}</Tag> : '—'}</Descriptions.Item>
           <Descriptions.Item label="Добавлен">{dayjs(building.created_at).format('DD.MM.YYYY')}</Descriptions.Item>
@@ -286,23 +342,35 @@ const BuildingDetailPage: React.FC = () => {
       </Card>
 
       {/* Модалка редактирования дома */}
-      <Modal title="Редактировать дом" open={editModalOpen} onCancel={() => setEditModalOpen(false)} footer={null} width={500}>
+      <Modal title="Редактировать дом" open={editModalOpen} onCancel={() => setEditModalOpen(false)} footer={null} width={550}>
         <Form form={form} layout="vertical" onFinish={handleSave}>
           <Form.Item name="city" label="Город"><Input /></Form.Item>
-          <Form.Item name="region_id" label="Район">
-            <Select showSearch allowClear placeholder="Район" filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+          <Form.Item name="region_id" label="Регион">
+            <Select showSearch allowClear placeholder="Регион" filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
               options={regions.map((r: any) => ({ label: r.name, value: r.id }))} />
+          </Form.Item>
+          <Form.Item name="district" label="Район / пригород"><Input placeholder="Например: Всеволожский р-н" /></Form.Item>
+          <Form.Item name="street_type" label="Тип улицы">
+            <Select options={[
+              { label: 'Улица', value: 'street' }, { label: 'Проспект', value: 'avenue' },
+              { label: 'Переулок', value: 'lane' }, { label: 'Бульвар', value: 'boulevard' },
+              { label: 'Шоссе', value: 'highway' }, { label: 'Площадь', value: 'square' },
+              { label: 'Набережная', value: 'embankment' }, { label: 'Проезд', value: 'passage' },
+              { label: 'Аллея', value: 'alley' }, { label: 'Микрорайон', value: 'microdistrict' },
+              { label: 'Другое', value: 'other' },
+            ]} />
           </Form.Item>
           <Form.Item name="street_name" label="Улица"><Input /></Form.Item>
           <Space>
             <Form.Item name="house_number" label="Дом"><Input style={{ width: 100 }} /></Form.Item>
             <Form.Item name="building_number" label="Корпус"><Input style={{ width: 100 }} /></Form.Item>
+            <Form.Item name="liter" label="Литера"><Input style={{ width: 80 }} /></Form.Item>
           </Space>
           <Space>
-            <Form.Item name="apartments_count" label="Квартир"><InputNumber min={0} /></Form.Item>
-            <Form.Item name="entrances_count" label="Подъездов"><InputNumber min={0} /></Form.Item>
+            <Form.Item name="apartments_count" label="Квартир"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
+            <Form.Item name="entrances_count" label="Подъездов"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
           </Space>
-          <Form.Item name="equipment_type" label="Оборудование">
+          <Form.Item name="equipment_type" label="Тип оборудования">
             <Select allowClear options={[
               { label: 'Без оборудования', value: '' },
               { label: 'Домофон', value: 'intercom' },
@@ -314,8 +382,23 @@ const BuildingDetailPage: React.FC = () => {
               { label: 'Другое', value: 'other' },
             ]} />
           </Form.Item>
+          <Form.Item name="equipment_list" label="Список оборудования"><Input.TextArea rows={2} /></Form.Item>
+          <Form.Item name="programming_code" label="Код программирования"><Input /></Form.Item>
+          <Form.Item name="is_dormitory" label="Общежитие" valuePropName="checked">
+            <Select options={[{ label: 'Да (несколько л/с в квартире)', value: true }, { label: 'Нет', value: false }]} />
+          </Form.Item>
           <Form.Item name="notes" label="Примечания"><Input.TextArea rows={4} /></Form.Item>
-          <Button type="primary" htmlType="submit" loading={saving} block>Сохранить</Button>
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space>
+              <Button type="primary" htmlType="submit" loading={saving}>Сохранить</Button>
+              <Button onClick={handleDadataVerify} loading={dadataLoading} icon={<EnvironmentOutlined />}>
+                Проверить через Dadata
+              </Button>
+            </Space>
+            <Button onClick={handleApplyToResidents} loading={applyLoading} icon={<ApartmentOutlined />}>
+              Применить ко всем квартирам
+            </Button>
+          </Space>
         </Form>
       </Modal>
 
