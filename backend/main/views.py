@@ -1720,18 +1720,22 @@ class SystemSettingsViewSet(viewsets.ViewSet):
                 return Response({'found': False, 'message': 'Компания не найдена'})
 
             s = suggestions[0]
-            d = s.get('data', {})
+            d = s.get('data')
+            # DaData может вернуть data: null для недействующих/неполных записей
+            if not d or not isinstance(d, dict):
+                return Response({'found': False, 'message': 'Данные компании недоступны (возможно, организация ликвидирована)'})
+
             return Response({
                 'found': True,
-                'name': d.get('name', {}).get('full_with_opf', '') or s.get('value', ''),
-                'short_name': d.get('name', {}).get('short_with_opf', ''),
+                'name': (d.get('name') or {}).get('full_with_opf', '') or s.get('value', ''),
+                'short_name': (d.get('name') or {}).get('short_with_opf', ''),
                 'inn': d.get('inn', inn),
                 'kpp': d.get('kpp', ''),
                 'ogrn': d.get('ogrn', ''),
-                'legal_address': d.get('address', {}).get('unrestricted_value', '') or d.get('address', {}).get('value', ''),
-                'director': d.get('management', {}).get('name', ''),
-                'director_post': d.get('management', {}).get('post', ''),
-                'status': d.get('state', {}).get('status', ''),
+                'legal_address': (d.get('address') or {}).get('unrestricted_value', '') or (d.get('address') or {}).get('value', ''),
+                'director': (d.get('management') or {}).get('name', ''),
+                'director_post': (d.get('management') or {}).get('post', ''),
+                'status': (d.get('state') or {}).get('status', ''),
             })
         except Exception as e:
             return Response({'error': f'Ошибка запроса к DaData: {str(e)}'}, status=500)
