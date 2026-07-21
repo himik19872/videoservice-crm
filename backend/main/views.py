@@ -1798,59 +1798,76 @@ class SystemSettingsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'])
     def update_now(self, request):
-        """Обновить CRM через git pull (требуется смонтированный .git)."""
-        import subprocess, os
+        """Обновить CRM через git pull + npm build (фронтенд)."""
+        import subprocess, os, json
+
         settings = SystemSettings.objects.first()
 
         try:
-            # Проверяем, что .git доступен
             git_dir = '/app/.git'
             if not os.path.isdir(git_dir):
-                return Response({'ok': False, 'error': '.git не найден в /app — смонтируйте репозиторий через volume'})
+                return Response({'ok': False, 'error': '.git не найден в /app'})
 
-            # Делаем git fetch + git reset --hard (сбрасываем все локальные изменения)
-            result = subprocess.run(
-                ['git', 'fetch', 'origin'],
-                cwd='/app', capture_output=True, text=True, timeout=30
-            )
-            if result.returncode != 0:
-                return Response({'ok': False, 'error': f'git fetch: {result.stderr.strip() or result.stdout.strip()}'})
+            host_dir = '/app/host'
+            has_host = os.path.isdir(host_dir) and os.path.exists(os.path.join(host_dir, 'frontend', 'package.json'))
 
             branch = settings.git_branch or 'main'
-            result = subprocess.run(
-                ['git', 'reset', '--hard', f'origin/{branch}'],
-                cwd='/app', capture_output=True, text=True, timeout=30
-            )
-            if result.returncode != 0:
-                return Response({'ok': False, 'error': f'git reset: {result.stderr.strip() or result.stdout.strip()}'})
+            steps = []
 
-            output = result.stdout.strip() or 'Updated'
+            # Шаг 1: git fetch
+            steps.append('git fetch')
+            r = subprocess.run(['git', 'fetch', 'origin'], cwd='/app', capture_output=True, text=True, timeout=60)
+            if r.returncode != 0:
+                return Response({'ok': False, 'error': f'git fetch failed: {r.stderr[-200:]}'})
 
-            # Получаем новый HEAD
-            result = subprocess.run(
-                ['git', 'rev-parse', '--short', 'HEAD'],
-                cwd='/app', capture_output=True, text=True, timeout=5
-            )
-            new_commit = result.stdout.strip()
+            # Шаг 2: git reset --hard
+            steps.append('git reset')
+            r = subprocess.run(['git', 'reset', '--hard', f'origin/{branch}'], cwd='/app', capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                return Response({'ok': False, 'error': f'git reset failed: {r.stderr[-200:]}'})
 
-            # Применяем миграции
-            subprocess.run(
-                ['python', 'manage.py', 'migrate'],
-                cwd='/app', capture_output=True, timeout=30
-            )
+            # Шаг 3: миграции
+            steps.append('migrate')
+            r = subprocess.run(['python', 'manage.py', 'migrate'], cwd='/app', capture_output=True, text=True, timeout=60)
+            migrate_out = r.stdout[-300:]
 
-            # Перезапуск Daphne: трогаем asgi.py
+            # Шаг 4: сборка фронтенда (через хост-директорию)
+            build_out = ''
+            if has_host:
+                steps.append('npm install')
+                r = subprocess.run(['npm', 'install'], cwd=os.path.join(host_dir, 'frontend'),
+                    capture_output=True, text=True, timeout=180, env={**os.environ, 'NODE_ENV': 'production'})
+                steps.append('npm build')
+                r = subprocess.run(['npm', 'run', 'build'], cwd=os.path.join(host_dir, 'frontend'),
+                    capture_output=True, text=True, timeout=300, env={**os.environ, 'NODE_ENV': 'production'})
+                build_out = r.stdout[-500:] + '\n' + r.stderr[-300:]
+                # Копируем build в /app/frontend/build если нужно
+                src_build = os.path.join(host_dir, 'frontend', 'build')
+                dst_build = '/app/frontend/build'
+                if os.path.isdir(src_build) and os.path.isdir(os.path.dirname(dst_build)):
+                    subprocess.run(['cp', '-r', src_build, dst_build], timeout=30)
+                steps.append('build done')
+            else:
+                steps.append('no frontend dir')
+
+            # Шаг 5: перезапуск Daphne
             subprocess.run(['touch', '/app/crm/asgi.py'], timeout=5)
 
-            settings.last_update_check = timezone.now()
+            # Новый HEAD
+            r = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd='/app', capture_output=True, text=True, timeout=5)
+            new_commit = r.stdout.strip()
+
             settings.latest_commit = new_commit
-            settings.save(update_fields=['last_update_check', 'latest_commit'])
+            settings.last_update_check = timezone.now()
+            settings.save(update_fields=['latest_commit', 'last_update_check'])
 
             return Response({
                 'ok': True,
-                'message': f'Обновлено до {new_commit}',
                 'commit': new_commit,
-                'output': output,
+                'steps': steps,
+                'migrate_output': migrate_out.strip(),
+                'build_output': build_out.strip()[-500:],
+                'frontend_built': has_host,
             })
         except Exception as e:
             return Response({'ok': False, 'error': str(e)})

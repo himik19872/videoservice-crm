@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Switch, Typography, message, Space, Tag, Divider, Descriptions, Spin, Alert } from 'antd';
-import { CloudDownloadOutlined, ReloadOutlined, CheckCircleOutlined, GithubOutlined, SyncOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Button, Switch, Typography, message, Space, Tag, Divider, Descriptions, Spin, Alert, Steps, Progress } from 'antd';
+import { CloudDownloadOutlined, ReloadOutlined, CheckCircleOutlined, GithubOutlined, SyncOutlined, BuildOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 
 const { Title, Text, Paragraph } = Typography;
@@ -107,7 +107,7 @@ const UpdatePage: React.FC = () => {
             Проверить обновления
           </Button>
           <Button icon={<CloudDownloadOutlined />} type="primary" onClick={doUpdate} loading={updating} size="large" danger>
-            Обновить сейчас
+            Обновить сейчас (git pull + сборка)
           </Button>
         </Space>
 
@@ -117,14 +117,42 @@ const UpdatePage: React.FC = () => {
               <Alert type="error" message="Ошибка" description={updateResult.error} showIcon />
             ) : updateResult.has_update ? (
               <>
-                <Alert type="warning" message="Доступно обновление!" description={`Удалённый коммит: ${updateResult.remote} (локальный: ${updateResult.local})`} showIcon style={{ marginBottom: 12 }} />
+                <Alert type="warning" message="Доступно обновление!" description={`Удалённый: ${updateResult.remote} (локальный: ${updateResult.local})`} showIcon style={{ marginBottom: 12 }} />
                 <Button type="primary" danger icon={<CloudDownloadOutlined />} onClick={doUpdate} loading={updating}>Обновить сейчас</Button>
               </>
             ) : (
-              <Alert type="success" message="Система актуальна" description="У вас последняя версия из репозитория." showIcon />
+              <>
+                {updateResult.ok ? (
+                  <>
+                    <Alert type="success" message="Обновление завершено!" description={<>
+                      <div>Коммит: <Tag>{updateResult.commit}</Tag></div>
+                      {updateResult.steps && (
+                        <Space style={{ marginTop: 8 }}>
+                          {updateResult.steps.includes('git fetch') && <Tag color="blue">git fetch ✓</Tag>}
+                          {updateResult.steps.includes('git reset') && <Tag color="blue">git reset ✓</Tag>}
+                          {updateResult.steps.includes('migrate') && <Tag color="green">migrate ✓</Tag>}
+                          {updateResult.steps.includes('npm install') && <Tag color="orange">npm install ✓</Tag>}
+                          {updateResult.steps.includes('npm build') && <Tag color="orange">npm build ✓</Tag>}
+                          {updateResult.steps.includes('build done') && <Tag color="green"><BuildOutlined /> Сборка фронтенда ✓</Tag>}
+                        </Space>
+                      )}
+                      <div style={{ marginTop: 12 }}>
+                        <Text strong type="success">Фронтенд пересобран! Обновите страницу (Ctrl+F5).</Text>
+                      </div>
+                    </>} showIcon />
+                    {updateResult.migrate_output && (
+                      <Card size="small" title="Миграции" style={{ marginTop: 8 }}>
+                        <pre style={{ fontSize: 10, maxHeight: 150, overflow: 'auto' }}>{updateResult.migrate_output}</pre>
+                      </Card>
+                    )}
+                  </>
+                ) : (
+                  <Alert type="success" message="Система актуальна" description="У вас последняя версия." showIcon />
+                )}
+              </>
             )}
             {updateResult.output && (
-              <Card size="small" title="Результат git pull" style={{ marginTop: 12 }}>
+              <Card size="small" title="Результат" style={{ marginTop: 12 }}>
                 <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{updateResult.output}</pre>
               </Card>
             )}
@@ -134,13 +162,15 @@ const UpdatePage: React.FC = () => {
 
       <Card title="Как это работает" size="small">
         <Paragraph>
-          <Text strong>Ручное обновление:</Text> Укажите URL вашего GitHub-репозитория и ветку. При нажатии «Обновить сейчас» система выполнит <Text code>git pull</Text> и перезапустит веб-сервер.
-        </Paragraph>
-        <Paragraph>
-          <Text strong>Приватный репозиторий:</Text> Создайте <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Personal Access Token</a> с правами <Text code>repo</Text> и вставьте его в поле GitHub Token. URL будет автоматически преобразован.
-        </Paragraph>
-        <Paragraph>
-          <Text strong>Автообновление:</Text> Если включено — система будет проверять обновления раз в час и автоматически применять их.
+          <Text strong>Обновление одной кнопкой:</Text>
+          <ol style={{ marginTop: 8, paddingLeft: 20 }}>
+            <li><Text code>git fetch</Text> — получение изменений с GitHub</li>
+            <li><Text code>git reset --hard</Text> — применение обновлений</li>
+            <li><Text code>python manage.py migrate</Text> — миграции БД</li>
+            <li><Text code>npm install && npm run build</Text> — <Text strong>пересборка фронтенда</Text></li>
+            <li>Daphne перезагружается автоматически</li>
+          </ol>
+          <Text type="secondary" style={{ marginTop: 8, display: 'block' }}>После завершения — обновите страницу (Ctrl+F5). Всё! 🎉</Text>
         </Paragraph>
       </Card>
     </div>
