@@ -36,6 +36,8 @@ const MigrationPage: React.FC = () => {
   // ── Прямой перенос ──
   const [remoteHost, setRemoteHost] = useState('');
   const [remotePort, setRemotePort] = useState('8000');
+  const [remoteUser, setRemoteUser] = useState('admin');
+  const [remotePass, setRemotePass] = useState('admin123');
   const [migrating, setMigrating] = useState(false);
   const [migrateStatus, setMigrateStatus] = useState<any>(null);
   const pollRef = useRef<any>(null);
@@ -128,11 +130,16 @@ const MigrationPage: React.FC = () => {
 
   const handleStartMigration = async () => {
     if (!remoteHost.trim()) { message.warning('Введите IP-адрес сервера-источника'); return; }
+    if (!remoteUser.trim()) { message.warning('Введите логин от сервера-источника'); return; }
     if (selectedSections.length === 0) { message.warning('Выберите хотя бы одну секцию'); return; }
     setMigrating(true);
     setMigrateStatus({ running: true, progress: 0, total: 0, current_step: 'Запуск...', created: 0, errors: [], log: [] });
     try {
-      const r = await api.post('/system/migrate/start/', { host: remoteHost.trim(), port: remotePort, sections: selectedSections });
+      const r = await api.post('/system/migrate/start/', {
+        host: remoteHost.trim(), port: remotePort,
+        username: remoteUser.trim(), password: remotePass,
+        sections: selectedSections,
+      });
       if (r.data.success) {
         message.success('Перенос запущен');
         pollRef.current = setInterval(pollStatus, 800);
@@ -182,22 +189,40 @@ const MigrationPage: React.FC = () => {
                 message="Перенос данных напрямую с другого сервера по HTTP. Оба сервера должны быть в одной сети." />
 
               <Card title="Сервер-источник" size="small" style={{ marginBottom: 16 }}>
-                <Space>
-                  <Input
-                    addonBefore="IP"
-                    placeholder="192.168.1.100"
-                    value={remoteHost}
-                    onChange={e => setRemoteHost(e.target.value)}
-                    style={{ width: 180 }}
-                    disabled={migrating}
-                  />
-                  <Input
-                    addonBefore="Порт"
-                    value={remotePort}
-                    onChange={e => setRemotePort(e.target.value)}
-                    style={{ width: 120 }}
-                    disabled={migrating}
-                  />
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space>
+                    <Input
+                      addonBefore="IP"
+                      placeholder="192.168.1.100"
+                      value={remoteHost}
+                      onChange={e => setRemoteHost(e.target.value)}
+                      style={{ width: 180 }}
+                      disabled={migrating}
+                    />
+                    <Input
+                      addonBefore="Порт"
+                      value={remotePort}
+                      onChange={e => setRemotePort(e.target.value)}
+                      style={{ width: 120 }}
+                      disabled={migrating}
+                    />
+                  </Space>
+                  <Space>
+                    <Input
+                      addonBefore="Логин"
+                      value={remoteUser}
+                      onChange={e => setRemoteUser(e.target.value)}
+                      style={{ width: 180 }}
+                      disabled={migrating}
+                    />
+                    <Input.Password
+                      addonBefore="Пароль"
+                      value={remotePass}
+                      onChange={e => setRemotePass(e.target.value)}
+                      style={{ width: 200 }}
+                      disabled={migrating}
+                    />
+                  </Space>
                 </Space>
               </Card>
 

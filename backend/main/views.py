@@ -5202,8 +5202,8 @@ def migration_export_model_view(request):
     })
 
 
-def _run_migration(source_host, source_port, sections):
-    """Фоновый процесс переноса данных."""
+def _run_migration(source_host, source_port, username, password, sections):
+    """Фоновый процесс переноса данных. Сначала авторизуется на источнике."""
     import requests as req
 
     global _migration_state
@@ -5214,14 +5214,44 @@ def _run_migration(source_host, source_port, sections):
             'created': 0, 'updated': 0, 'errors': [], 'log': [], 'finished': False,
         }
 
-    source_url = f'http://{source_host}:{source_port}/api/system/migrate/export/'
+    source_base = f'http://{source_host}:{source_port}'
+    source_url = f'{source_base}/api/system/migrate/export/'
+
+    # ── Авторизация на сервере-источнике ──
+    token = None
+    try:
+        with _migration_lock:
+            _migration_state['current_step'] = 'Авторизация на источнике...'
+        login_resp = req.post(
+            f'{source_base}/api/auth/login/',
+            json={'username': username, 'password': password},
+            timeout=10,
+        )
+        if login_resp.status_code == 200:
+            token = login_resp.json().get('token')
+        if not token:
+            with _migration_lock:
+                _migration_state['running'] = False
+                _migration_state['finished'] = True
+                _migration_state['errors'].append('Не удалось авторизоваться на сервере-источнике. Проверьте логин/пароль.')
+                _migration_state['current_step'] = 'Ошибка авторизации'
+            return
+    except Exception as e:
+        with _migration_lock:
+            _migration_state['running'] = False
+            _migration_state['finished'] = True
+            _migration_state['errors'].append(f'Ошибка подключения к источнику: {str(e)[:100]}')
+            _migration_state['current_step'] = 'Ошибка подключения'
+        return
+
+    headers = {'Authorization': f'Token {token}'}
 
     # Подсчёт общего количества записей
     all_models = [m for m in MIGRATION_MODELS if m['model'] in sections or 'all' in sections]
     total_items = 0
     for m_cfg in all_models:
         try:
-            r = req.get(source_url, params={'model': m_cfg['model'], 'page': 1, 'page_size': 1}, timeout=10)
+            r = req.get(source_url, params={'model': m_cfg['model'], 'page': 1, 'page_size': 1}, headers=headers, timeout=10)
             if r.status_code == 200:
                 total_items += r.json().get('total_count', 0)
         except Exception:
@@ -5243,7 +5273,7 @@ def _run_migration(source_host, source_port, sections):
         page = 1
         while True:
             try:
-                r = req.get(source_url, params={'model': model_name, 'page': page, 'page_size': 500}, timeout=30)
+                r = req.get(source_url, params={'model': model_name, 'page': page, 'page_size': 500}, headers=headers, timeout=30)
                 if r.status_code != 200:
                     with _migration_lock:
                         _migration_state['errors'].append(f'{label}: HTTP {r.status_code}')
@@ -5255,7 +5285,6 @@ def _run_migration(source_host, source_port, sections):
                     break
 
                 page += 1
-                # Сохраняем записи
                 from django.apps import apps
                 try:
                     Model = apps.get_model('main', model_name)
@@ -5269,7 +5298,7 @@ def _run_migration(source_host, source_port, sections):
                     try:
                         if pk and Model.objects.filter(pk=pk).exists():
                             Model.objects.filter(pk=pk).update(**item)
-                            created_total += 1  # считаем как updated
+                            created_total += 1
                         else:
                             obj = Model(**item)
                             if pk:
@@ -5306,10 +5335,12 @@ def migration_start_view(request):
     """
     Запуск прямого переноса данных с другого сервера.
     POST /api/system/migrate/start/
-    Body: { host, port, sections: ['all'] или ['Client','Building',...] }
+    Body: { host, port, username, password, sections }
     """
     host = request.data.get('host', '')
     port = request.data.get('port', '8000')
+    username = request.data.get('username', 'admin')
+    password = request.data.get('password', 'admin123')
     sections = request.data.get('sections', ['all'])
 
     if not host:
@@ -5320,7 +5351,7 @@ def migration_start_view(request):
         if _migration_state.get('running'):
             return Response({'success': False, 'error': 'Перенос уже выполняется'}, status=400)
 
-    thread = threading.Thread(target=_run_migration, args=(host, port, sections), daemon=True)
+    thread = threading.Thread(target=_run_migration, args=(host, port, username, password, sections), daemon=True)
     thread.start()
 
     return Response({'success': True, 'message': 'Перенос запущен'})
