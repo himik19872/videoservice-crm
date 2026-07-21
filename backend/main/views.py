@@ -5164,6 +5164,19 @@ MIGRATION_MODELS = [
 
 MIGRATION_MODEL_NAMES = [m['model'] for m in MIGRATION_MODELS]
 
+# Маппинг секций (фронтенд) → имена моделей
+SECTION_TO_MODELS = {
+    'clients': ['Region', 'Building', 'BuildingEntrance', 'Client'],
+    'orders': ['Order', 'OrderHistory', 'OrderMedia', 'Payment'],
+    'users': ['UserProfile', 'Master'],
+    'buildings': ['ManagementCompany', 'Building', 'BuildingEntrance'],
+    'tariffs': ['Tariff', 'PaymentRecord'],
+    'erc': ['ErcAccount', 'ErcBillingRecord'],
+    'equipment': ['InventoryItem', 'InventoryMovement', 'StorageLocation', 'Supplier'],
+    'settings': ['SystemSettings', 'BewardDevice', 'LegalEntity', 'CallLog'],
+    'all': MIGRATION_MODEL_NAMES,
+}
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -5263,8 +5276,18 @@ def _run_migration(source_host, source_port, username, password, sections):
 
     headers = {'Authorization': f'Token {token}'}
 
+    # Конвертируем секции в список моделей
+    model_names = set()
+    for s in sections:
+        if s in SECTION_TO_MODELS:
+            model_names.update(SECTION_TO_MODELS[s])
+        elif s in MIGRATION_MODEL_NAMES:
+            model_names.add(s)
+    if not model_names:
+        model_names = set(MIGRATION_MODEL_NAMES)
+
     # Подсчёт общего количества записей
-    all_models = [m for m in MIGRATION_MODELS if m['model'] in sections or 'all' in sections]
+    all_models = [m for m in MIGRATION_MODELS if m['model'] in model_names]
     total_items = 0
     for m_cfg in all_models:
         try:
