@@ -5091,3 +5091,245 @@ def cleanup_media_view(request):
         'deleted_count': deleted_count,
         'deleted_size_mb': round(deleted_size / (1024**2), 1),
     })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Прямой перенос данных между серверами (миграция «online»)
+# ══════════════════════════════════════════════════════════════════════════════
+import threading
+
+_migration_state = {
+    'running': False,
+    'progress': 0,
+    'total': 0,
+    'current_model': '',
+    'current_step': '',
+    'created': 0,
+    'updated': 0,
+    'errors': [],
+    'log': [],
+    'finished': False,
+}
+_migration_lock = threading.Lock()
+
+# Порядок переноса моделей (зависимости: сначала справочники, потом основные)
+MIGRATION_MODELS = [
+    # Справочники
+    {'model': 'Region', 'label': 'Регионы'},
+    {'model': 'ManagementCompany', 'label': 'УК/ТСЖ'},
+    {'model': 'Tariff', 'label': 'Тарифы'},
+    {'model': 'Building', 'label': 'Дома'},
+    {'model': 'BuildingEntrance', 'label': 'Подъезды'},
+    # Клиенты и ЕРЦ
+    {'model': 'Client', 'label': 'Клиенты'},
+    {'model': 'ErcAccount', 'label': 'Лицевые счета'},
+    {'model': 'ErcBillingRecord', 'label': 'ЕРЦ-записи'},
+    {'model': 'PaymentRecord', 'label': 'Внутренние платежи'},
+    # Пользователи
+    {'model': 'UserProfile', 'label': 'Профили'},
+    {'model': 'Master', 'label': 'Мастера'},
+    # Оборудование
+    {'model': 'InventoryItem', 'label': 'Оборудование'},
+    {'model': 'InventoryMovement', 'label': 'Движения'},
+    {'model': 'StorageLocation', 'label': 'Места хранения'},
+    {'model': 'Supplier', 'label': 'Поставщики'},
+    # Заявки
+    {'model': 'Order', 'label': 'Заявки'},
+    {'model': 'OrderHistory', 'label': 'История'},
+    {'model': 'OrderMedia', 'label': 'Медиа'},
+    {'model': 'Payment', 'label': 'Оплаты'},
+    # Настройки
+    {'model': 'SystemSettings', 'label': 'Настройки'},
+    {'model': 'BewardDevice', 'label': 'Beward'},
+    {'model': 'LegalEntity', 'label': 'Юрлица'},
+    {'model': 'CallLog', 'label': 'Звонки'},
+]
+
+MIGRATION_MODEL_NAMES = [m['model'] for m in MIGRATION_MODELS]
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def migration_export_model_view(request):
+    """
+    Постраничный экспорт модели для прямого переноса.
+    GET /api/system/migrate/export/?model=Region&page=1&page_size=500
+
+    Возвращает: { model, page, total_pages, total_count, data: [...] }
+    """
+    from django.apps import apps
+    from django.core import serializers
+
+    model_name = request.query_params.get('model', '')
+    if model_name not in MIGRATION_MODEL_NAMES:
+        return Response({'error': f'Unknown model: {model_name}'}, status=400)
+
+    try:
+        Model = apps.get_model('main', model_name)
+        if not Model:
+            # Пробуем auth.User
+            from django.contrib.auth.models import User as AuthUser
+            Model = AuthUser if model_name == 'User' else None
+            if not Model:
+                return Response({'error': f'Model not found: {model_name}'}, status=400)
+    except LookupError:
+        return Response({'error': f'Model not found: {model_name}'}, status=400)
+
+    page = int(request.query_params.get('page', 1))
+    page_size = int(request.query_params.get('page_size', 500))
+    total = Model.objects.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    qs = Model.objects.all().order_by('pk')
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = list(qs[start:end].values())
+
+    # Конвертируем поля, которые не сериализуются (ForeignKey → _id)
+    for item in items:
+        for k, v in list(item.items()):
+            if hasattr(v, 'isoformat'):
+                if v is not None:
+                    item[k] = v.isoformat()
+
+    return Response({
+        'model': model_name,
+        'page': page,
+        'total_pages': total_pages,
+        'total_count': total,
+        'page_size': page_size,
+        'data': items,
+    })
+
+
+def _run_migration(source_host, source_port, sections):
+    """Фоновый процесс переноса данных."""
+    import requests as req
+
+    global _migration_state
+    with _migration_lock:
+        _migration_state = {
+            'running': True, 'progress': 0, 'total': 0,
+            'current_model': '', 'current_step': 'Подготовка...',
+            'created': 0, 'updated': 0, 'errors': [], 'log': [], 'finished': False,
+        }
+
+    source_url = f'http://{source_host}:{source_port}/api/system/migrate/export/'
+
+    # Подсчёт общего количества записей
+    all_models = [m for m in MIGRATION_MODELS if m['model'] in sections or 'all' in sections]
+    total_items = 0
+    for m_cfg in all_models:
+        try:
+            r = req.get(source_url, params={'model': m_cfg['model'], 'page': 1, 'page_size': 1}, timeout=10)
+            if r.status_code == 200:
+                total_items += r.json().get('total_count', 0)
+        except Exception:
+            pass
+
+    with _migration_lock:
+        _migration_state['total'] = total_items
+
+    created_total = 0
+
+    for m_cfg in all_models:
+        model_name = m_cfg['model']
+        label = m_cfg['label']
+
+        with _migration_lock:
+            _migration_state['current_model'] = label
+            _migration_state['current_step'] = f'Загрузка {label}...'
+
+        page = 1
+        while True:
+            try:
+                r = req.get(source_url, params={'model': model_name, 'page': page, 'page_size': 500}, timeout=30)
+                if r.status_code != 200:
+                    with _migration_lock:
+                        _migration_state['errors'].append(f'{label}: HTTP {r.status_code}')
+                        _migration_state['log'].append(f'✗ {label}: HTTP {r.status_code}')
+                    break
+                data = r.json()
+                items = data.get('data', [])
+                if not items:
+                    break
+
+                page += 1
+                # Сохраняем записи
+                from django.apps import apps
+                try:
+                    Model = apps.get_model('main', model_name)
+                except LookupError:
+                    with _migration_lock:
+                        _migration_state['errors'].append(f'{label}: модель не найдена')
+                    break
+
+                for item in items:
+                    pk = item.pop('id', None)
+                    try:
+                        if pk and Model.objects.filter(pk=pk).exists():
+                            Model.objects.filter(pk=pk).update(**item)
+                            created_total += 1  # считаем как updated
+                        else:
+                            obj = Model(**item)
+                            if pk:
+                                obj.id = pk
+                            obj.save(force_insert=True)
+                            created_total += 1
+                    except Exception as e:
+                        with _migration_lock:
+                            err = str(e)[:100]
+                            _migration_state['errors'].append(f'{label} pk={pk}: {err}')
+
+                with _migration_lock:
+                    _migration_state['progress'] += len(items)
+                    _migration_state['created'] = created_total
+                    _migration_state['current_step'] = f'{label}: {_migration_state["progress"]}/{total_items}'
+                    _migration_state['log'].append(f'✓ {label}: +{len(items)} (стр. {page - 1})')
+
+                if data.get('page', 0) >= data.get('total_pages', 1):
+                    break
+            except Exception as e:
+                with _migration_lock:
+                    _migration_state['errors'].append(f'{label}: {str(e)[:100]}')
+                break
+
+    with _migration_lock:
+        _migration_state['running'] = False
+        _migration_state['finished'] = True
+        _migration_state['current_step'] = 'Перенос завершён'
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def migration_start_view(request):
+    """
+    Запуск прямого переноса данных с другого сервера.
+    POST /api/system/migrate/start/
+    Body: { host, port, sections: ['all'] или ['Client','Building',...] }
+    """
+    host = request.data.get('host', '')
+    port = request.data.get('port', '8000')
+    sections = request.data.get('sections', ['all'])
+
+    if not host:
+        return Response({'success': False, 'error': 'Укажите IP-адрес сервера-источника'}, status=400)
+
+    global _migration_state
+    with _migration_lock:
+        if _migration_state.get('running'):
+            return Response({'success': False, 'error': 'Перенос уже выполняется'}, status=400)
+
+    thread = threading.Thread(target=_run_migration, args=(host, port, sections), daemon=True)
+    thread.start()
+
+    return Response({'success': True, 'message': 'Перенос запущен'})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def migration_status_view(request):
+    """Статус текущего переноса."""
+    global _migration_state
+    with _migration_lock:
+        return Response({**_migration_state})

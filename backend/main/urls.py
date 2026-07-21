@@ -26,6 +26,7 @@ from .views import (
     import_erc_update_view,
     system_stats_view, export_clients_excel_view, cleanup_media_view,
     erc_report_summary_view,
+    migration_export_model_view, migration_start_view, migration_status_view,
 )
 from .bitrix24_views import bitrix24_clients_to_bitrix_view, bitrix24_clients_from_bitrix_view
 from .bitrix24_views import bitrix24_products_to_bitrix_view, bitrix24_products_from_bitrix_view
@@ -121,6 +122,9 @@ urlpatterns = [
     path('system/export-clients/', export_clients_excel_view, name='export-clients'),
     path('system/cleanup-media/', cleanup_media_view, name='cleanup-media'),
     path('reports/erc-summary/', erc_report_summary_view, name='reports-erc-summary'),
+    path('system/migrate/export/', migration_export_model_view, name='migration-export-model'),
+    path('system/migrate/start/', migration_start_view, name='migration-start'),
+    path('system/migrate/status/', migration_status_view, name='migration-status'),
     path('inventory/issue-zip/', issue_zip_to_master, name='issue-zip'),
     path('masters/<int:master_id>/inventory/', master_inventory, name='master-inventory'),
     path('rostelecom/get-calls/', rostelecom_get_calls_view, name='rostelecom-get-calls'),
