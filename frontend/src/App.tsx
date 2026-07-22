@@ -176,6 +176,7 @@ function AppContent() {
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/messages" element={<MessagesPage />} />
+          <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/estimates" element={<EstimatesPage />} />
           <Route path="/estimates/:id" element={<EstimateDetailPage />} />
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
@@ -213,6 +214,7 @@ function AppContent() {
           <Route path="/supply-invoices" element={<SupplyInvoicesPage />} />
           <Route path="/issue-orders" element={<IssueOrdersPage />} />
           <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
+          <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/estimates" element={<EstimatesPage />} />
           <Route path="/estimates/:id" element={<EstimateDetailPage />} />
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
