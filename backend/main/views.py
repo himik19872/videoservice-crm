@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404
 from django.http import HttpResponse
 from datetime import timedelta
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, UserProfile, WorkShift, OrderMedia, PushToken
+from .models import AuditLog
 from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial, Message
@@ -52,6 +53,7 @@ from .serializers import AsteriskVoicemailSerializer, AsteriskCallRecordingSeria
 from .serializers import BuildingEntranceSerializer, ManagementCompanySerializer, TariffSerializer, PaymentRecordSerializer, BewardDeviceSerializer
 from .serializers import BuildingSystemSerializer
 from .serializers import MCContactSerializer, MCPaymentSerializer, MCCommentSerializer
+from .serializers import AuditLogSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -1721,7 +1723,6 @@ class SystemSettingsViewSet(viewsets.ViewSet):
 
             s = suggestions[0]
             d = s.get('data')
-            # DaData может вернуть data: null для недействующих/неполных записей
             if not d or not isinstance(d, dict):
                 return Response({'found': False, 'message': 'Данные компании недоступны (возможно, организация ликвидирована)'})
 
@@ -3528,6 +3529,34 @@ class CallLogViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['direction', 'status', 'call_type']
     search_fields = ['phone', 'client__name']
+
+
+# ══════════════════════════════════════════════════════════════════
+# Аудит действий сотрудников
+# ══════════════════════════════════════════════════════════════════
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Журнал действий сотрудников (только чтение)."""
+    queryset = AuditLog.objects.select_related('user').all()
+    serializer_class = AuditLogSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['action', 'model_name', 'user']
+    search_fields = ['object_repr', 'model_name', 'user__username', 'user__first_name', 'user__last_name']
+    ordering_fields = ['created_at', 'action', 'model_name']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return AuditLog.objects.none()
+        # Только админы и директора видят всё
+        try:
+            role = user.userprofile.role
+        except Exception:
+            role = ''
+        if user.is_staff or role in ['admin', 'general_director', 'executive_director', 'technical_director']:
+            return AuditLog.objects.select_related('user').all()
+        return AuditLog.objects.select_related('user').filter(user=user)
 
 
 # ══════════════════════════════════════════════════════════════════

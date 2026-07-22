@@ -16,6 +16,7 @@ from .views import (
     StorageLocationViewSet,
     OutgoingInvoiceViewSet,
     CallLogViewSet,
+    AuditLogViewSet,
     AsteriskSipPeerViewSet, AsteriskTrunkViewSet, AsteriskRouteViewSet,
     AsteriskIvrViewSet, AsteriskIvrOptionViewSet,
     AsteriskVoicemailViewSet, AsteriskCallRecordingViewSet,
@@ -81,6 +82,7 @@ router.register(r'beward-devices', BewardDeviceViewSet, basename='beward-devices
 router.register(r'storage-locations', StorageLocationViewSet, basename='storage-locations')
 router.register(r'outgoing-invoices', OutgoingInvoiceViewSet, basename='outgoing-invoices')
 router.register(r'call-logs', CallLogViewSet, basename='call-logs')
+router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 router.register(r'asterisk/sip-peers', AsteriskSipPeerViewSet, basename='asterisk-sip-peers')
 router.register(r'asterisk/trunks', AsteriskTrunkViewSet, basename='asterisk-trunks')
 router.register(r'asterisk/routes', AsteriskRouteViewSet, basename='asterisk-routes')
@@ -88,6 +90,7 @@ router.register(r'asterisk/ivrs', AsteriskIvrViewSet, basename='asterisk-ivrs')
 router.register(r'asterisk/ivr-options', AsteriskIvrOptionViewSet, basename='asterisk-ivr-options')
 router.register(r'asterisk/voicemails', AsteriskVoicemailViewSet, basename='asterisk-voicemails')
 router.register(r'asterisk/recordings', AsteriskCallRecordingViewSet, basename='asterisk-recordings')
+router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),

@@ -16,6 +16,42 @@ def generate_order_number():
     return f'ЗАЯВ-{date_part}-{random_part}'
 
 
+class AuditLog(models.Model):
+    """Журнал действий сотрудников."""
+    ACTION_CHOICES = [
+        ('create', 'Создание'),
+        ('update', 'Изменение'),
+        ('delete', 'Удаление'),
+        ('login', 'Вход'),
+        ('logout', 'Выход'),
+        ('import', 'Импорт'),
+        ('export', 'Экспорт'),
+        ('migrate', 'Перенос данных'),
+        ('other', 'Прочее'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs', verbose_name=_('Сотрудник'))
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, verbose_name=_('Действие'))
+    model_name = models.CharField(max_length=100, blank=True, verbose_name=_('Модель'))
+    object_id = models.CharField(max_length=50, blank=True, verbose_name=_('ID объекта'))
+    object_repr = models.CharField(max_length=300, blank=True, verbose_name=_('Представление объекта'))
+    details = models.JSONField(default=dict, blank=True, verbose_name=_('Детали'))
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name=_('IP-адрес'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Время'))
+
+    class Meta:
+        verbose_name = _('Запись аудита')
+        verbose_name_plural = _('Журнал аудита')
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['action', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'[{self.created_at.strftime("%d.%m.%Y %H:%M")}] {self.user} — {self.get_action_display()}: {self.object_repr}'
+
+
 class Building(models.Model):
     """Обслуживаемый адрес (дом) — основа адресной системы.
     

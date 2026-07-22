@@ -17,6 +17,23 @@ from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, 
 from .models import MCContact, MCPayment, MCComment
 
 
+from .models import AuditLog  # noqa
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditLog
+        fields = ['id', 'user', 'user_name', 'action', 'model_name',
+                  'object_id', 'object_repr', 'details', 'ip_address', 'created_at']
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return obj.user.get_full_name() or obj.user.username
+        return '—'
+
+
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     master_profile = serializers.SerializerMethodField()
@@ -1430,3 +1447,20 @@ class CallLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = CallLog
         fields = '__all__'
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    """Журнал действий сотрудников"""
+    user_name = serializers.SerializerMethodField()
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = ['id', 'user', 'user_name', 'action', 'action_display',
+                  'model_name', 'object_id', 'object_repr', 'details',
+                  'ip_address', 'created_at']
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return obj.user.get_full_name() or obj.user.username
+        return 'Система'
