@@ -7,6 +7,7 @@ import {
   HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined, ToolOutlined, BankOutlined, FileTextOutlined,
   UserOutlined, CheckCircleOutlined, FileExcelOutlined, HddOutlined,
   PhoneOutlined, ApartmentOutlined, SwapOutlined, SafetyCertificateOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -189,6 +190,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/settings/migration',
       icon: <SwapOutlined />,
       label: 'Миграция',
+    },
+    {
+      key: '/audit-log',
+      icon: <AuditOutlined />,
+      label: 'Журнал действий',
     },
     {
       key: '/settings/stats',
