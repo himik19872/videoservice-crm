@@ -135,6 +135,34 @@ class Building(models.Model):
         return str(self)
 
 
+class Apartment(models.Model):
+    """Квартира — уникальный объект учета (building + number)."""
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='apartments', verbose_name=_('Дом'))
+    entrance = models.ForeignKey('BuildingEntrance', on_delete=models.SET_NULL, null=True, blank=True, related_name='apartments', verbose_name=_('Подъезд'))
+    number = models.CharField(max_length=20, verbose_name=_('Номер квартиры'))
+
+    class Meta:
+        verbose_name = _('Квартира')
+        verbose_name_plural = _('Квартиры')
+        unique_together = ['building', 'number']
+        ordering = ['building', 'number']
+        indexes = [
+            models.Index(fields=['building', 'number']),
+        ]
+
+    def __str__(self):
+        building_str = str(self.building) if self.building else '?'
+        return f'{building_str}, кв. {self.number}'
+
+    @property
+    def active_residents(self):
+        return self.residents.filter(is_active=True)
+
+    @property
+    def all_residents(self):
+        return self.residents.all()
+
+
 class BuildingEntrance(models.Model):
     """Подъезд дома — детализация по подъездам."""
     building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='entrances', verbose_name=_('Дом'))
@@ -438,6 +466,8 @@ class Client(models.Model):
                               choices=[('manual', _('Ручной ввод')), ('excel_import', _('Импорт Excel (ТСЖ)')), ('erc', _('ЕРЦ')), ('bitrix24', _('Битрикс24'))])
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'), help_text=_('Снимите галочку для умерших/съехавших — они исключаются из статистики'))
+    apartment_obj = models.ForeignKey('Apartment', on_delete=models.SET_NULL, null=True, blank=True, related_name='residents', verbose_name=_('Квартира (объект)'))
 
     class Meta:
         verbose_name = _('Клиент')

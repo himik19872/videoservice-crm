@@ -18,6 +18,7 @@ from .models import MCContact, MCPayment, MCComment
 
 
 from .models import AuditLog  # noqa
+from .models import Apartment  # noqa
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
@@ -32,6 +33,44 @@ class AuditLogSerializer(serializers.ModelSerializer):
         if obj.user:
             return obj.user.get_full_name() or obj.user.username
         return '—'
+
+
+class ApartmentSerializer(serializers.ModelSerializer):
+    building_address = serializers.SerializerMethodField()
+    residents_count = serializers.SerializerMethodField()
+    active_residents_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Apartment
+        fields = ['id', 'building', 'building_address', 'entrance', 'number',
+                  'residents_count', 'active_residents_count']
+
+    def get_building_address(self, obj):
+        return str(obj.building) if obj.building else ''
+
+    def get_residents_count(self, obj):
+        return obj.residents.count()
+
+    def get_active_residents_count(self, obj):
+        return obj.residents.filter(is_active=True).count()
+
+
+class ApartmentDetailSerializer(ApartmentSerializer):
+    residents = serializers.SerializerMethodField()
+    orders = serializers.SerializerMethodField()
+
+    class Meta(ApartmentSerializer.Meta):
+        fields = ApartmentSerializer.Meta.fields + ['residents', 'orders']
+
+    def get_residents(self, obj):
+        from .serializers import ClientSerializer
+        return ClientSerializer(obj.residents.all().order_by('-is_active', 'name'), many=True).data
+
+    def get_orders(self, obj):
+        orders = list(obj.building.orders.filter(apartment=obj.number).order_by('-created_at')[:50]) if obj.building else []
+        return [{'id': o.id, 'number': o.number, 'order_type': o.get_order_type_display(),
+                 'status': o.get_status_display(), 'created_at': o.created_at.isoformat(),
+                 'description': o.description[:100]} for o in orders]
 
 
 class UserSerializer(serializers.ModelSerializer):

@@ -542,14 +542,33 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
             pre_apt = row_data.get('_apartment', '')
 
             if pre_city or pre_house:
-                city = pre_city or 'Санкт-Петербург'
-                region_str = row_data.get('_region', '')
-                district = row_data.get('_district', '')
-                street_name = pre_street
-                street_type = 'street'
-                house_number = pre_house
-                building_number = ''
-                apartment = pre_apt or row_data.get('apartment', '')
+                # Агалатово: собираем адрес из кусочков → нормализуем через DaData
+                parts = []
+                rgn = row_data.get('_region', '')
+                dst = row_data.get('_district', '')
+                if rgn:
+                    parts.append(rgn)
+                if dst:
+                    parts.append(dst)
+                if pre_city:
+                    parts.append(pre_city)
+                if pre_street and pre_street != '-':
+                    parts.append(pre_street)
+                if pre_house:
+                    parts.append(f'д {pre_house}')
+                if pre_apt:
+                    parts.append(f'кв {pre_apt}')
+                raw_for_dadata = ', '.join(parts)
+
+                addr = normalize_address(raw_for_dadata)
+                city = addr.get('city', '') or pre_city or 'Санкт-Петербург'
+                region_str = addr.get('region', '') or rgn
+                district = addr.get('district', '') or dst
+                street_name = addr.get('street_name', '') or (pre_street if pre_street != '-' else '')
+                street_type = addr.get('street_type', '') or 'street'
+                house_number = addr.get('house_number', '') or pre_house
+                building_number = addr.get('building_number', '') or ''
+                apartment = pre_apt or row_data.get('apartment', '') or addr.get('apartment', '')
             else:
                 addr = normalize_address(raw_address) if raw_address else {'success': False}
                 city = addr.get('city', '') or 'Санкт-Петербург'
@@ -654,6 +673,18 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 parts.append(f'кв. {apartment}')
             full_address = ', '.join(parts)
 
+            # ── Квартира (объект) ──
+            apartment_obj = None
+            if building and apartment:
+                from .models import Apartment
+                apartment_obj, _ = Apartment.objects.get_or_create(
+                    building=building, number=apartment,
+                    defaults={'entrance': entrance_obj}
+                )
+                if entrance_obj and not apartment_obj.entrance:
+                    apartment_obj.entrance = entrance_obj
+                    apartment_obj.save(update_fields=['entrance'])
+
             # ── Клиент (КЛЮЧ = personal_account) ──
             existing = Client.objects.filter(personal_account_number=personal_account).first()
 
@@ -662,6 +693,8 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                     existing.building = building
                 if entrance_obj and not existing.entrance:
                     existing.entrance = entrance_obj
+                if apartment_obj and not existing.apartment_obj:
+                    existing.apartment_obj = apartment_obj
                 if not existing.address or existing.address == 'г. , д. ':
                     existing.address = full_address
                 if name and existing.name == 'Не определено':
@@ -679,6 +712,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                     building=building,
                     entrance=entrance_obj,
                     apartment=apartment,
+                    apartment_obj=apartment_obj,
                     management_company=mc_obj,
                     personal_account_number=personal_account,
                     region=region_obj,

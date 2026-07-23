@@ -3531,6 +3531,21 @@ class CallLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['phone', 'client__name']
 
 
+class ApartmentViewSet(viewsets.ReadOnlyModelViewSet):
+    """Квартиры — группировка клиентов по building+номер."""
+    queryset = Apartment.objects.select_related('building', 'entrance').all()
+    serializer_class = ApartmentSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['building']
+    search_fields = ['number', 'building__street_name', 'building__city']
+    pagination_class = None
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return ApartmentDetailSerializer
+        return ApartmentSerializer
+
+
 # ══════════════════════════════════════════════════════════════════
 # Аудит действий сотрудников
 # ══════════════════════════════════════════════════════════════════

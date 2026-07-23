@@ -11,6 +11,7 @@ from .views import (
     SupplierViewSet, SupplyInvoiceViewSet,
     IssueOrderViewSet, PurchaseRequestViewSet,
     ErcAccountViewSet, ErcBillingRecordViewSet,
+    ApartmentViewSet,
     BuildingEntranceViewSet, ManagementCompanyViewSet, TariffViewSet, PaymentRecordViewSet,
     BewardDeviceViewSet,
     StorageLocationViewSet,
@@ -74,6 +75,7 @@ router.register(r'issue-orders', IssueOrderViewSet, basename='issue-orders')
 router.register(r'purchase-requests', PurchaseRequestViewSet, basename='purchase-requests')
 router.register(r'erc-accounts', ErcAccountViewSet, basename='erc-accounts')
 router.register(r'erc-billing', ErcBillingRecordViewSet, basename='erc-billing')
+router.register(r'apartments', ApartmentViewSet, basename='apartments')
 router.register(r'entrances', BuildingEntranceViewSet, basename='entrances')
 router.register(r'management-companies', ManagementCompanyViewSet, basename='management-companies')
 router.register(r'tariffs', TariffViewSet, basename='tariffs')
