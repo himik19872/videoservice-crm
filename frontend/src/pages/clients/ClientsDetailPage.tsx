@@ -107,11 +107,14 @@ const ClientsDetailPage: React.FC = () => {
       full_name: client.full_name,
       phone: client.phone,
       email: client.email,
+      personal_account_number: client.personal_account_number,
+      address: client.address,
+      apartment: client.apartment,
       management_company: client.management_company || undefined,
       building: client.building || undefined,
       entrance: client.entrance || undefined,
       contract_type: client.contract_type || 'erc',
-      erc_enabled: client.erc_enabled,
+      erc_enabled: client.erc_enabled !== false,
       tariff: client.tariff || undefined,
       monthly_payment: parseFloat(client.monthly_payment) || 0,
       notes: client.notes,
@@ -282,6 +285,9 @@ const ClientsDetailPage: React.FC = () => {
           <Form.Item name="full_name" label="ФИО"><Input /></Form.Item>
           <Form.Item name="phone" label="Телефон"><Input /></Form.Item>
           <Form.Item name="email" label="Email"><Input /></Form.Item>
+          <Form.Item name="personal_account_number" label="Лицевой счёт"><Input placeholder="050000000000" /></Form.Item>
+          <Form.Item name="address" label="Адрес"><Input /></Form.Item>
+          <Form.Item name="apartment" label="Квартира"><Input /></Form.Item>
           <Form.Item name="building" label="Дом">
             <Select
               allowClear showSearch placeholder="Выберите дом"

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Table, Tag, Space, Button, message, Spin, Descriptions, Switch } from 'antd';
-import { ArrowLeftOutlined, HomeOutlined, UserOutlined, HistoryOutlined } from '@ant-design/icons';
+import { Typography, Card, Table, Tag, Space, Button, message, Spin, Switch, Modal, Form, Input } from 'antd';
+import { ArrowLeftOutlined, HomeOutlined, UserOutlined, HistoryOutlined, PlusOutlined, EditOutlined } from '@ant-design/icons';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import api from '../../services/api';
 import dayjs from 'dayjs';
@@ -12,6 +12,9 @@ const ApartmentDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const [apt, setApt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addForm] = Form.useForm();
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => { fetchApt(); }, [id]);
 
@@ -30,6 +33,38 @@ const ApartmentDetailPage: React.FC = () => {
       message.success(checked ? 'Клиент активен' : 'Клиент помечен неактивным');
       fetchApt();
     } catch { message.error('Ошибка'); }
+  };
+
+  const handleAddClient = async (values: any) => {
+    setSaving(true);
+    try {
+      await api.post('/clients/', {
+        name: values.full_name,
+        phone: values.phone || '',
+        personal_account_number: values.personal_account_number || '',
+        apartment: apt.number,
+        apartment_obj: apt.id,
+        building: apt.building,
+        entrance: apt.entrance || undefined,
+        address: apt.building_address,
+        source: 'manual',
+        is_active: true,
+      });
+      message.success('Клиент добавлен');
+      setAddModalOpen(false);
+      addForm.resetFields();
+      fetchApt();
+    } catch (e: any) {
+      message.error(e?.response?.data ? JSON.stringify(e.response.data).slice(0, 200) : 'Ошибка');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openAddModal = () => {
+    addForm.resetFields();
+    addForm.setFieldsValue({ apartment: apt.number });
+    setAddModalOpen(true);
   };
 
   if (loading) return <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />;
@@ -53,7 +88,11 @@ const ApartmentDetailPage: React.FC = () => {
       </Space>
 
       {/* Жители */}
-      <Card title={<><UserOutlined /> Жители квартиры ({residents.length})</>} style={{ marginBottom: 16 }}>
+      <Card 
+        title={<><UserOutlined /> Жители квартиры ({residents.length})</>}
+        extra={<Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>Добавить клиента</Button>}
+        style={{ marginBottom: 16 }}
+      >
         <Table
           dataSource={residents.map((r: any, i: number) => ({ ...r, _k: i }))}
           rowKey="_k"
@@ -124,6 +163,27 @@ const ApartmentDetailPage: React.FC = () => {
           ]}
         />
       </Card>
+
+      {/* Модалка добавления клиента */}
+      <Modal title="Добавить клиента" open={addModalOpen} onCancel={() => setAddModalOpen(false)} footer={null} width={450}>
+        <Form form={addForm} layout="vertical" onFinish={handleAddClient}>
+          <Form.Item name="full_name" label="ФИО" rules={[{ required: true, message: 'Обязательно' }]}>
+            <Input placeholder="Иванов Иван Иванович" />
+          </Form.Item>
+          <Form.Item name="phone" label="Телефон">
+            <Input placeholder="+7 999 123-45-67" />
+          </Form.Item>
+          <Form.Item name="personal_account_number" label="Номер лицевого счёта">
+            <Input placeholder="050000000000" />
+          </Form.Item>
+          <Form.Item name="apartment" label="Квартира">
+            <Input disabled />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={saving} block>
+            Добавить
+          </Button>
+        </Form>
+      </Modal>
     </div>
   );
 };
