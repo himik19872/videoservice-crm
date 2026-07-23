@@ -26,7 +26,7 @@ from .models import OutgoingInvoice, OutgoingInvoiceItem
 from .models import CallLog
 from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, AsteriskIvrOption
 from .models import AsteriskVoicemail, AsteriskCallRecording
-from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem
+from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem, Apartment
 from .models import MCContact, MCPayment, MCComment
 from django.db.models import Q
 from .serializers import (
@@ -53,6 +53,7 @@ from .serializers import AsteriskVoicemailSerializer, AsteriskCallRecordingSeria
 from .serializers import BuildingEntranceSerializer, ManagementCompanySerializer, TariffSerializer, PaymentRecordSerializer, BewardDeviceSerializer
 from .serializers import BuildingSystemSerializer
 from .serializers import MCContactSerializer, MCPaymentSerializer, MCCommentSerializer
+from .serializers import ApartmentSerializer, ApartmentDetailSerializer
 from .serializers import AuditLogSerializer
 
 
