@@ -31,6 +31,7 @@ const BuildingDetailPage: React.FC = () => {
   const [regions, setRegions] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [tariffs, setTariffs] = useState<any[]>([]);
+  const [apartmentsList, setApartmentsList] = useState<any[]>([]);
 
   // Модалка системы
   const [sysModalOpen, setSysModalOpen] = useState(false);
@@ -65,6 +66,11 @@ const BuildingDetailPage: React.FC = () => {
       setRegions(rRes.data.results || rRes.data);
       setCompanies(cRes.data.results || cRes.data || []);
       setTariffs(tRes.data.results || tRes.data || []);
+      // Загружаем квартиры
+      try {
+        const aptRes = await api.get('/apartments/', { params: { building: id } });
+        setApartmentsList(aptRes.data.results || aptRes.data || []);
+      } catch {}
     } catch (e) { message.error('Ошибка загрузки'); navigate('/buildings'); }
     finally { setLoading(false); }
   };
@@ -332,6 +338,43 @@ const BuildingDetailPage: React.FC = () => {
           <Table dataSource={entrances} columns={entrCols} rowKey="id" size="small" pagination={false} />
         )}
       </Card>
+
+      {/* Квартиры */}
+      {apartmentsList && apartmentsList.length > 0 && (
+        <>
+          <Divider />
+          <Card title={`🚪 Квартиры (${apartmentsList.length})`}>
+            <Table
+              dataSource={apartmentsList}
+              rowKey="id"
+              size="small"
+              pagination={{ pageSize: 20, showTotal: (t: number) => `Всего: ${t}` }}
+              columns={[
+                { title: 'Кв.', dataIndex: 'number', key: 'num', width: 80 },
+                { title: 'Жителей', dataIndex: 'residents_count', key: 'rc', width: 100,
+                  render: (v: number, r: any) => (
+                    <Space>
+                      <Text>{v}</Text>
+                      {r.active_residents_count < v && <Tag color="orange" style={{ fontSize: 10 }}>—{v - r.active_residents_count} неакт.</Tag>}
+                    </Space>
+                  ),
+                },
+                { title: 'Активных', dataIndex: 'active_residents_count', key: 'ac', width: 100,
+                  render: (v: number) => <Tag color={v > 0 ? 'green' : 'default'}>{v}</Tag>,
+                },
+                {
+                  title: '', key: 'act', width: 80,
+                  render: (_: any, r: any) => (
+                    <Link to={`/apartments/${r.id}`}>
+                      <Button size="small" icon={<ApartmentOutlined />}>Открыть</Button>
+                    </Link>
+                  ),
+                },
+              ]}
+            />
+          </Card>
+        </>
+      )}
 
       {/* История заявок */}
       <Divider />
