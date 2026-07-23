@@ -529,6 +529,11 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
     if period_date is None:
         period_date = date(2026, 5, 1)
 
+    # ── Кеш существующих клиентов по л/с (ускоряет импорт в 10-50 раз) ──
+    account_map = {}
+    for c in Client.objects.exclude(personal_account_number='').iterator():
+        account_map[c.personal_account_number] = c
+
     for r in range(data_start, ws.max_row + 1):
         try:
             row_data = _extract_row(ws, r, fmt)
@@ -728,7 +733,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                     stats['dormitories'] += 1
 
             # ── УК ──
-            source = row_data.get('source', '')
+            source = row_data.get('source', '')[:20]  # поле source ограничено 20 символами
             mc_obj = None
             if source:
                 mc_obj, _ = ManagementCompany.objects.get_or_create(name=source)
@@ -773,7 +778,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                     apartment_obj.save(update_fields=['entrance'])
 
             # ── Клиент (КЛЮЧ = personal_account) ──
-            existing = Client.objects.filter(personal_account_number=personal_account).first()
+            existing = account_map.get(personal_account)
 
             if existing:
                 if building and not existing.building:
@@ -793,7 +798,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 existing.save()
                 stats['clients_updated'] += 1
             else:
-                Client.objects.create(
+                new_client = Client.objects.create(
                     name=name or 'Не определено',
                     address=full_address,
                     building=building,
@@ -806,6 +811,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                     district=district,
                     source=source or 'erc',
                 )
+                account_map[personal_account] = new_client  # обновляем кеш
                 stats['clients_created'] += 1
 
             # ── ЕРЦ запись ──
@@ -841,6 +847,10 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 })
             except:
                 pass
+
+        # Прогресс каждые 500 строк (чтобы видеть что процесс жив)
+        if r % 500 == 0:
+            logger.info(f'[IMPORT] row {r}/{ws.max_row}  clients:{stats["clients_created"]}+{stats["clients_updated"]}  bld:{stats["buildings_created"]}  err:{len(stats["errors"])}')
 
     logger.warning(
         f'[XLSX IMPORT] rows={stats["total_rows"]} +{stats["clients_created"]} ~{stats["clients_updated"]} '
