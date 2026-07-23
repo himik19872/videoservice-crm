@@ -533,14 +533,13 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
 
             stats['total_rows'] += 1
 
-            # ── Нормализация через Dadata + fallback ──
-            # Если row_data содержит пред-распарсенные поля (_city, _street_name...) — используем их
+            # ── Нормализация адреса ──
             pre_city = row_data.get('_city', '')
             pre_street = row_data.get('_street_name', '')
             pre_house = row_data.get('_house_number', '')
             pre_apt = row_data.get('_apartment', '')
 
-            if pre_city or pre_house:
+            if fmt == 'agalatovo':
                 # Агалатово: собираем адрес из кусочков → нормализуем через DaData
                 parts = []
                 rgn = row_data.get('_region', '')
@@ -568,42 +567,44 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 house_number = addr.get('house_number', '') or pre_house
                 building_number = addr.get('building_number', '') or ''
                 apartment = pre_apt or row_data.get('apartment', '') or addr.get('apartment', '')
+
+            elif fmt == 'lo':
+                # ЛО: DaData не понимает обратный формат — прямой парсер
+                parsed = _parse_erc_address(raw_address)
+                city = parsed.get('city', '') or 'Санкт-Петербург'
+                region_str = parsed.get('region', '')
+                district = parsed.get('district', '')
+                street_name = parsed.get('street', '')
+                street_type = parsed.get('street_type', 'street')
+                house_number = parsed.get('house', '')
+                building_number = parsed.get('building', '')
+                apartment = parsed.get('apartment', '')
+
+            elif fmt == 'erc':
+                # СПб / Коммунар: _extract_row уже распарсил через _parse_erc_address — берём готовое
+                city = pre_city or 'Санкт-Петербург'
+                region_str = row_data.get('_region', '')
+                district = row_data.get('_district', '')
+                street_name = pre_street
+                street_type = row_data.get('_street_type', 'street')
+                house_number = pre_house
+                building_number = row_data.get('_building_number', '')
+                apartment = pre_apt
+
             elif raw_address:
-                # ЛО, Коммунар, СПб — адрес одной строкой
-                # Для ЛО: DaData не понимает этот формат — используем сразу _parse_erc_address
-                if fmt == 'lo':
+                # Прочие форматы: пробуем DaData, при неудаче — fallback-парсер
+                addr = normalize_address(raw_address)
+                if not addr.get('street_name') or len(addr.get('street_name', '')) < 3:
                     parsed = _parse_erc_address(raw_address)
-                    city = parsed.get('city', '') or 'Санкт-Петербург'
-                    region_str = parsed.get('region', '')
-                    district = parsed.get('district', '')
-                    street_name = parsed.get('street', '')
-                    street_type = parsed.get('street_type', 'street')
-                    house_number = parsed.get('house', '')
-                    building_number = parsed.get('building', '')
-                    apartment = parsed.get('apartment', '')
-                else:
-                    addr = normalize_address(raw_address)
-                    # Если DaData не справился (street_name битый, меньше 3 символов) — fallback
-                    if not addr.get('street_name') or len(addr.get('street_name', '')) < 3:
-                        parsed = _parse_erc_address(raw_address)
-                        if parsed:
-                            city = parsed.get('city', '') or addr.get('city', '') or 'Санкт-Петербург'
-                            region_str = parsed.get('region', '') or addr.get('region', '')
-                            district = parsed.get('district', '') or addr.get('district', '')
-                            street_name = parsed.get('street', '') or addr.get('street_name', '')
-                            street_type = parsed.get('street_type', 'street')
-                            house_number = parsed.get('house', '') or addr.get('house_number', '')
-                            building_number = parsed.get('building', '') or addr.get('building_number', '')
-                            apartment = parsed.get('apartment', '') or row_data.get('apartment', '') or addr.get('apartment', '')
-                        else:
-                            city = addr.get('city', '') or 'Санкт-Петербург'
-                            region_str = addr.get('region', '')
-                            district = addr.get('district', '')
-                            street_name = addr.get('street_name', '')
-                            street_type = addr.get('street_type', '') or 'street'
-                            house_number = addr.get('house_number', '')
-                            building_number = addr.get('building_number', '')
-                            apartment = row_data.get('apartment', '') or addr.get('apartment', '')
+                    if parsed:
+                        city = parsed.get('city', '') or addr.get('city', '') or 'Санкт-Петербург'
+                        region_str = parsed.get('region', '') or addr.get('region', '')
+                        district = parsed.get('district', '') or addr.get('district', '')
+                        street_name = parsed.get('street', '') or addr.get('street_name', '')
+                        street_type = parsed.get('street_type', 'street')
+                        house_number = parsed.get('house', '') or addr.get('house_number', '')
+                        building_number = parsed.get('building', '') or addr.get('building_number', '')
+                        apartment = parsed.get('apartment', '') or row_data.get('apartment', '') or addr.get('apartment', '')
                     else:
                         city = addr.get('city', '') or 'Санкт-Петербург'
                         region_str = addr.get('region', '')
@@ -613,6 +614,15 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                         house_number = addr.get('house_number', '')
                         building_number = addr.get('building_number', '')
                         apartment = row_data.get('apartment', '') or addr.get('apartment', '')
+                else:
+                    city = addr.get('city', '') or 'Санкт-Петербург'
+                    region_str = addr.get('region', '')
+                    district = addr.get('district', '')
+                    street_name = addr.get('street_name', '')
+                    street_type = addr.get('street_type', '') or 'street'
+                    house_number = addr.get('house_number', '')
+                    building_number = addr.get('building_number', '')
+                    apartment = row_data.get('apartment', '') or addr.get('apartment', '')
             else:
                 addr = normalize_address(raw_address) if raw_address else {'success': False}
                 city = addr.get('city', '') or 'Санкт-Петербург'
