@@ -602,8 +602,8 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 building_number = parsed.get('building', '')
                 apartment = parsed.get('apartment', '')
 
-            elif fmt == 'erc':
-                # СПб / Коммунар: _extract_row уже распарсил через _parse_erc_address — берём готовое
+            elif fmt in ('erc', 'tszh'):
+                # СПб / Коммунар / ТСЖ: _extract_row уже распарсил через _parse_erc_address — берём готовое
                 city = pre_city or 'Санкт-Петербург'
                 region_str = row_data.get('_region', '')
                 district = row_data.get('_district', '')
@@ -793,7 +793,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                     personal_account_number=personal_account,
                     region=region_obj,
                     district=district,
-                    source='erc',
+                    source=source or 'erc',
                 )
                 stats['clients_created'] += 1
 
