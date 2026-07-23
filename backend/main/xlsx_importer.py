@@ -326,7 +326,7 @@ def _parse_erc_address(raw_address: str) -> dict:
         if len(parts) >= 3:
             # Город
             city_raw = parts[2].strip()
-            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст)$', '', city_raw).strip()
+            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст|тер)$', '', city_raw).strip()
             if not city:
                 city = city_raw
         if len(parts) >= 4:
@@ -335,7 +335,7 @@ def _parse_erc_address(raw_address: str) -> dict:
         # ── Город (1-й элемент) ──
         if parts:
             city_raw = parts[0]
-            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст)$', '', city_raw).strip()
+            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст|тер)$', '', city_raw).strip()
             if not city:
                 city = city_raw
 
@@ -569,16 +569,50 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 building_number = addr.get('building_number', '') or ''
                 apartment = pre_apt or row_data.get('apartment', '') or addr.get('apartment', '')
             elif raw_address:
-                # ЛО, Коммунар, СПб — адрес одной строкой, нормализуем через DaData
-                addr = normalize_address(raw_address)
-                city = addr.get('city', '') or 'Санкт-Петербург'
-                region_str = addr.get('region', '')
-                district = addr.get('district', '')
-                street_name = addr.get('street_name', '')
-                street_type = addr.get('street_type', '') or 'street'
-                house_number = addr.get('house_number', '')
-                building_number = addr.get('building_number', '')
-                apartment = row_data.get('apartment', '') or addr.get('apartment', '')
+                # ЛО, Коммунар, СПб — адрес одной строкой
+                # Для ЛО: DaData не понимает этот формат — используем сразу _parse_erc_address
+                if fmt == 'lo':
+                    parsed = _parse_erc_address(raw_address)
+                    city = parsed.get('city', '') or 'Санкт-Петербург'
+                    region_str = parsed.get('region', '')
+                    district = parsed.get('district', '')
+                    street_name = parsed.get('street', '')
+                    street_type = parsed.get('street_type', 'street')
+                    house_number = parsed.get('house', '')
+                    building_number = parsed.get('building', '')
+                    apartment = parsed.get('apartment', '')
+                else:
+                    addr = normalize_address(raw_address)
+                    # Если DaData не справился (street_name битый, меньше 3 символов) — fallback
+                    if not addr.get('street_name') or len(addr.get('street_name', '')) < 3:
+                        parsed = _parse_erc_address(raw_address)
+                        if parsed:
+                            city = parsed.get('city', '') or addr.get('city', '') or 'Санкт-Петербург'
+                            region_str = parsed.get('region', '') or addr.get('region', '')
+                            district = parsed.get('district', '') or addr.get('district', '')
+                            street_name = parsed.get('street', '') or addr.get('street_name', '')
+                            street_type = parsed.get('street_type', 'street')
+                            house_number = parsed.get('house', '') or addr.get('house_number', '')
+                            building_number = parsed.get('building', '') or addr.get('building_number', '')
+                            apartment = parsed.get('apartment', '') or row_data.get('apartment', '') or addr.get('apartment', '')
+                        else:
+                            city = addr.get('city', '') or 'Санкт-Петербург'
+                            region_str = addr.get('region', '')
+                            district = addr.get('district', '')
+                            street_name = addr.get('street_name', '')
+                            street_type = addr.get('street_type', '') or 'street'
+                            house_number = addr.get('house_number', '')
+                            building_number = addr.get('building_number', '')
+                            apartment = row_data.get('apartment', '') or addr.get('apartment', '')
+                    else:
+                        city = addr.get('city', '') or 'Санкт-Петербург'
+                        region_str = addr.get('region', '')
+                        district = addr.get('district', '')
+                        street_name = addr.get('street_name', '')
+                        street_type = addr.get('street_type', '') or 'street'
+                        house_number = addr.get('house_number', '')
+                        building_number = addr.get('building_number', '')
+                        apartment = row_data.get('apartment', '') or addr.get('apartment', '')
             else:
                 addr = normalize_address(raw_address) if raw_address else {'success': False}
                 city = addr.get('city', '') or 'Санкт-Петербург'
