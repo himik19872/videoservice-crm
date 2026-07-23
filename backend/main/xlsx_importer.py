@@ -523,7 +523,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
         'total_rows': 0, 'clients_created': 0, 'clients_updated': 0,
         'buildings_created': 0, 'entrances_created': 0,
         'erc_created': 0, 'erc_updated': 0, 'dormitories': 0,
-        'skipped': 0, 'errors': [],
+        'skipped': 0, 'errors': [], 'failed_rows': [],
     }
 
     if period_date is None:
@@ -655,6 +655,17 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 house_number = addr.get('house_number', '')
                 building_number = addr.get('building_number', '')
                 apartment = row_data.get('apartment', '') or addr.get('apartment', '')
+
+            # ── Проверка: адрес не распарсился ──
+            if not house_number or not city:
+                stats['failed_rows'].append({
+                    'row': r,
+                    'personal_account': personal_account,
+                    'name': name,
+                    'raw_address': raw_address,
+                    'reason': 'Не удалось определить дом/город',
+                })
+                continue
 
             # ── Регион с кодом ──
             region_obj = _get_or_create_region(city, region_str)
@@ -820,6 +831,16 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
 
         except Exception as e:
             stats['errors'].append(f'Строка {r}: {str(e)}')
+            try:
+                acc = str(ws.cell(r, 2).value or '')
+                nm = str(ws.cell(r, 3).value or '')
+                raw = str(ws.cell(r, 6).value or '')
+                stats['failed_rows'].append({
+                    'row': r, 'personal_account': acc, 'name': nm,
+                    'raw_address': raw, 'reason': str(e)[:200],
+                })
+            except:
+                pass
 
     logger.warning(
         f'[XLSX IMPORT] rows={stats["total_rows"]} +{stats["clients_created"]} ~{stats["clients_updated"]} '

@@ -140,6 +140,24 @@ const ImportTab: React.FC<{ preset: ImportTabPreset }> = ({ preset }) => {
           </div>
           {result.errors?.length > 0 && <Alert type="warning" style={{ marginTop: 12 }} message={`Ошибок: ${result.errors.length}`}
             description={<ul style={{ margin: 0, paddingLeft: 20, maxHeight: 150, overflow: 'auto' }}>{result.errors.slice(0, 15).map((e: string, i: number) => <li key={i} style={{ fontSize: 12 }}>{e}</li>)}</ul>} />}
+          {result.failed_rows?.length > 0 && (
+            <Card title={`⚠️ Строки, не прошедшие парсинг (${result.failed_rows.length})`} size="small" style={{ marginTop: 12, borderColor: '#ff4d4f' }}>
+              <Alert type="error" showIcon style={{ marginBottom: 8 }} message="Эти строки не были импортированы. Проверьте адреса и занесите вручную." />
+              <Table
+                dataSource={result.failed_rows.map((r: any, i: number) => ({ ...r, _k: i }))}
+                rowKey="_k"
+                size="small"
+                pagination={{ pageSize: 20, size: 'small' }}
+                columns={[
+                  { title: 'Строка', dataIndex: 'row', width: 70 },
+                  { title: 'Л/с', dataIndex: 'personal_account', width: 130, render: (v: string) => <Text code>{v}</Text> },
+                  { title: 'ФИО', dataIndex: 'name', ellipsis: true },
+                  { title: 'Адрес (сырой)', dataIndex: 'raw_address', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                  { title: 'Причина', dataIndex: 'reason', width: 200, render: (v: string) => <Text type="danger" style={{ fontSize: 11 }}>{v}</Text> },
+                ]}
+              />
+            </Card>
+          )}
         </Card>
       )}
     </div>
