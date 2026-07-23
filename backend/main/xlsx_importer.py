@@ -399,29 +399,51 @@ def _parse_erc_address(raw_address: str) -> dict:
             if num_end:
                 apartment = num_end.group(1)
 
-    # ── Определяем район ──
-    if 'Гатчин' in raw_address or 'Коммунар' in raw_address or 'Тайцы' in raw_address:
-        district = 'Гатчинский р-н'
-    elif 'Ломоносов' in raw_address or 'Петергоф' in raw_address or 'Стрельна' in raw_address:
-        district = 'Петродворцовый р-н'
-    elif raw_address.startswith('Санкт-Петербург,'):
-        district = 'Петродворцовый р-н'  # по умолчанию для СПб пригородов
-    elif 'Пушкин' in raw_address:
-        district = 'Пушкинский р-н'
-    elif 'Колпин' in raw_address:
-        district = 'Колпинский р-н'
-    elif 'Аннино' in raw_address or 'Горбунки' in raw_address or 'Виллози' in raw_address:
-        district = 'Ломоносовский р-н'
-    elif 'Кипень' in raw_address or 'Келози' in raw_address or 'Карлино' in raw_address:
-        district = 'Ломоносовский р-н'
-    elif 'Яльгелево' in raw_address or 'Разбегаево' in raw_address or 'Пеники' in raw_address:
-        district = 'Ломоносовский р-н'
-    elif 'Ижора' in raw_address:
-        district = 'Ломоносовский р-н'
-    elif 'Сертолово' in raw_address or 'Агалат' in raw_address:
-        district = 'Всеволожский р-н'
-    elif 'Горелово' in raw_address or 'Красное Село' in raw_address:
-        district = 'Красносельский р-н'
+    # ── Определяем район по подгороду в скобках (формат СПб: «Улица (Пушкин)») ──
+    # Ищем подгород в скобках — он определяет административный район
+    bracket_match = re.search(r'\(([^)]+)\)', raw_address)
+    sub_city = bracket_match.group(1).strip() if bracket_match else ''
+
+    if sub_city:
+        sub_district_map = {
+            'ломоносов': 'Петродворцовый р-н',
+            'петергоф': 'Петродворцовый р-н',
+            'стрельна': 'Петродворцовый р-н',
+            'пушкин': 'Пушкинский р-н',
+            'павловск': 'Пушкинский р-н',
+            'шушары': 'Пушкинский р-н',
+            'колпино': 'Колпинский р-н',
+            'металлострой': 'Колпинский р-н',
+            'кронштадт': 'Кронштадтский р-н',
+            'сестрорецк': 'Курортный р-н',
+            'зеленогорск': 'Курортный р-н',
+            'красное село': 'Красносельский р-н',
+            'горелово': 'Красносельский р-н',
+        }
+        district = sub_district_map.get(sub_city.lower(), '')
+
+    # Если нет скобок — старый алгоритм
+    if not district:
+        if 'Гатчин' in raw_address or 'Коммунар' in raw_address or 'Тайцы' in raw_address:
+            district = 'Гатчинский р-н'
+        elif 'Ломоносов' in raw_address or 'Петергоф' in raw_address or 'Стрельна' in raw_address:
+            district = 'Петродворцовый р-н'
+        elif 'Пушкин' in raw_address or 'Павловск' in raw_address or 'Шушары' in raw_address:
+            district = 'Пушкинский р-н'
+        elif 'Колпин' in raw_address:
+            district = 'Колпинский р-н'
+        elif 'Аннино' in raw_address or 'Горбунки' in raw_address or 'Виллози' in raw_address:
+            district = 'Ломоносовский р-н'
+        elif 'Кипень' in raw_address or 'Келози' in raw_address or 'Карлино' in raw_address:
+            district = 'Ломоносовский р-н'
+        elif 'Яльгелево' in raw_address or 'Разбегаево' in raw_address or 'Пеники' in raw_address:
+            district = 'Ломоносовский р-н'
+        elif 'Ижора' in raw_address:
+            district = 'Ломоносовский р-н'
+        elif 'Сертолово' in raw_address or 'Агалат' in raw_address:
+            district = 'Всеволожский р-н'
+        elif 'Горелово' in raw_address or 'Красное Село' in raw_address:
+            district = 'Красносельский р-н'
 
     return {
         'city': city,
