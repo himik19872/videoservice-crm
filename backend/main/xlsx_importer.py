@@ -196,24 +196,23 @@ def _extract_row(ws, row_num: int, fmt: str) -> Optional[Dict[str, Any]]:
         balance_end = cell(15).replace(',', '.')    # колонка 15 = Сальдо на конец
         bs = _safe_float(balance_start_dt) - _safe_float(balance_start_kt)
 
-        # ЛО — такой же формат адреса как Коммунар/СПб
-        parsed = _parse_erc_address(raw_address)
         return {
-            'apartment': parsed['apartment'],
+            'apartment': '',
             'name': name,
             'personal_account': personal_account,
             'raw_address': raw_address,
             'phone': '',
             'source': 'ЕРЦ ЛО',
             'source_file': '',
-            '_city': parsed['city'],
-            '_street_name': parsed['street'],
-            '_street_type': parsed['street_type'],
-            '_house_number': parsed['house'],
-            '_building_number': parsed['building'],
-            '_apartment': parsed['apartment'],
-            '_district': parsed['district'],
-            '_region': parsed['region'],
+            # Оставляем пустыми — будет нормализация через DaData в import_xlsx_file
+            '_city': '',
+            '_street_name': '',
+            '_street_type': '',
+            '_house_number': '',
+            '_building_number': '',
+            '_apartment': '',
+            '_district': '',
+            '_region': '',
             'balance_start': bs,
             'charged': _safe_float(charged),
             'paid': _safe_float(paid),
@@ -569,6 +568,17 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 house_number = addr.get('house_number', '') or pre_house
                 building_number = addr.get('building_number', '') or ''
                 apartment = pre_apt or row_data.get('apartment', '') or addr.get('apartment', '')
+            elif raw_address:
+                # ЛО, Коммунар, СПб — адрес одной строкой, нормализуем через DaData
+                addr = normalize_address(raw_address)
+                city = addr.get('city', '') or 'Санкт-Петербург'
+                region_str = addr.get('region', '')
+                district = addr.get('district', '')
+                street_name = addr.get('street_name', '')
+                street_type = addr.get('street_type', '') or 'street'
+                house_number = addr.get('house_number', '')
+                building_number = addr.get('building_number', '')
+                apartment = row_data.get('apartment', '') or addr.get('apartment', '')
             else:
                 addr = normalize_address(raw_address) if raw_address else {'success': False}
                 city = addr.get('city', '') or 'Санкт-Петербург'
