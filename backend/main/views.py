@@ -1327,7 +1327,7 @@ class BuildingViewSet(viewsets.ModelViewSet):
     serializer_class = BuildingSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['region', 'city', 'street_type', 'equipment_type']
-    search_fields = ['street_name', 'house_number', 'building_number', 'city', 'notes']
+    search_fields = ['street_name', 'house_number', 'building_number', 'city', 'notes', 'management_company', 'management_company_fk__name', 'management_company_fk__short_name']
     ordering_fields = ['street_name', 'house_number', 'created_at']
     pagination_class = None  # все 1825 домов сразу
 

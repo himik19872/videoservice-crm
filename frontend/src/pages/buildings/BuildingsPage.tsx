@@ -43,19 +43,33 @@ const BuildingsPage: React.FC = () => {
   const [regions, setRegions] = useState<Region[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [searchText, setSearchText] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Debounce: отправляем запрос через 400ms после последнего ввода
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchText), 400);
+    return () => clearTimeout(timer);
+  }, [searchText]);
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchBuildings();
-      fetchRegions();
-      fetchCompanies();
+      fetchBuildings(debouncedSearch);
+    }
+  }, [debouncedSearch, isAuthenticated]);
+
+  // При первом входе грузим всё
+  useEffect(() => {
+    if (isAuthenticated && !debouncedSearch) {
+      fetchBuildings('');
     }
   }, [isAuthenticated]);
 
-  const fetchBuildings = async () => {
+  const fetchBuildings = async (search?: string) => {
     setLoading(true);
     try {
-      const response = await api.get('/buildings/');
+      const params: any = {};
+      if (search) params.search = search;
+      const response = await api.get('/buildings/', { params });
       setBuildings(response.data.results || response.data);
     } catch (error) {
       message.error('Ошибка загрузки домов');
@@ -80,6 +94,14 @@ const BuildingsPage: React.FC = () => {
     } catch (e) {}
   };
 
+  // Загружаем справочники при первом входе
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchRegions();
+      fetchCompanies();
+    }
+  }, [isAuthenticated]);
+
   const handleCreateBuilding = async (values: BuildingFormValues) => {
     try {
       const response = await api.post('/buildings/', values);
@@ -95,16 +117,6 @@ const BuildingsPage: React.FC = () => {
   const handleViewBuilding = (building: Building) => {
     navigate(`/buildings/${building.id}`);
   };
-
-  const filteredBuildings = buildings.filter((b) => {
-    const s = searchText.toLowerCase();
-    return (
-      b.street_name?.toLowerCase().includes(s) ||
-      b.house_number?.toLowerCase().includes(s) ||
-      b.city?.toLowerCase().includes(s) ||
-      (b as any).management_company_name?.toLowerCase().includes(s)
-    );
-  });
 
   const columns = [
     {
@@ -190,7 +202,7 @@ const BuildingsPage: React.FC = () => {
 
       <Table
         columns={columns}
-        dataSource={filteredBuildings}
+        dataSource={buildings}
         loading={loading}
         rowKey="id"
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `Всего: ${total}` }}
