@@ -4801,6 +4801,58 @@ def import_erc_update_view(request):
 # Импорт справочника Beward (IP-адреса и коды)
 # ══════════════════════════════════════════════════════════════════
 
+def _find_building_for_beward(address: str, ent_num=None):
+    """
+    Ищет Building по адресу из Beward-файла.
+    Возвращает (building, entrance_obj) или (None, None).
+    Ищет по: улица + номер дома + корпус. Без улицы — только если один результат.
+    """
+    import re as _re
+    building = None
+    entrance_obj = None
+    if not address:
+        return None, None
+
+    addr = _re.sub(r',(?!\s)', ', ', address)
+    # Дом: «д. 15», «дом 15 корп. 1», «д.15/1»
+    m = _re.search(r'(?:дом|дсм|д\.)\s*(\d+[а-яА-Я]?)\s*(?:корп\.?\s*(\d+)|к\.\s*(\d+))?', addr)
+    house = m.group(1) if m else ''
+    building_num = m.group(2) or m.group(3) or ''
+
+    # Улица
+    parts = [p.strip() for p in addr.split(',')]
+    street_candidates = [p for p in parts if any(t in p.lower() for t in
+        ['улица', 'проспект', 'шоссе', 'пр-кт', 'пер', 'переулок', 'бульвар', 'наб', 'пр ', 'аллея'])]
+    street_raw = street_candidates[-1] if street_candidates else (parts[1] if len(parts) > 1 else parts[0] if parts else '')
+    street = street_raw
+    for prefix in ['улица ', 'проспект ', 'переулок ', 'шоссе ', 'бульвар ', 'набережная ']:
+        if street.lower().startswith(prefix):
+            street = street[len(prefix):]
+            break
+
+    if street and house:
+        qs = Building.objects.filter(house_number=house, street_name__icontains=street.strip())
+        if building_num:
+            qs = qs.filter(building_number=building_num)
+        building = qs.first()
+
+    if not building and house:
+        qs = Building.objects.filter(house_number=house, city__icontains='Санкт')
+        if building_num:
+            qs = qs.filter(building_number=building_num)
+        if qs.count() == 1:
+            building = qs.first()
+
+    if building and ent_num:
+        try:
+            ent_int = int(ent_num)
+            entrance_obj = building.entrances.filter(number=ent_int).first()
+        except (ValueError, TypeError):
+            pass
+
+    return building, entrance_obj
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def import_beward_ip_view(request):
@@ -4849,46 +4901,8 @@ def import_beward_ip_view(request):
             except (ValueError, TypeError):
                 ent_num = entrance_raw
 
-            # Пробуем найти Building по адресу (улица + дом + корпус)
-            building = None
-            entrance_obj = None
-            if address:
-                addr_clean = re.sub(r',(?!\s)', ', ', address)
-                # Ищем дом: «д. 15 корп. 1», «дом 15 к. 1», «д.15/1» и т.п.
-                m = re.search(r'(?:дом|дсм|д\.)\s*(\d+[а-яА-Я]?)\s*(?:корп\.?\s*(\d+)|к\.\s*(\d+))?', addr_clean)
-                house = m.group(1) if m else ''
-                building_num = m.group(2) or m.group(3) or ''
-                # Ищем улицу
-                parts = [p.strip() for p in addr_clean.split(',')]
-                street_candidates = [p for p in parts if any(t in p.lower() for t in
-                    ['улица', 'проспект', 'шоссе', 'пр-кт', 'пер', 'переулок', 'бульвар', 'наб', 'пр ', 'аллея'])]
-                street_raw = street_candidates[-1] if street_candidates else (parts[1] if len(parts) > 1 else parts[0] if parts else '')
-                # Убираем префиксы типа улицы
-                street = street_raw
-                for prefix in ['улица ', 'проспект ', 'переулок ', 'шоссе ', 'бульвар ', 'набережная ']:
-                    if street.lower().startswith(prefix):
-                        street = street[len(prefix):]
-                        break
-                if street and house:
-                    qs = Building.objects.filter(house_number=house, street_name__icontains=street.strip())
-                    if building_num:
-                        qs = qs.filter(building_number=building_num)
-                    building = qs.first()
-                # Если не нашли — пробуем искать просто по номеру дома + корпусу без улицы
-                if not building and house:
-                    qs = Building.objects.filter(house_number=house, city__icontains='Санкт')
-                    if building_num:
-                        qs = qs.filter(building_number=building_num)
-                    # Только если один результат (чтобы не привязать к чужому дому)
-                    if qs.count() == 1:
-                        building = qs.first()
-
-            if building and ent_num:
-                try:
-                    ent_int = int(ent_num)
-                    entrance_obj = building.entrances.filter(number=ent_int).first()
-                except (ValueError, TypeError):
-                    pass
+            # Находим Building через общий парсер
+            building, entrance_obj = _find_building_for_beward(address, ent_num)
 
             BewardDevice.objects.update_or_create(
                 ip_address=ip_addr,
@@ -4979,39 +4993,6 @@ def import_beward_codes_view(request):
                 stats['skipped'] += 1
                 continue
 
-            # Парсим адрес — улучшенный поиск улицы и дома
-            addr = address
-
-            # Ищем дом: «дом 21», «дом 8», «д. 15»
-            m = re.search(r'(?:дом|д\.)\s*(\d+[а-яА-Я]?)', addr.lower())
-            house = m.group(1) if m else ''
-
-            # Ищем корпус
-            m = re.search(r'корпус\s*(\d+[а-яА-Я]?)', addr.lower())
-            bldg = m.group(1) if m else ''
-
-            # Улица — ищем «улица XXX», «шоссе XXX», «проспект XXX»
-            street = ''
-            for pattern in [r'(?:улица|шоссе|проспект|переулок|бульвар)\s+([^,]+)', r'(?:ул\.|ш\.)\s+([^,]+)']:
-                m = re.search(pattern, addr, re.IGNORECASE)
-                if m:
-                    street = m.group(1).strip()
-                    break
-
-            # Находим Building
-            building = None
-            if house:
-                qs = Building.objects.filter(house_number=house)
-                if street:
-                    qs_street = qs.filter(street_name__icontains=street.strip())
-                    if qs_street.exists():
-                        qs = qs_street
-                if bldg and qs.count() > 1:
-                    qs_b = qs.filter(building_number=bldg)
-                    if qs_b.exists():
-                        qs = qs_b
-                building = qs.first()
-
             # Парсим номер подъезда
             ent_num = None
             try:
@@ -5020,6 +5001,9 @@ def import_beward_codes_view(request):
                 m = re.search(r'\d+', str(entrance_raw))
                 if m:
                     ent_num = int(m.group(0))
+
+            # Находим Building через общий парсер
+            building, entrance_obj = _find_building_for_beward(address, ent_num)
 
             # Создаём/обновляем BuildingEntrance
             entrance = None
