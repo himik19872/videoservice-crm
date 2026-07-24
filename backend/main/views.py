@@ -3709,26 +3709,45 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def generate_clients(self, request, pk=None):
-        """Создать клиентов-квартиры для дома этой УК по подъездам."""
+        """Создать клиентов-квартиры для домов этой УК по подъездам.
+        Если передан building_id — только для одного дома, иначе для всех."""
         company = self.get_object()
         building_id = request.data.get('building_id')
-        building = get_object_or_404(Building, id=building_id)
-        created = 0
-        for entrance in building.entrances.all():
-            if entrance.apartment_from and entrance.apartment_to:
-                for apt in range(entrance.apartment_from, entrance.apartment_to + 1):
-                    _, c = Client.objects.get_or_create(
-                        building=building, apartment=str(apt),
-                        defaults={
-                            'name': f'Квартира {apt}',
-                            'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt}',
-                            'management_company': company,
-                            'entrance': entrance,
-                            'source': 'manual', 'erc_enabled': True,
-                        }
-                    )
-                    created += 1
-        return Response({'ok': True, 'building_id': building.id, 'clients_created': created})
+        Apt = apps.get_model('main', 'Apartment')
+
+        buildings_qs = company.buildings_list.all()
+        if building_id:
+            buildings_qs = buildings_qs.filter(id=building_id)
+
+        total_created = 0
+        for building in buildings_qs:
+            for entrance in building.entrances.all():
+                if entrance.apartment_from and entrance.apartment_to:
+                    for apt in range(entrance.apartment_from, entrance.apartment_to + 1):
+                        apt_str = str(apt)
+                        # Создаём квартиру
+                        apt_obj, _ = Apt.objects.get_or_create(
+                            building=building, number=apt_str,
+                            defaults={'entrance': entrance}
+                        )
+                        if not apt_obj.entrance:
+                            apt_obj.entrance = entrance
+                            apt_obj.save(update_fields=['entrance'])
+                        # Создаём клиента
+                        _, c = Client.objects.get_or_create(
+                            building=building, apartment=apt_str,
+                            defaults={
+                                'name': f'Квартира {apt_str}',
+                                'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt_str}',
+                                'management_company': company,
+                                'entrance': entrance,
+                                'apartment_obj': apt_obj,
+                                'source': 'manual', 'erc_enabled': True,
+                            }
+                        )
+                        total_created += 1
+
+        return Response({'ok': True, 'clients_created': total_created})
 
     @action(detail=True, methods=['post'])
     def apply_tariff(self, request, pk=None):

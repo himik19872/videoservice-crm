@@ -92,9 +92,12 @@ const CompanyDetailPage: React.FC = () => {
     await api.post(`/management-companies/${id}/add_building/`, v);
     message.success('Дом добавлен'); setAddBldOpen(false); fetchAll();
   };
-  const handleGenerateClients = async (bldId: number) => {
-    await api.post(`/management-companies/${id}/generate_clients/`, { building_id: bldId });
-    message.success('Квартиры созданы'); fetchAll();
+  const handleGenerateClients = async (bldId?: number) => {
+    const payload: any = {};
+    if (bldId) payload.building_id = bldId;
+    const res = await api.post(`/management-companies/${id}/generate_clients/`, payload);
+    message.success(`Создано квартир: ${res.data.clients_created || 0}`);
+    fetchAll();
   };
   const handleRemoveBuilding = async (bldId: number) => {
     await api.post(`/management-companies/${id}/remove_building/`, { building_id: bldId });
@@ -190,6 +193,11 @@ const CompanyDetailPage: React.FC = () => {
           children: <div>
             <Space style={{ marginBottom: 12 }}>
               <Button icon={<PlusOutlined />} onClick={() => { form.resetFields(); setAddBldOpen(true); }}>Привязать дом</Button>
+              {buildings.length > 0 && (
+                <Popconfirm title="Создать квартиры и клиентов во ВСЕХ домах? Это может занять время." onConfirm={() => handleGenerateClients()}>
+                  <Button type="primary" icon={<HomeOutlined />}>Сгенерировать квартиры</Button>
+                </Popconfirm>
+              )}
             </Space>
             <Table dataSource={buildings} rowKey="id" size="small" pagination={{ pageSize: 20 }}
               columns={[
