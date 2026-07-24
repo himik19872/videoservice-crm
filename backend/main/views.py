@@ -4817,7 +4817,7 @@ def _find_building_for_beward(address: str, ent_num=None):
     # Дом: «д. 15», «дом 15 корп. 1», «д.15/1»
     m = _re.search(r'(?:дом|дсм|д\.)\s*(\d+[а-яА-Я]?)\s*(?:корп\.?\s*(\d+)|к\.\s*(\d+))?', addr)
     house = m.group(1) if m else ''
-    building_num = m.group(2) or m.group(3) or ''
+    building_num = (m.group(2) or m.group(3)) if m else ''
 
     # Улица
     parts = [p.strip() for p in addr.split(',')]
@@ -4998,6 +4998,8 @@ def import_beward_codes_view(request):
             try:
                 ent_num = int(float(entrance_raw))
             except (ValueError, TypeError):
+                pass
+            if ent_num is None:
                 m = re.search(r'\d+', str(entrance_raw))
                 if m:
                     ent_num = int(m.group(0))
