@@ -3900,12 +3900,24 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
 
                 if create_clients and apt_from and apt_to:
                     for apt_num in range(apt_from, apt_to + 1):
+                        apt_str = str(apt_num)
+                        # Создаём квартиру (объект)
+                        Apt = apps.get_model('main', 'Apartment')
+                        apt_obj, _ = Apt.objects.get_or_create(
+                            building=building, number=apt_str,
+                            defaults={'entrance': entrance}
+                        )
+                        if not apt_obj.entrance:
+                            apt_obj.entrance = entrance
+                            apt_obj.save(update_fields=['entrance'])
+                        # Создаём клиента
                         Client.objects.get_or_create(
-                            building=building, apartment=str(apt_num),
+                            building=building, apartment=apt_str,
                             defaults={
-                                'name': f'Квартира {apt_num}',
-                                'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt_num}',
+                                'name': f'Квартира {apt_str}',
+                                'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt_str}',
                                 'management_company': company, 'entrance': entrance,
+                                'apartment_obj': apt_obj,
                                 'source': 'manual', 'erc_enabled': True,
                             }
                         )

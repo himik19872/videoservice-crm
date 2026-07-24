@@ -43,32 +43,29 @@ const BuildingsPage: React.FC = () => {
   const [regions, setRegions] = useState<Region[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
 
-  // Debounce: отправляем запрос через 400ms после последнего ввода
+  // Загрузка зданий с debounce: полный список или поиск
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchText), 400);
+    if (!isAuthenticated) return;
+    const timer = setTimeout(() => {
+      const params: any = {};
+      if (searchText) params.search = searchText;
+      fetchBuildings(params);
+    }, 300);
     return () => clearTimeout(timer);
-  }, [searchText]);
+  }, [searchText, isAuthenticated]);
 
+  // Справочники — один раз
   useEffect(() => {
     if (isAuthenticated) {
-      fetchBuildings(debouncedSearch);
-    }
-  }, [debouncedSearch, isAuthenticated]);
-
-  // При первом входе грузим всё
-  useEffect(() => {
-    if (isAuthenticated && !debouncedSearch) {
-      fetchBuildings('');
+      fetchRegions();
+      fetchCompanies();
     }
   }, [isAuthenticated]);
 
-  const fetchBuildings = async (search?: string) => {
+  const fetchBuildings = async (params: any = {}) => {
     setLoading(true);
     try {
-      const params: any = {};
-      if (search) params.search = search;
       const response = await api.get('/buildings/', { params });
       setBuildings(response.data.results || response.data);
     } catch (error) {
