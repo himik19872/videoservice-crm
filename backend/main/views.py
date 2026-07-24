@@ -3723,7 +3723,6 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
         Если передан building_id — только для одного дома, иначе для всех."""
         company = self.get_object()
         building_id = request.data.get('building_id')
-        Apt = apps.get_model('main', 'Apartment')
 
         buildings_qs = company.buildings_list.all()
         if building_id:
@@ -3736,7 +3735,7 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
                     for apt in range(entrance.apartment_from, entrance.apartment_to + 1):
                         apt_str = str(apt)
                         # Создаём квартиру
-                        apt_obj, _ = Apt.objects.get_or_create(
+                        apt_obj, _ = Apartment.objects.get_or_create(
                             building=building, number=apt_str,
                             defaults={'entrance': entrance}
                         )
@@ -3931,8 +3930,7 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
                     for apt_num in range(apt_from, apt_to + 1):
                         apt_str = str(apt_num)
                         # Создаём квартиру (объект)
-                        Apt = apps.get_model('main', 'Apartment')
-                        apt_obj, _ = Apt.objects.get_or_create(
+                        apt_obj, _ = Apartment.objects.get_or_create(
                             building=building, number=apt_str,
                             defaults={'entrance': entrance}
                         )
