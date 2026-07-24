@@ -3,7 +3,7 @@ import {
   Typography, Card, Button, Space, message, Form, Input, Select, InputNumber,
   Steps, Row, Col, Checkbox, Divider,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
@@ -108,9 +108,33 @@ const CompanyCreatePage: React.FC = () => {
         <Card title="Реквизиты компании">
           <Form form={form} layout="vertical" onFinish={goToStep2}>
             <Form.Item name="name" label="Полное название" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item label="ИНН">
+              <Input.Search
+                name="inn"
+                maxLength={12}
+                placeholder="Введите ИНН и нажмите поиск..."
+                enterButton={<SearchOutlined />}
+                onSearch={async (value) => {
+                  if (!value || value.length < 8) { message.warning('Введите корректный ИНН (минимум 8 цифр)'); return; }
+                  try {
+                    const res = await api.get('/management-companies/lookup_inn/', { params: { inn: value } });
+                    if (res.data.success) {
+                      form.setFieldsValue({
+                        name: res.data.name,
+                        short_name: res.data.short_name,
+                        inn: res.data.inn,
+                      });
+                      message.success('Данные найдены');
+                    } else {
+                      message.error(res.data.error || 'Организация не найдена');
+                    }
+                  } catch (e) { message.error('Ошибка поиска'); }
+                }}
+              />
+            </Form.Item>
             <Row gutter={16}>
               <Col span={12}><Form.Item name="short_name" label="Короткое название"><Input /></Form.Item></Col>
-              <Col span={12}><Form.Item name="inn" label="ИНН"><Input maxLength={12} /></Form.Item></Col>
+              <Col span={12}><Form.Item name="inn" label="ИНН (скрыто)" hidden><Input /></Form.Item></Col>
             </Row>
             <Row gutter={16}>
               <Col span={12}><Form.Item name="phone" label="Телефон"><Input /></Form.Item></Col>

@@ -250,6 +250,59 @@ def _map_street_type(dadata_type: str) -> str:
     return mapping.get(dadata_type, 'street')
 
 
+# ─── Поиск организации по ИНН через DaData Party API ─────────────
+
+def suggest_party_by_inn(inn: str) -> dict:
+    """
+    Поиск организации по ИНН через DaData Party API (Suggest).
+    Возвращает словарь с полями:
+      { 'name': str, 'short_name': str, 'inn': str, 'kpp': str, 'ogrn': str,
+        'address': str, 'director': str, 'status': str, 'success': bool }
+    """
+    if not inn or len(inn) < 8:
+        return {'success': False, 'error': 'ИНН слишком короткий'}
+
+    api_key = settings.DADATA_API_KEY
+    secret = settings.DADATA_SECRET
+
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+    if api_key:
+        headers['Authorization'] = f'Token {api_key}'
+    if secret:
+        headers['X-Secret'] = secret
+
+    try:
+        resp = requests.post(
+            'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party',
+            json={'query': inn, 'count': 1},
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            suggestions = data.get('suggestions', [])
+            if suggestions:
+                item = suggestions[0].get('data', {})
+                return {
+                    'success': True,
+                    'name': item.get('name', {}).get('full_with_opf', '') or suggestions[0].get('value', ''),
+                    'short_name': item.get('name', {}).get('short_with_opf', ''),
+                    'inn': item.get('inn', ''),
+                    'kpp': item.get('kpp', ''),
+                    'ogrn': item.get('ogrn', ''),
+                    'address': item.get('address', {}).get('unrestricted_value', '') or item.get('address', {}).get('value', ''),
+                    'director': item.get('management', {}).get('name', '') if item.get('management') else '',
+                    'status': item.get('state', {}).get('status', '') if item.get('state') else '',
+                }
+        return {'success': False, 'error': 'Организация не найдена'}
+    except Exception as e:
+        logger.warning(f'DaData party suggest failed: {e}')
+        return {'success': False, 'error': str(e)}
+
+
 def _empty_result(raw: str) -> dict:
     return {
         'city': '',

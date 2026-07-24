@@ -3664,6 +3664,16 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'short_name', 'inn']
     pagination_class = None  # все 49 компаний сразу
 
+    @action(detail=False, methods=['get'])
+    def lookup_inn(self, request):
+        """Поиск организации по ИНН через DaData Party API."""
+        inn = request.query_params.get('inn', '').strip()
+        if not inn:
+            return Response({'success': False, 'error': 'Укажите ИНН'}, status=400)
+        from .dadata_service import suggest_party_by_inn
+        result = suggest_party_by_inn(inn)
+        return Response(result)
+
     @action(detail=True, methods=['get'])
     def buildings(self, request, pk=None):
         """Список домов, которые обслуживает эта УК (из Building FK)"""
