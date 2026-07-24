@@ -41,12 +41,14 @@ const BuildingsPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [regions, setRegions] = useState<Region[]>([]);
+  const [companies, setCompanies] = useState<any[]>([]);
   const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchBuildings();
       fetchRegions();
+      fetchCompanies();
     }
   }, [isAuthenticated]);
 
@@ -71,6 +73,13 @@ const BuildingsPage: React.FC = () => {
     }
   };
 
+  const fetchCompanies = async () => {
+    try {
+      const r = await api.get('/management-companies/');
+      setCompanies(r.data.results || r.data || []);
+    } catch (e) {}
+  };
+
   const handleCreateBuilding = async (values: BuildingFormValues) => {
     try {
       const response = await api.post('/buildings/', values);
@@ -92,7 +101,8 @@ const BuildingsPage: React.FC = () => {
     return (
       b.street_name?.toLowerCase().includes(s) ||
       b.house_number?.toLowerCase().includes(s) ||
-      b.city?.toLowerCase().includes(s)
+      b.city?.toLowerCase().includes(s) ||
+      (b as any).management_company_name?.toLowerCase().includes(s)
     );
   });
 
@@ -109,6 +119,14 @@ const BuildingsPage: React.FC = () => {
       dataIndex: 'city',
       key: 'city',
       width: 120,
+    },
+    {
+      title: 'УК / ТСЖ',
+      dataIndex: 'management_company_name',
+      key: 'mc',
+      width: 200,
+      ellipsis: true,
+      render: (v: string, r: any) => v || r.management_company || '-',
     },
     {
       title: 'Район',
@@ -220,6 +238,14 @@ const BuildingsPage: React.FC = () => {
               <InputNumber min={1} style={{ width: 120 }} />
             </Form.Item>
           </Space>
+
+          <Form.Item name="management_company_fk" label="УК / ТСЖ">
+            <Select
+              allowClear showSearch placeholder="Выберите УК"
+              filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+              options={companies.map((c: any) => ({ label: c.short_name || c.name, value: c.id }))}
+            />
+          </Form.Item>
 
           <Form.Item name="equipment_type" label="Тип оборудования">
             <Select options={EQUIPMENT_TYPES} />
