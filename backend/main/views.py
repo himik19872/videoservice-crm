@@ -3970,6 +3970,80 @@ class BewardDeviceViewSet(viewsets.ModelViewSet):
     search_fields = ['ip_address', 'address', 'region', 'notes']
     pagination_class = None  # все записи сразу (9555 шт.), фильтрация на фронте
 
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        """Экспорт объединённого справочника Beward + подъезды с IP в Excel."""
+        import openpyxl, io
+        from django.http import HttpResponse
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Beward + подъезды'
+
+        # Заголовки
+        headers = ['Источник', 'IP-адрес', 'Район', 'Адрес', 'Подъезд',
+                   'Квартиры (с)', 'Квартиры (по)', 'Код доступа', 'Код программирования',
+                   'Код открытия (доп.)', 'Дом (ID)', 'Подъезд (ID)', 'Примечания']
+        ws.append(headers)
+
+        # Стираем старые стили — жирный заголовок
+        for col in range(1, len(headers) + 1):
+            ws.cell(1, col).font = openpyxl.styles.Font(bold=True)
+
+        # 1. Данные из BewardDevice
+        for d in BewardDevice.objects.select_related('building', 'entrance').all():
+            ws.append([
+                'Beward',
+                d.ip_address,
+                d.region,
+                d.address,
+                d.entrance_number,
+                '',  # apartment_range — текст, разберём ниже
+                '',  # 
+                d.access_code,
+                d.programming_code,
+                d.door_opening_code,
+                str(d.building_id or ''),
+                str(d.entrance_id or ''),
+                d.apartment_range,  # пусть будет в примечаниях для Beward
+            ])
+
+        # 2. Подъезды с IP (из BuildingEntrance)
+        from .models import BuildingEntrance as BldEntrance
+        for e in BldEntrance.objects.select_related('building').exclude(ip_address=''):
+            ws.append([
+                'Подъезд дома',
+                e.ip_address,
+                e.building.district if e.building else '',
+                str(e.building) if e.building else '',
+                str(e.number),
+                str(e.apartment_from) if e.apartment_from else '',
+                str(e.apartment_to) if e.apartment_to else '',
+                e.access_code or '',
+                e.programming_code or '',
+                '',
+                str(e.building_id or ''),
+                str(e.id),
+                e.notes or '',
+            ])
+
+        # Автоширина колонок
+        for col_cells in ws.columns:
+            max_len = 0
+            for cell in col_cells:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 2, 40)
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        response = HttpResponse(output.read(),
+                                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename=beward_full_export.xlsx'
+        return response
+
 
 # ══════════════════════════════════════════════════════════════════
 # Эндпоинты импорта из Excel

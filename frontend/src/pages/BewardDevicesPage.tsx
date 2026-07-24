@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Table, Button, Space, Modal, Form, Input, message, Select, Popconfirm, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, DownloadOutlined } from '@ant-design/icons';
 import api from '../services/api';
 import type { BewardDevice } from '../types';
 
@@ -110,6 +110,9 @@ const BewardDevicesPage: React.FC = () => {
             allowClear
           />
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Добавить</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => window.open('/api/beward-devices/export/', '_blank')}>
+            Экспорт Excel
+          </Button>
         </Space>
       </Space>
 
