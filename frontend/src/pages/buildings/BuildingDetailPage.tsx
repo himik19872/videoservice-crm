@@ -66,10 +66,10 @@ const BuildingDetailPage: React.FC = () => {
       setRegions(rRes.data.results || rRes.data);
       setCompanies(cRes.data.results || cRes.data || []);
       setTariffs(tRes.data.results || tRes.data || []);
-      // Загружаем квартиры
+      // Загружаем квартиры (из реальных клиентов, не Apartment-модель)
       try {
-        const aptRes = await api.get('/apartments/', { params: { building: id } });
-        setApartmentsList(aptRes.data.results || aptRes.data || []);
+        const aptRes = await api.get(`/buildings/${id}/resident_flats/`);
+        setApartmentsList(aptRes.data || []);
       } catch {}
     } catch (e) { message.error('Ошибка загрузки'); navigate('/buildings'); }
     finally { setLoading(false); }
@@ -348,7 +348,7 @@ const BuildingDetailPage: React.FC = () => {
               dataSource={apartmentsList}
               rowKey="id"
               size="small"
-              pagination={{ pageSize: 20, showTotal: (t: number) => `Всего: ${t}` }}
+              pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'], showTotal: (t: number) => `Всего: ${t}` }}
               columns={[
                 { title: 'Кв.', dataIndex: 'number', key: 'num', width: 80 },
                 { title: 'Жителей', dataIndex: 'residents_count', key: 'rc', width: 100,

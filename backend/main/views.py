@@ -272,7 +272,7 @@ class ClientViewSet(viewsets.ModelViewSet):
     serializer_class = ClientSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['region', 'is_legal', 'legal_type']
-    search_fields = ['name', 'phone', 'email', 'address', 'inn']
+    search_fields = ['name', 'phone', 'email', 'address', 'inn', 'apartment', 'personal_account_number']
 
     def get_queryset(self):
         queryset = Client.objects.all()
@@ -438,7 +438,7 @@ class ClientViewSet(viewsets.ModelViewSet):
             building_id=building_id
         ).exclude(
             Q(apartment='') | Q(apartment__isnull=True)
-        ).order_by('apartment').distinct('apartment')[:50]
+        ).order_by('apartment').distinct('apartment')[:200]
 
         result = []
         for c in clients:
@@ -1508,6 +1508,39 @@ class BuildingViewSet(viewsets.ModelViewSet):
                 created += 1
             return Response({'ok': True, 'entrances_created': created})
         return Response({'error': 'Укажите entrances_count и apartments_count'}, status=400)
+
+    @action(detail=True, methods=['get'])
+    def resident_flats(self, request, pk=None):
+        """
+        Квартиры клиентов в этом доме (из поля apartment, не Apartment-модель).
+        Работает для домов с 500+ квартирами.
+        """
+        building = self.get_object()
+        flats = Client.objects.filter(
+            building=building
+        ).exclude(
+            Q(apartment='') | Q(apartment__isnull=True)
+        ).values_list('apartment', flat=True).distinct().order_by('apartment')
+
+        # Интеллектуальная сортировка: 1, 2, 10, а не 1, 10, 2
+        def sort_key(v):
+            try:
+                return (0, int(v), '')
+            except ValueError:
+                return (1, 0, v.lower())
+
+        sorted_flats = sorted(set(flats), key=sort_key)
+
+        result = []
+        for f in sorted_flats:
+            residents = Client.objects.filter(building=building, apartment=f)
+            result.append({
+                'number': f,
+                'residents_count': residents.count(),
+                'active_residents_count': residents.filter(is_active=True).count(),
+                'residents': list(residents.values('id', 'name', 'phone')[:10]),
+            })
+        return Response(result)
 
     @action(detail=True, methods=['post'])
     def apply_to_residents(self, request, pk=None):
