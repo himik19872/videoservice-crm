@@ -28,6 +28,10 @@ const ClientsPage: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [searchOptions, setSearchOptions] = useState<{ value: string; label: string }[]>([]);
   const [searching, setSearching] = useState(false);
+  const [selectedStreet, setSelectedStreet] = useState('');
+  const [selectedHouse, setSelectedHouse] = useState('');
+  const [houseOptions, setHouseOptions] = useState<{ value: string; label: string }[]>([]);
+  const [houseSearching, setHouseSearching] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -130,14 +134,48 @@ const ClientsPage: React.FC = () => {
     finally { setSearching(false); }
   };
 
-  // При выборе улицы — ищем по ней
+  // При выборе улицы — подгружаем дома
   const handleStreetSelect = (value: string) => {
     setSearchText(value);
+    setSelectedStreet(value);
+    setSelectedHouse('');
+    setHouseOptions([]);
+    // Загружаем дома для этой улицы
+    setHouseSearching(true);
+    api.get('/clients/house_autocomplete/', { params: { street: value } })
+      .then(r => {
+        const opts = (r.data || []).map((h: any) => ({
+          value: h.label,
+          label: `🏡 ${h.label}`,
+          house: h.house,
+          building: h.building,
+        }));
+        setHouseOptions(opts);
+        if (opts.length === 0) {
+          // Если домов нет — ищем сразу по улице
+          doSearch(value, '');
+        }
+      })
+      .catch(() => setHouseOptions([]))
+      .finally(() => setHouseSearching(false));
+  };
+
+  // При выборе дома — ищем
+  const handleHouseSelect = (value: string) => {
+    setSelectedHouse(value);
+    doSearch(selectedStreet, value);
+  };
+
+  // Общая функция поиска
+  const doSearch = (street: string, house: string) => {
     setPage(1);
     setSearchOptions([]);
-    const params = buildParams(1, pageSize);
-    params.search = value;
+    setHouseOptions([]);
+    const q = house ? `${street}, ${house}` : street;
+    setSearchText(q);
     setLoading(true);
+    const params = buildParams(1, pageSize);
+    params.search = q;
     api.get('/clients/', { params })
       .then(r => { setClients(r.data.results || r.data); setTotal(r.data.count || 0); })
       .catch(() => message.error('Ошибка поиска'))
@@ -145,22 +183,30 @@ const ClientsPage: React.FC = () => {
   };
 
   // Поиск по Enter
-  const handleSearch = (value: string) => {
-    setSearchText(value);
-    setPage(1);
-    setSearchOptions([]);
-    const params = buildParams(1, pageSize);
-    params.search = value;
-    setLoading(true);
-    api.get('/clients/', { params })
-      .then(r => { setClients(r.data.results || r.data); setTotal(r.data.count || 0); })
-      .catch(() => message.error('Ошибка поиска'))
-      .finally(() => setLoading(false));
+  const handleStreetEnter = () => {
+    const val = searchText.trim();
+    if (val) {
+      if (selectedStreet && selectedStreet === val) {
+        // уже выбрана улица — ищем по ней
+        doSearch(selectedStreet, selectedHouse);
+      } else {
+        handleStreetSelect(val);
+      }
+    }
+  };
+
+  const handleHouseEnter = () => {
+    if (selectedHouse && selectedStreet) {
+      doSearch(selectedStreet, selectedHouse);
+    }
   };
 
   // Сброс всех фильтров
   const handleResetFilters = () => {
     setSearchText('');
+    setSelectedStreet('');
+    setSelectedHouse('');
+    setHouseOptions([]);
     setFilterSource('');
     setFilterRegionId('');
     setFilterMcId('');
@@ -265,7 +311,7 @@ const ClientsPage: React.FC = () => {
 
       {/* Фильтры */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={4}>
           <AutoComplete
             style={{ width: '100%' }}
             value={searchText}
@@ -273,13 +319,31 @@ const ClientsPage: React.FC = () => {
             onSearch={handleStreetSearch}
             onSelect={handleStreetSelect}
             allowClear
-            onClear={() => { setSearchText(''); setPage(1); fetchClients(1, pageSize); }}
+            onClear={() => { setSearchText(''); setSelectedStreet(''); setSelectedHouse(''); setHouseOptions([]); setPage(1); fetchClients(1, pageSize); }}
           >
-            <Input.Search
-              placeholder="🏠 Поиск по улице (автокомплит)..."
-              enterButton
+            <Input
+              placeholder="🏠 Улица..."
+              onPressEnter={handleStreetEnter}
               allowClear
-              onSearch={handleSearch}
+            />
+          </AutoComplete>
+        </Col>
+        <Col xs={12} md={3}>
+          <AutoComplete
+            style={{ width: '100%' }}
+            value={selectedHouse}
+            options={houseOptions}
+            disabled={!selectedStreet}
+            onSearch={(v) => setSelectedHouse(v)}
+            onSelect={handleHouseSelect}
+            onClear={() => { setSelectedHouse(''); if (selectedStreet) doSearch(selectedStreet, ''); }}
+            allowClear
+          >
+            <Input
+              placeholder={selectedStreet ? (houseSearching ? 'Загрузка...' : '🏡 Дом...') : 'Сначала улицу'}
+              disabled={!selectedStreet}
+              onPressEnter={handleHouseEnter}
+              allowClear
             />
           </AutoComplete>
         </Col>

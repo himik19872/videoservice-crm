@@ -391,7 +391,34 @@ class ClientViewSet(viewsets.ModelViewSet):
                 result.append({'id': b.id, 'label': b.street_name, 'sub': f'{cnt} домов', 'street': b.street_name})
         return Response(result)
 
+    @action(detail=False, methods=['get'])
+    def house_autocomplete(self, request):
+        """Дома на выбранной улице.
+        ?street=Ленина — вернёт все дома на этой улице."""
+        street = request.query_params.get('street', '').strip()
+        if not street or len(street) < 2:
+            return Response([])
 
+        buildings = Building.objects.filter(
+            street_name__icontains=street
+        ).order_by('house_number').distinct('house_number', 'building_number')[:50]
+
+        result, seen = [], set()
+        for b in buildings:
+            key = f'{b.house_number}|{b.building_number or ""}'
+            if key not in seen:
+                seen.add(key)
+                label = f'д. {b.house_number}'
+                if b.building_number:
+                    label += f' корп. {b.building_number}'
+                result.append({
+                    'id': b.id,
+                    'label': label,
+                    'sub': b.street_name,
+                    'house': b.house_number,
+                    'building': b.building_number or '',
+                })
+        return Response(result)
 
 
     @action(detail=True, methods=['get'])
