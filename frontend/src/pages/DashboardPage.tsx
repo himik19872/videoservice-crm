@@ -59,10 +59,6 @@ const DashboardPage: React.FC = () => {
       const dashboard = dashRes.data;
       const locations = locRes.data || [];
       const orders = ordersRes.data.results || ordersRes.data || [];
-
-      const dashboard = dashRes.data;
-      const locations = locRes.data || [];
-      const orders = ordersRes.data.results || ordersRes.data || [];
       const payments = paymentsRes.data.results || paymentsRes.data || [];
 
       const today = dayjs().startOf('day');
