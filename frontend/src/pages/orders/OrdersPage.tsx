@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Table, Tag, Button, Space, Typography, Modal, Form, Input, Select, message, Card } from 'antd';
+import { Table, Tag, Button, Space, Typography, Modal, Form, Input, Select, message, Card, Tabs } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -26,6 +26,10 @@ const OrdersPage: React.FC = () => {
   const [form] = Form.useForm();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [masterFilter, setMasterFilter] = useState<number | undefined>();
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<string>('active');  // active | closed
   const [regions, setRegions] = useState<Region[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [masters, setMasters] = useState<any[]>([]);
@@ -123,7 +127,10 @@ const OrdersPage: React.FC = () => {
   };
 
   // Фильтрация + сортировка
-  const filteredOrders = orders
+  const activeOrders = orders.filter(o => o.status !== 'confirmed' && o.status !== 'cancelled');
+  const closedOrders = orders.filter(o => o.status === 'confirmed' || o.status === 'cancelled');
+
+  const filterAndSort = (list: any[]) => list
     .filter((order) => {
       const matchesSearch = !searchText || (
         order.address?.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -133,7 +140,10 @@ const OrdersPage: React.FC = () => {
         order.client_info?.full_name?.toLowerCase().includes(searchText.toLowerCase())
       );
       const matchesStatus = statusFilter ? order.status === statusFilter : true;
-      return matchesSearch && matchesStatus;
+      const matchesMaster = masterFilter ? order.master === masterFilter : true;
+      const matchesDate = (!dateFrom || dayjs(order.created_at).isAfter(dateFrom)) &&
+                          (!dateTo || dayjs(order.created_at).isBefore(dateTo + 'T23:59:59'));
+      return matchesSearch && matchesStatus && matchesMaster && matchesDate;
     })
     .sort((a: any, b: any) => {
       const desc = sortOrder === 'descend';
@@ -162,6 +172,9 @@ const OrdersPage: React.FC = () => {
       }
       return desc ? vb - va : va - vb;
     });
+
+  const filteredActive = filterAndSort(activeOrders);
+  const filteredClosed = filterAndSort(closedOrders);
 
   const columns = [
     {
@@ -278,29 +291,74 @@ const OrdersPage: React.FC = () => {
           onChange={(e) => setSearchText(e.target.value)}
           allowClear
         />
-        <Tag style={{ marginLeft: 8 }}>Найдено: {filteredOrders.length}</Tag>
+        <Select
+          allowClear
+          showSearch
+          placeholder="👨‍🔧 Мастер"
+          style={{ minWidth: 180 }}
+          value={masterFilter}
+          onChange={setMasterFilter}
+          filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+          options={masters.map((m: any) => ({
+            value: m.id,
+            label: `${m.user?.last_name || ''} ${m.user?.first_name || ''}`.trim() || m.user?.username,
+          }))}
+        />
+        {activeTab === 'closed' && (
+          <>
+            <Input type="date" placeholder="Дата с" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ width: 150 }} />
+            <Input type="date" placeholder="Дата по" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ width: 150 }} />
+          </>
+        )}
+        <Tag style={{ marginLeft: 8 }}>Найдено: {activeTab === 'active' ? filteredActive.length : filteredClosed.length}</Tag>
       </Space>
 
-      <Table
-        columns={columns}
-        dataSource={filteredOrders}
-        loading={loading}
-        rowKey="id"
-        scroll={{ x: 1300 }}
-        size="middle"
-        onChange={(_pagination, _filters, sorter: any) => {
-          if (sorter.field) {
-            setSortField(sorter.field);
-            setSortOrder(sorter.order || 'descend');
-          }
-        }}
-        pagination={{
-          pageSize: 15,
-          showSizeChanger: true,
-          pageSizeOptions: ['10', '15', '25', '50'],
-          showTotal: (total) => `Всего: ${total}`,
-        }}
-      />
+      <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginTop: 8 }}>
+        <Tabs.TabPane tab={`🔄 Активные (${activeOrders.length})`} key="active">
+          <Table
+            columns={columns}
+            dataSource={filteredActive}
+            loading={loading}
+            rowKey="id"
+            scroll={{ x: 1300 }}
+            size="middle"
+            onChange={(_pagination, _filters, sorter: any) => {
+              if (sorter.field) {
+                setSortField(sorter.field);
+                setSortOrder(sorter.order || 'descend');
+              }
+            }}
+            pagination={{
+              pageSize: 15,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '15', '25', '50'],
+              showTotal: (total) => `Всего: ${total}`,
+            }}
+          />
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={`✅ Закрытые (${closedOrders.length})`} key="closed">
+          <Table
+            columns={columns}
+            dataSource={filteredClosed}
+            loading={loading}
+            rowKey="id"
+            scroll={{ x: 1300 }}
+            size="middle"
+            onChange={(_pagination, _filters, sorter: any) => {
+              if (sorter.field) {
+                setSortField(sorter.field);
+                setSortOrder(sorter.order || 'descend');
+              }
+            }}
+            pagination={{
+              pageSize: 15,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '15', '25', '50'],
+              showTotal: (total) => `Всего: ${total}`,
+            }}
+          />
+        </Tabs.TabPane>
+      </Tabs>
 
       <Modal
         title="Создать новую заявку"
