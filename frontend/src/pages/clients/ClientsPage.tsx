@@ -57,6 +57,9 @@ const ClientsPage: React.FC = () => {
     const params: any = { page: pg, page_size: size };
     if (selectedBuildingId) {
       params.building_id = selectedBuildingId;
+      if (selectedFlat) {
+        params.apartment = selectedFlat;  // точный фильтр по квартире
+      }
     } else if (searchText) {
       params.search = searchText;
     }

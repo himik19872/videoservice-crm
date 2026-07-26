@@ -308,6 +308,11 @@ class ClientViewSet(viewsets.ModelViewSet):
         if building_id:
             queryset = queryset.filter(building_id=int(building_id))
 
+        # Фильтр по номеру квартиры (точный)
+        apartment = self.request.query_params.get('apartment', '').strip()
+        if apartment:
+            queryset = queryset.filter(apartment=apartment)
+
         # Если не администратор, показываем только клиентов своего региона
         if user.is_authenticated and not user.is_staff:
             try:
