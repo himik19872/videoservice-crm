@@ -33,6 +33,7 @@ const ClientsPage: React.FC = () => {
   const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(null);
   const [selectedFlat, setSelectedFlat] = useState('');
   const [houseOptions, setHouseOptions] = useState<{ value: string; label: string; buildingId?: number }[]>([]);
+  const [filteredHouseOptions, setFilteredHouseOptions] = useState<{ value: string; label: string; buildingId?: number }[]>([]);
   const [houseSearching, setHouseSearching] = useState(false);
   const [flatOptions, setFlatOptions] = useState<{ value: string; label: string }[]>([]);
   const [total, setTotal] = useState(0);
@@ -149,6 +150,7 @@ const ClientsPage: React.FC = () => {
     setSelectedBuildingId(null);
     setSelectedFlat('');
     setHouseOptions([]);
+    setFilteredHouseOptions([]);
     setFlatOptions([]);
     // Загружаем дома для этой улицы
     setHouseSearching(true);
@@ -160,12 +162,13 @@ const ClientsPage: React.FC = () => {
           buildingId: h.id,
         }));
         setHouseOptions(opts);
+        setFilteredHouseOptions(opts);
         if (opts.length === 0) {
           // Если домов нет — ищем сразу по улице
           doSearch(value, '', '');
         }
       })
-      .catch(() => { setHouseOptions([]); })
+      .catch(() => { setHouseOptions([]); setFilteredHouseOptions([]); })
       .finally(() => setHouseSearching(false));
   };
 
@@ -193,11 +196,14 @@ const ClientsPage: React.FC = () => {
     }
   };
 
-  // При вводе дома — просто обновляем текст, buildingId не трогаем
+  // При вводе дома — фильтруем выпадающий список, но buildingId НЕ трогаем
   const handleHouseSearch = (v: string) => {
     setSelectedHouse(v);
-    // buildingId ставится только при выборе из списка (handleHouseSelect)
-    // или при точном совпадении после ввода полного названия (handleHouseEnter)
+    if (v) {
+      setFilteredHouseOptions(houseOptions.filter(o => o.value.toLowerCase().includes(v.toLowerCase())));
+    } else {
+      setFilteredHouseOptions(houseOptions);
+    }
   };
 
   const handleHouseEnter = () => {
@@ -230,6 +236,7 @@ const ClientsPage: React.FC = () => {
     setPage(1);
     setSearchOptions([]);
     setHouseOptions([]);
+    setFilteredHouseOptions([]);
     setFlatOptions([]);
     
     // Формируем текст для отображения в поле поиска
@@ -269,6 +276,7 @@ const ClientsPage: React.FC = () => {
     setSelectedBuildingId(null);
     setSelectedFlat('');
     setHouseOptions([]);
+    setFilteredHouseOptions([]);
     setFlatOptions([]);
     setFilterSource('');
     setFilterRegionId('');
@@ -382,7 +390,7 @@ const ClientsPage: React.FC = () => {
             onSearch={handleStreetSearch}
             onSelect={handleStreetSelect}
             allowClear
-            onClear={() => { setSearchText(''); setSelectedStreet(''); setSelectedHouse(''); setSelectedBuildingId(null); setSelectedFlat(''); setHouseOptions([]); setFlatOptions([]); setPage(1); fetchClients(1, pageSize); }}
+            onClear={() => { setSearchText(''); setSelectedStreet(''); setSelectedHouse(''); setSelectedBuildingId(null); setSelectedFlat(''); setHouseOptions([]); setFilteredHouseOptions([]); setFlatOptions([]); setPage(1); fetchClients(1, pageSize); }}
           >
             <Input
               placeholder="🏠 Улица..."
@@ -395,7 +403,7 @@ const ClientsPage: React.FC = () => {
           <AutoComplete
             style={{ width: '100%' }}
             value={selectedHouse}
-            options={houseOptions}
+            options={filteredHouseOptions}
             disabled={!selectedStreet}
             onSearch={handleHouseSearch}
             onSelect={handleHouseSelect}
