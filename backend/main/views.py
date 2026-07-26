@@ -401,7 +401,7 @@ class ClientViewSet(viewsets.ModelViewSet):
 
         buildings = Building.objects.filter(
             street_name__icontains=street
-        ).order_by('house_number').distinct('house_number', 'building_number')[:50]
+        ).distinct('house_number', 'building_number')[:50]
 
         result, seen = [], set()
         for b in buildings:
@@ -418,6 +418,15 @@ class ClientViewSet(viewsets.ModelViewSet):
                     'house': b.house_number,
                     'building': b.building_number or '',
                 })
+
+        # Сортируем численно: д. 2, д. 5, д. 10, а не д. 10, д. 2, д. 5
+        def house_sort_key(item):
+            try:
+                return (int(item['house']), item['building'])
+            except ValueError:
+                return (0, item['house'])
+        result.sort(key=house_sort_key)
+
         return Response(result)
 
     @action(detail=False, methods=['get'])
@@ -434,18 +443,28 @@ class ClientViewSet(viewsets.ModelViewSet):
             return Response([])
 
         # Ищем квартиры клиентов в этом доме
-        clients = Client.objects.filter(
+        flats = Client.objects.filter(
             building_id=building_id
         ).exclude(
             Q(apartment='') | Q(apartment__isnull=True)
-        ).order_by('apartment').distinct('apartment')[:200]
+        ).values_list('apartment', flat=True).distinct()
+
+        # Сортируем как числа (544 после 543, а не после 4999)
+        def sort_key(v):
+            try:
+                return (0, int(v))
+            except ValueError:
+                return (1, v.lower(), 0)
+
+        sorted_flats = sorted(set(flats), key=sort_key)
 
         result = []
-        for c in clients:
+        for f in sorted_flats:
+            c = Client.objects.filter(building_id=building_id, apartment=f).first()
             result.append({
-                'id': c.id,
-                'label': c.apartment,
-                'sub': c.name or '',
+                'id': c.id if c else 0,
+                'label': f,
+                'sub': c.name if c else '',
             })
         return Response(result)
 
