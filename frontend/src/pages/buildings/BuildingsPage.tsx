@@ -119,9 +119,11 @@ const BuildingsPage: React.FC = () => {
     {
       title: 'Адрес',
       key: 'address',
-      width: 300,
+      width: 350,
       render: (_: any, record: Building) =>
-        `${record.street_type_display} ${record.street_name}, ${record.house_number}${record.building_number ? ' корп.' + record.building_number : ''}`,
+        <div style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+          {`${record.street_type_display} ${record.street_name}, ${record.house_number}${record.building_number ? ' корп.' + record.building_number : ''}`}
+        </div>,
     },
     {
       title: 'Город',
@@ -134,8 +136,7 @@ const BuildingsPage: React.FC = () => {
       dataIndex: 'management_company_name',
       key: 'mc',
       width: 200,
-      ellipsis: true,
-      render: (v: string, r: any) => v || r.management_company || '-',
+      render: (v: string, r: any) => <div style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{v || r.management_company || '-'}</div>,
     },
     {
       title: 'Район',

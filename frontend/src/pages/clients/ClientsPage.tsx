@@ -203,9 +203,9 @@ const ClientsPage: React.FC = () => {
       title: 'Адрес',
       dataIndex: 'address',
       key: 'address',
-      width: 280,
-      ellipsis: true,
+      width: 350,
       sorter: true,
+      render: (text: string) => <div style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{text}</div>,
     },
     {
       title: 'ФИО',
@@ -228,9 +228,8 @@ const ClientsPage: React.FC = () => {
       dataIndex: 'management_company_name',
       key: 'management_company_name',
       width: 180,
-      ellipsis: true,
       sorter: true,
-      render: (text: string) => text || '-',
+      render: (text: string) => <div style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{text || '-'}</div>,
     },
     {
       title: 'Источник',
@@ -358,7 +357,7 @@ const ClientsPage: React.FC = () => {
         loading={loading}
         rowKey="id"
         onChange={handleTableChange}
-        scroll={{ x: 1000 }}
+        scroll={{ x: 1100 }}
         pagination={{
           current: page,
           pageSize: pageSize,
