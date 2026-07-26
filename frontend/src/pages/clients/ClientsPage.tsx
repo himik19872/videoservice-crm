@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, Typography, Modal, Form, Input, Select, AutoComplete, message, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Typography, Modal, Form, Input, Select, AutoComplete, message, Tag, Row, Col } from 'antd';
+import { PlusOutlined, EditOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../services/api';
@@ -24,31 +24,44 @@ const ClientsPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [regions, setRegions] = useState<Region[]>([]);
+  const [managementCompanies, setManagementCompanies] = useState<any[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [searchOptions, setSearchOptions] = useState<{ value: string; label: string; type: string }[]>([]);
+  const [searchOptions, setSearchOptions] = useState<{ value: string; label: string }[]>([]);
   const [searching, setSearching] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [ordering, setOrdering] = useState<string>('');
   const [filterSource, setFilterSource] = useState<string>('');
+  const [filterRegionId, setFilterRegionId] = useState<string>('');
+  const [filterMcId, setFilterMcId] = useState<string>('');
+  const [filterPersonalAccount, setFilterPersonalAccount] = useState<string>('');
   const [filterNoBuilding, setFilterNoBuilding] = useState<boolean>(false);
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchClients(page, searchText, pageSize, ordering);
+      fetchClients(page, pageSize);
       fetchRegions();
+      fetchManagementCompanies();
     }
   }, [isAuthenticated]);
 
-  const fetchClients = async (pg: number, search: string, size: number, order?: string, source?: string, noBuilding?: boolean) => {
+  const buildParams = (pg: number, size: number) => {
+    const params: any = { page: pg, page_size: size };
+    if (searchText) params.search = searchText;
+    if (ordering) params.ordering = ordering;
+    if (filterSource) params.source = filterSource;
+    if (filterRegionId) params.region_id = filterRegionId;
+    if (filterMcId) params.management_company_id = filterMcId;
+    if (filterPersonalAccount) params.personal_account = filterPersonalAccount;
+    if (filterNoBuilding) params.no_building = 'true';
+    return params;
+  };
+
+  const fetchClients = async (pg: number, size: number) => {
     setLoading(true);
     try {
-      const params: any = { page: pg, page_size: size };
-      if (search) params.search = search;
-      if (order) params.ordering = order;
-      if (source) params.source = source;
-      if (noBuilding) params.no_building = 'true';
+      const params = buildParams(pg, size);
       const response = await api.get('/clients/', { params });
       setClients(response.data.results || response.data);
       setTotal(response.data.count || 0);
@@ -68,6 +81,15 @@ const ClientsPage: React.FC = () => {
     }
   };
 
+  const fetchManagementCompanies = async () => {
+    try {
+      const response = await api.get('/management-companies/');
+      setManagementCompanies(response.data.results || response.data);
+    } catch (error) {
+      console.error('Ошибка загрузки УК:', error);
+    }
+  };
+
   const handleTableChange = (pagination: TablePaginationConfig, _filters: any, sorter: SorterResult<Client> | SorterResult<Client>[]) => {
     const newPage = pagination.current || 1;
     const newSize = pagination.pageSize || 50;
@@ -80,42 +102,84 @@ const ClientsPage: React.FC = () => {
       newOrdering = s.order === 'ascend' ? s.field as string : `-${s.field}`;
     }
     setOrdering(newOrdering);
-    fetchClients(newPage, searchText, newSize, newOrdering, filterSource, filterNoBuilding);
+    
+    const params = buildParams(newPage, newSize);
+    if (newOrdering) params.ordering = newOrdering;
+    
+    setLoading(true);
+    api.get('/clients/', { params })
+      .then(r => { setClients(r.data.results || r.data); setTotal(r.data.count || 0); })
+      .catch(() => message.error('Ошибка загрузки'))
+      .finally(() => setLoading(false));
   };
 
-  const handleSearch = (value: string) => {
-    setSearchText(value);
-    setPage(1);
-    fetchClients(1, value, pageSize, ordering, filterSource, filterNoBuilding);
-    setSearchOptions([]);
-  };
-
-  const handleSearchInput = async (value: string) => {
+  // Поиск по улицам из базы (автокомплит)
+  const handleStreetSearch = async (value: string) => {
     setSearchText(value);
     if (!value || value.length < 2) { setSearchOptions([]); return; }
     setSearching(true);
     try {
-      const [crmRes, streetRes, dadataRes] = await Promise.all([
-        api.get('/clients/autocomplete/', { params: { q: value } }).then(r => r.data || []),
-        api.get('/clients/street_autocomplete/', { params: { q: value } }).then(r => r.data || []).catch(() => []),
-        api.get('/clients/address_suggest/', { params: { q: value } }).then(r => r.data || []).catch(() => []),
-      ]);
-      const opts: any[] = [];
-      // Клиенты из CRM
-      crmRes.forEach((c: any) => opts.push({ value: c.name, label: `👤 ${c.name} — ${c.address}`, type: 'client' }));
-      // Улицы — зелёным
-      if (streetRes.length > 0) {
-        if (opts.length > 0) opts.push({ value: '---divider---', label: '── 🏠 Улицы в базе ──', disabled: true, type: 'divider' });
-        streetRes.forEach((s: any) => opts.push({ value: s.street || s.label, label: `🏠 ${s.label} (${s.sub})`, type: 'street' }));
-      }
-      // Адресные подсказки
-      if (dadataRes.length > 0) {
-        if (opts.length > 0) opts.push({ value: '---divider2---', label: '── 📍 Адресные подсказки ──', disabled: true, type: 'divider' });
-        dadataRes.forEach((d: any) => opts.push({ value: d.value, label: `📍 ${d.unrestricted_value || d.value}`, type: 'dadata' }));
-      }
+      const streetRes = await api.get('/clients/street_autocomplete/', { params: { q: value } })
+        .then(r => r.data || []).catch(() => []);
+      const opts = streetRes.map((s: any) => ({
+        value: s.street || s.label,
+        label: `🏠 ${s.label} (${s.sub})`,
+      }));
       setSearchOptions(opts);
     } catch { setSearchOptions([]); }
     finally { setSearching(false); }
+  };
+
+  // При выборе улицы — ищем по ней
+  const handleStreetSelect = (value: string) => {
+    setSearchText(value);
+    setPage(1);
+    setSearchOptions([]);
+    const params = buildParams(1, pageSize);
+    params.search = value;
+    setLoading(true);
+    api.get('/clients/', { params })
+      .then(r => { setClients(r.data.results || r.data); setTotal(r.data.count || 0); })
+      .catch(() => message.error('Ошибка поиска'))
+      .finally(() => setLoading(false));
+  };
+
+  // Поиск по Enter
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+    setPage(1);
+    setSearchOptions([]);
+    const params = buildParams(1, pageSize);
+    params.search = value;
+    setLoading(true);
+    api.get('/clients/', { params })
+      .then(r => { setClients(r.data.results || r.data); setTotal(r.data.count || 0); })
+      .catch(() => message.error('Ошибка поиска'))
+      .finally(() => setLoading(false));
+  };
+
+  // Сброс всех фильтров
+  const handleResetFilters = () => {
+    setSearchText('');
+    setFilterSource('');
+    setFilterRegionId('');
+    setFilterMcId('');
+    setFilterPersonalAccount('');
+    setFilterNoBuilding(false);
+    setPage(1);
+    setOrdering('');
+    const params = { page: 1, page_size: pageSize };
+    setLoading(true);
+    api.get('/clients/', { params })
+      .then(r => { setClients(r.data.results || r.data); setTotal(r.data.count || 0); })
+      .catch(() => message.error('Ошибка загрузки'))
+      .finally(() => setLoading(false));
+  };
+
+  // Применение фильтров через кнопку
+  const applyFilters = () => {
+    setPage(1);
+    fetchClients(1, pageSize);
   };
 
   const handleCreateClient = async (values: ClientFormValues) => {
@@ -124,7 +188,7 @@ const ClientsPage: React.FC = () => {
       setIsModalOpen(false);
       form.resetFields();
       message.success('Клиент создан');
-      fetchClients(page, searchText, pageSize, ordering);
+      fetchClients(page, pageSize);
     } catch (error) {
       message.error('Ошибка создания клиента');
     }
@@ -157,12 +221,12 @@ const ClientsPage: React.FC = () => {
       key: 'personal_account_number',
       width: 130,
       sorter: true,
-      render: (text: string) => text || '-',
+      render: (text: string) => text ? <Tag color="blue">{text}</Tag> : '-',
     },
     {
       title: 'УК / ТСЖ',
-      dataIndex: 'management_company',
-      key: 'management_company',
+      dataIndex: 'management_company_name',
+      key: 'management_company_name',
       width: 180,
       ellipsis: true,
       sorter: true,
@@ -200,53 +264,93 @@ const ClientsPage: React.FC = () => {
     <div>
       <Title level={3}>Клиенты</Title>
 
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }} wrap>
-        <Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)}>
-            Новый клиент
-          </Button>
-          <Select
-            style={{ width: 160 }}
-            placeholder="Источник"
+      {/* Фильтры */}
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={24} md={8}>
+          <AutoComplete
+            style={{ width: '100%' }}
+            value={searchText}
+            options={searchOptions}
+            onSearch={handleStreetSearch}
+            onSelect={handleStreetSelect}
             allowClear
-            value={filterSource || undefined}
-            onChange={(v) => { setFilterSource(v || ''); setPage(1); fetchClients(1, searchText, pageSize, ordering, v || '', filterNoBuilding); }}
+            onClear={() => { setSearchText(''); setPage(1); fetchClients(1, pageSize); }}
           >
-            <Select.Option value="erc">ЕРЦ</Select.Option>
-            <Select.Option value="excel_import">ТСЖ/УК</Select.Option>
-            <Select.Option value="manual">Ручной ввод</Select.Option>
-          </Select>
-          <Button
-            type={filterNoBuilding ? 'primary' : 'default'}
-            danger={filterNoBuilding}
-            onClick={() => {
-              const v = !filterNoBuilding;
-              setFilterNoBuilding(v);
-              setPage(1);
-              fetchClients(1, searchText, pageSize, ordering, filterSource, v);
-            }}
-          >
-            🏚️ Без дома
-          </Button>
-        </Space>
-      </Space>
+            <Input.Search
+              placeholder="🏠 Поиск по улице (автокомплит)..."
+              enterButton
+              allowClear
+              onSearch={handleSearch}
+            />
+          </AutoComplete>
+        </Col>
+        <Col xs={12} md={5}>
+          <Select
+            style={{ width: '100%' }}
+            placeholder="🏛️ Район"
+            allowClear
+            value={filterRegionId || undefined}
+            onChange={(v) => { setFilterRegionId(v || ''); }}
+            showSearch
+            filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+            options={regions.map((r: any) => ({ value: String(r.id), label: r.name }))}
+          />
+        </Col>
+        <Col xs={12} md={5}>
+          <Select
+            style={{ width: '100%' }}
+            placeholder="🏢 УК / ТСЖ"
+            allowClear
+            value={filterMcId || undefined}
+            onChange={(v) => { setFilterMcId(v || ''); }}
+            showSearch
+            filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+            options={managementCompanies.map((mc: any) => ({ value: String(mc.id), label: mc.short_name || mc.name }))}
+          />
+        </Col>
+        <Col xs={12} md={4}>
+          <Input
+            placeholder="🔢 Лицевой счёт"
+            value={filterPersonalAccount}
+            onChange={(e) => setFilterPersonalAccount(e.target.value)}
+            onPressEnter={applyFilters}
+            allowClear
+            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+          />
+        </Col>
+        <Col xs={12} md={2}>
+          <Button type="primary" onClick={applyFilters} block>🔍 Искать</Button>
+        </Col>
+      </Row>
 
-      <AutoComplete
-        style={{ marginBottom: 16, width: 450 }}
-        value={searchText}
-        options={searchOptions}
-        onSearch={handleSearchInput}
-        onSelect={(val: string) => { handleSearch(val); }}
-        allowClear
-      >
-        <Input.Search
-          placeholder="🔍 Поиск по адресу, ФИО, телефону, ИНН..."
-          enterButton
-          allowClear
-          onSearch={handleSearch}
-          onChange={(e) => !e.target.value && handleSearch('')}
-        />
-      </AutoComplete>
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col>
+          <Space>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)}>
+              Новый клиент
+            </Button>
+            <Select
+              style={{ width: 160 }}
+              placeholder="Источник"
+              allowClear
+              value={filterSource || undefined}
+              onChange={(v) => { setFilterSource(v || ''); }}
+            >
+              <Select.Option value="erc">ЕРЦ</Select.Option>
+              <Select.Option value="excel_import">ТСЖ/УК</Select.Option>
+              <Select.Option value="manual">Ручной ввод</Select.Option>
+            </Select>
+            <Button
+              type={filterNoBuilding ? 'primary' : 'default'}
+              danger={filterNoBuilding}
+              onClick={() => { setFilterNoBuilding(!filterNoBuilding); }}
+            >
+              🏚️ Без дома
+            </Button>
+            <Button onClick={handleResetFilters}>🔄 Сбросить</Button>
+          </Space>
+        </Col>
+      </Row>
 
       <Table
         columns={columns}

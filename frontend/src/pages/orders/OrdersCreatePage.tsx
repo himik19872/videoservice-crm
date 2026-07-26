@@ -7,6 +7,33 @@ import InnSuggest from '../../components/InnSuggest';
 
 const { Title, Text } = Typography;
 
+// Быстрые шаблоны частых проблем
+const QUICK_PROBLEMS = [
+  'Не доводит доводчик',
+  'Не работает доводчик',
+  'Стучит дверь',
+  'Не работает ЭМЗ',
+  'Не держит ЭМЗ',
+  'Сильно держит ЭМЗ',
+  'Обрыв провода на ЭМЗ',
+  'Оборван провод у входной двери',
+  'Обесточен домофон',
+  'Не работает домофон',
+  'Не работает кл.',
+  'Не работают ключи у всей парадной',
+  'Не работает считыватель',
+  'Запрограммировать кл.',
+  'Перезаписать кл. абонента',
+  'Допрограммировать кл.',
+  'Обрыв провода в квартире',
+  'Замена УКП',
+  'Установка УКП',
+  'Не открыть с ПУ',
+  'Нет слышимости в ПУ',
+  'Нет слышимости на панели',
+  'Полифония',
+];
+
 const OrdersCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -370,6 +397,27 @@ const OrdersCreatePage: React.FC = () => {
         </Row>
 
         <Divider>📝 Описание</Divider>
+
+        {/* Быстрые шаблоны проблем */}
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12, marginBottom: 6, display: 'block' }}>⚡ Частые проблемы — кликните, чтобы добавить:</Text>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {QUICK_PROBLEMS.map((p) => (
+              <Tag
+                key={p}
+                style={{ cursor: 'pointer', margin: 0, userSelect: 'none' }}
+                color="default"
+                onClick={() => {
+                  const current = form.getFieldValue('description') || '';
+                  const newText = current ? current + '\n' + p : p;
+                  form.setFieldsValue({ description: newText });
+                }}
+              >
+                {p}
+              </Tag>
+            ))}
+          </div>
+        </div>
 
         <Form.Item name="description" label="Описание проблемы" rules={[{ required: true }]}>
           <Input.TextArea rows={4} placeholder="Опишите проблему" />

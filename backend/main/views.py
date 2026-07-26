@@ -288,6 +288,21 @@ class ClientViewSet(viewsets.ModelViewSet):
         if no_building == 'true':
             queryset = queryset.filter(building__isnull=True)
 
+        # Фильтр по району
+        region_id = self.request.query_params.get('region_id', '').strip()
+        if region_id:
+            queryset = queryset.filter(region_id=int(region_id))
+
+        # Фильтр по управляющей компании
+        mc_id = self.request.query_params.get('management_company_id', '').strip()
+        if mc_id:
+            queryset = queryset.filter(management_company_id=int(mc_id))
+
+        # Поиск по лицевому счёту
+        personal_account = self.request.query_params.get('personal_account', '').strip()
+        if personal_account:
+            queryset = queryset.filter(personal_account_number__icontains=personal_account)
+
         # Если не администратор, показываем только клиентов своего региона
         if user.is_authenticated and not user.is_staff:
             try:
