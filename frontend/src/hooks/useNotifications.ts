@@ -29,8 +29,11 @@ export function useNotifications() {
   }, [token]);
 
   useEffect(() => {
+    console.log('[Notif] Init: token=' + (!!token) + ', Notification=' + ('Notification' in window) + ', perm=' + (window.Notification?.permission || 'N/A'));
+    
     let bannerEl: HTMLDivElement | null = null;
     if (token && 'Notification' in window && Notification.permission === 'default') {
+      console.log('[Notif] Showing permission banner');
       bannerEl = document.createElement('div');
       bannerEl.id = 'notif-banner';
       bannerEl.innerHTML = '<div style="background:#faad14;color:#000;padding:10px 20px;text-align:center;font-size:14px;display:flex;justify-content:center;align-items:center;gap:12px"><span>🔔 Включите уведомления, чтобы получать оповещения о заявках и статусах</span><button id="notif-enable-btn" style="background:#fff;color:#000;border:1px solid #d9bd6a;padding:4px 16px;border-radius:4px;cursor:pointer;font-weight:bold">Включить</button><button id="notif-dismiss-btn" style="background:none;border:none;cursor:pointer;font-size:18px;margin-left:8px">✕</button></div>';

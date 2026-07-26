@@ -266,6 +266,49 @@ class MasterViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': f'Ошибка связи с Traccar: {e}'}, status=500)
 
+    @action(detail=False, methods=['post'])
+    def update_all_gps(self, request):
+        """Запросить координаты ВСЕХ мастеров из Traccar (массовый refresh)."""
+        import requests
+
+        settings = TraccarSettings.objects.first()
+        if not settings or not settings.is_active:
+            return Response({'error': 'Интеграция Traccar не активна'}, status=400)
+
+        devices = TraccarDevice.objects.filter(master__isnull=False)
+        if not devices:
+            return Response({'error': 'Нет привязанных устройств'}, status=404)
+
+        try:
+            resp = requests.get(
+                f"{settings.server_url.rstrip('/')}/api/positions",
+                auth=(settings.username, settings.password),
+                timeout=15
+            )
+        except Exception as e:
+            return Response({'error': f'Ошибка связи с Traccar: {e}'}, status=500)
+
+        updated = 0
+        errors = 0
+        if resp.status_code == 200:
+            positions = {p['deviceId']: p for p in resp.json()}
+            for device in devices:
+                pos = positions.get(device.internal_device_id)
+                if pos:
+                    device.last_latitude = pos.get('latitude')
+                    device.last_longitude = pos.get('longitude')
+                    device.last_speed = round(pos.get('speed', 0) * 1.852, 1) if pos.get('speed') else None
+                    device.last_update = timezone.now()
+                    device.is_online = True
+                    device.save()
+                    updated += 1
+                else:
+                    device.is_online = False
+                    device.save()
+                    errors += 1
+
+        return Response({'ok': True, 'updated': updated, 'errors': errors})
+
 
 class ClientViewSet(viewsets.ModelViewSet):
     queryset = Client.objects.all()

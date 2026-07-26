@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Card, Typography, Statistic, Tag, List, Table, Progress, Spin, Badge, Tooltip } from 'antd';
+import { Row, Col, Card, Typography, Statistic, Tag, List, Table, Progress, Spin, Badge, Tooltip, Button, Space, message } from 'antd';
 import {
   OrderedListOutlined, CheckCircleOutlined, ClockCircleOutlined,
   UsergroupAddOutlined, DollarOutlined, EnvironmentOutlined,
-  DashboardOutlined,
+  DashboardOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
@@ -33,6 +33,7 @@ const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const [mastersData, setMastersData] = useState<MasterStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [gpsLoading, setGpsLoading] = useState(false);
   const [summary, setSummary] = useState({
     totalOrders: 0, newOrders: 0, inProgress: 0, completedToday: 0,
     totalCashOnHand: 0, totalCashToday: 0, totalCashWeek: 0,
@@ -54,6 +55,10 @@ const DashboardPage: React.FC = () => {
         api.get('/orders/?page_size=500'),
         api.get('/payments/?page_size=500'),
       ]);
+
+      const dashboard = dashRes.data;
+      const locations = locRes.data || [];
+      const orders = ordersRes.data.results || ordersRes.data || [];
 
       const dashboard = dashRes.data;
       const locations = locRes.data || [];
@@ -119,6 +124,20 @@ const DashboardPage: React.FC = () => {
     }
   };
 
+  const refreshGps = async () => {
+    setGpsLoading(true);
+    try {
+      const res = await api.post('/masters/update_all_gps/');
+      message.success(`Обновлено: ${res.data.updated} координат`);
+      // Обновляем данные на дашборде
+      setTimeout(fetchDashboard, 1500);
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка обновления GPS');
+    } finally {
+      setGpsLoading(false);
+    }
+  };
+
   if (loading) return <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>;
 
   const shiftMasters = mastersData.filter(m => m.is_on_shift);
@@ -141,7 +160,19 @@ const DashboardPage: React.FC = () => {
 
       <Row gutter={12} style={{ marginBottom: 16 }}>
         <Col span={14}>
-          <Card title={<span><EnvironmentOutlined /> Карта мастеров и монтажников</span>} extra={<Badge count={summary.mastersOnShift} style={{ backgroundColor: '#52c41a' }}><Text style={{ marginRight: 8 }}>на смене</Text></Badge>} bodyStyle={{ padding: 0 }}>
+          <Card title={<span><EnvironmentOutlined /> Карта мастеров и монтажников</span>}
+            extra={
+              <Space>
+                <Button size="small" icon={<ReloadOutlined />} loading={gpsLoading}
+                  onClick={refreshGps} title="Запросить координаты с Traccar">
+                  Обновить GPS
+                </Button>
+                <Badge count={summary.mastersOnShift} style={{ backgroundColor: '#52c41a' }}>
+                  <Text style={{ marginRight: 8 }}>на смене</Text>
+                </Badge>
+              </Space>
+            }
+            bodyStyle={{ padding: 0 }}>
             <MasterMapMulti masters={mastersData.filter(m => m.lat != null && m.lon != null)} height="400px" />
           </Card>
         </Col>
