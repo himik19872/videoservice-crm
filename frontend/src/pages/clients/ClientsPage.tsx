@@ -170,13 +170,16 @@ const ClientsPage: React.FC = () => {
   };
 
   // При выборе дома — подгружаем квартиры
-  const handleHouseSelect = (value: string, option: any) => {
+  const handleHouseSelect = (value: string) => {
     setSelectedHouse(value);
-    setSelectedBuildingId(option.buildingId || null);
+    // Находим buildingId в houseOptions (Select не передаёт наш option)
+    const found = houseOptions.find(o => o.value === value);
+    const bid = found?.buildingId || null;
+    setSelectedBuildingId(bid);
     setSelectedFlat('');
     setFlatOptions([]);
 
-    if (option.buildingId) {
+    if (bid) {
       api.get('/clients/flat_autocomplete/', { params: { building_id: option.buildingId } })
         .then(r => {
           const opts = (r.data || []).map((f: any) => ({
@@ -395,10 +398,10 @@ const ClientsPage: React.FC = () => {
             style={{ width: '100%' }}
             value={selectedHouse || undefined}
             placeholder={selectedStreet ? (houseSearching ? 'Загрузка...' : '🏡 Выберите дом') : 'Сначала улицу'}
-            disabled={!selectedStreet}
+            disabled={!selectedStreet || houseSearching}
             loading={houseSearching}
             filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
-            onSelect={(v, opt: any) => handleHouseSelect(v, opt)}
+            onSelect={handleHouseSelect}
             onClear={() => { setSelectedHouse(''); setSelectedBuildingId(null); setSelectedFlat(''); setFlatOptions([]); if (selectedStreet) doSearch(selectedStreet, '', ''); }}
             allowClear
             options={houseOptions}

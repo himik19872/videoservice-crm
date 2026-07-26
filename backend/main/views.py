@@ -406,7 +406,7 @@ class ClientViewSet(viewsets.ModelViewSet):
 
         buildings = Building.objects.filter(
             street_name__icontains=street
-        ).distinct('house_number', 'building_number')[:50]
+        ).order_by('house_number', 'building_number').distinct('house_number', 'building_number')[:50]
 
         result, seen = [], set()
         for b in buildings:
