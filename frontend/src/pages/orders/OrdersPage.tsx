@@ -140,7 +140,7 @@ const OrdersPage: React.FC = () => {
         order.client_info?.full_name?.toLowerCase().includes(searchText.toLowerCase())
       );
       const matchesStatus = statusFilter ? order.status === statusFilter : true;
-      const matchesMaster = masterFilter ? order.master === masterFilter : true;
+      const matchesMaster = masterFilter ? order.master?.id === masterFilter : true;
       const matchesDate = (!dateFrom || dayjs(order.created_at).isAfter(dateFrom)) &&
                           (!dateTo || dayjs(order.created_at).isBefore(dateTo + 'T23:59:59'));
       return matchesSearch && matchesStatus && matchesMaster && matchesDate;
