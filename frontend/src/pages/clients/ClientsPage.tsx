@@ -390,23 +390,20 @@ const ClientsPage: React.FC = () => {
           </AutoComplete>
         </Col>
         <Col xs={12} md={3}>
-          <AutoComplete
+          <Select
+            showSearch
             style={{ width: '100%' }}
-            value={selectedHouse}
-            options={houseOptions.filter(o => !selectedHouse || o.value.toLowerCase().includes(selectedHouse.toLowerCase()))}
+            value={selectedHouse || undefined}
+            placeholder={selectedStreet ? (houseSearching ? 'Загрузка...' : '🏡 Выберите дом') : 'Сначала улицу'}
             disabled={!selectedStreet}
-            onSearch={handleHouseSearch}
-            onSelect={handleHouseSelect}
-            allowClear
+            loading={houseSearching}
+            filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+            onSelect={(v, opt: any) => handleHouseSelect(v, opt)}
             onClear={() => { setSelectedHouse(''); setSelectedBuildingId(null); setSelectedFlat(''); setFlatOptions([]); if (selectedStreet) doSearch(selectedStreet, '', ''); }}
-          >
-            <Input
-              placeholder={selectedStreet ? (houseSearching ? 'Загрузка...' : '🏡 Дом...') : 'Сначала улицу'}
-              disabled={!selectedStreet}
-              onPressEnter={handleHouseEnter}
-              allowClear
-            />
-          </AutoComplete>
+            allowClear
+            options={houseOptions}
+            notFoundContent={houseSearching ? 'Загрузка...' : 'Нет домов'}
+          />
         </Col>
         <Col xs={12} md={3}>
           <AutoComplete
