@@ -303,6 +303,11 @@ class ClientViewSet(viewsets.ModelViewSet):
         if personal_account:
             queryset = queryset.filter(personal_account_number__icontains=personal_account)
 
+        # Фильтр по конкретному дому (building_id) — точный поиск, не текстовый
+        building_id = self.request.query_params.get('building_id', '').strip()
+        if building_id:
+            queryset = queryset.filter(building_id=int(building_id))
+
         # Если не администратор, показываем только клиентов своего региона
         if user.is_authenticated and not user.is_staff:
             try:

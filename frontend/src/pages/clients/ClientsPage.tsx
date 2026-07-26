@@ -55,7 +55,11 @@ const ClientsPage: React.FC = () => {
 
   const buildParams = (pg: number, size: number) => {
     const params: any = { page: pg, page_size: size };
-    if (searchText) params.search = searchText;
+    if (selectedBuildingId) {
+      params.building_id = selectedBuildingId;
+    } else if (searchText) {
+      params.search = searchText;
+    }
     if (ordering) params.ordering = ordering;
     if (filterSource) params.source = filterSource;
     if (filterRegionId) params.region_id = filterRegionId;
@@ -201,13 +205,17 @@ const ClientsPage: React.FC = () => {
     setSearchOptions([]);
     setHouseOptions([]);
     setFlatOptions([]);
+    
+    // Формируем текст для отображения в поле поиска
     let q = street;
     if (house) q += `, ${house}`;
     if (flat) q += `, кв. ${flat}`;
     setSearchText(q);
+
     setLoading(true);
     const params = buildParams(1, pageSize);
-    params.search = q;
+    // Если выбран дом — ищем через building_id (точный поиск), не через текст
+    // Текстовый поиск ищет по всем корпусам, что даёт ложные совпадения
     api.get('/clients/', { params })
       .then(r => { setClients(r.data.results || r.data); setTotal(r.data.count || 0); })
       .catch(() => message.error('Ошибка поиска'))
