@@ -420,6 +420,35 @@ class ClientViewSet(viewsets.ModelViewSet):
                 })
         return Response(result)
 
+    @action(detail=False, methods=['get'])
+    def flat_autocomplete(self, request):
+        """Квартиры в выбранном доме.
+        ?building_id=123 — вернёт все квартиры клиентов в этом доме."""
+        building_id = request.query_params.get('building_id', '').strip()
+        if not building_id:
+            return Response([])
+
+        try:
+            building_id = int(building_id)
+        except ValueError:
+            return Response([])
+
+        # Ищем квартиры клиентов в этом доме
+        clients = Client.objects.filter(
+            building_id=building_id
+        ).exclude(
+            Q(apartment='') | Q(apartment__isnull=True)
+        ).order_by('apartment').distinct('apartment')[:50]
+
+        result = []
+        for c in clients:
+            result.append({
+                'id': c.id,
+                'label': c.apartment,
+                'sub': c.name or '',
+            })
+        return Response(result)
+
 
     @action(detail=True, methods=['get'])
     def erc_payments(self, request, pk=None):
