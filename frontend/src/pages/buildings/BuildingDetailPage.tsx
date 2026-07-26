@@ -349,6 +349,7 @@ const BuildingDetailPage: React.FC = () => {
               rowKey="id"
               size="small"
               pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'], showTotal: (t: number) => `Всего: ${t}` }}
+              rowKey="number"
               columns={[
                 { title: 'Кв.', dataIndex: 'number', key: 'num', width: 80 },
                 { title: 'Жителей', dataIndex: 'residents_count', key: 'rc', width: 100,
@@ -364,11 +365,17 @@ const BuildingDetailPage: React.FC = () => {
                 },
                 {
                   title: '', key: 'act', width: 80,
-                  render: (_: any, r: any) => (
-                    <Link to={`/apartments/${r.id}`}>
-                      <Button size="small" icon={<ApartmentOutlined />}>Открыть</Button>
-                    </Link>
-                  ),
+                  render: (_: any, r: any) => {
+                    const firstResident = r.residents?.[0];
+                    if (firstResident) {
+                      return (
+                        <Link to={`/clients/${firstResident.id}`}>
+                          <Button size="small" icon={<ApartmentOutlined />}>Открыть</Button>
+                        </Link>
+                      );
+                    }
+                    return <Button size="small" disabled>—</Button>;
+                  },
                 },
               ]}
             />
