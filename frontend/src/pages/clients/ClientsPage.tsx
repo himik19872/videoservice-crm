@@ -346,7 +346,7 @@ const ClientsPage: React.FC = () => {
 
       {/* Фильтры */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={24} md={4}>
+        <Col xs={24} md={5}>
           <AutoComplete
             style={{ width: '100%' }}
             value={searchText}
@@ -382,7 +382,7 @@ const ClientsPage: React.FC = () => {
             />
           </AutoComplete>
         </Col>
-        <Col xs={12} md={2}>
+        <Col xs={12} md={3}>
           <AutoComplete
             style={{ width: '100%' }}
             value={selectedFlat}
@@ -394,14 +394,14 @@ const ClientsPage: React.FC = () => {
             allowClear
           >
             <Input
-              placeholder={selectedHouse ? '🚪 Кв...' : 'Сначала дом'}
+              placeholder={selectedHouse ? '🚪 Квартира...' : 'Сначала дом'}
               disabled={!selectedHouse}
               onPressEnter={() => { if (selectedFlat && selectedStreet && selectedHouse) doSearch(selectedStreet, selectedHouse, selectedFlat); }}
               allowClear
             />
           </AutoComplete>
         </Col>
-        <Col xs={12} md={5}>
+        <Col xs={12} md={4}>
           <Select
             style={{ width: '100%' }}
             placeholder="🏛️ Район"
@@ -413,7 +413,7 @@ const ClientsPage: React.FC = () => {
             options={regions.map((r: any) => ({ value: String(r.id), label: r.name }))}
           />
         </Col>
-        <Col xs={12} md={5}>
+        <Col xs={12} md={4}>
           <Select
             style={{ width: '100%' }}
             placeholder="🏢 УК / ТСЖ"
@@ -425,7 +425,7 @@ const ClientsPage: React.FC = () => {
             options={managementCompanies.map((mc: any) => ({ value: String(mc.id), label: mc.short_name || mc.name }))}
           />
         </Col>
-        <Col xs={12} md={4}>
+        <Col xs={12} md={3}>
           <Input
             placeholder="🔢 Лицевой счёт"
             value={filterPersonalAccount}
