@@ -193,6 +193,28 @@ const ClientsPage: React.FC = () => {
     }
   };
 
+  // При вводе дома — ищем точное совпадение в опциях для buildingId
+  const handleHouseSearch = (v: string) => {
+    setSelectedHouse(v);
+    const found = v ? houseOptions.find(o => o.value.toLowerCase() === v.toLowerCase()) : null;
+    setSelectedBuildingId(found?.buildingId || null);
+  };
+
+  const handleHouseEnter = () => {
+    const house = selectedHouse.trim();
+    if (!house || !selectedStreet) return;
+    if (selectedBuildingId) {
+      doSearch(selectedStreet, selectedHouse, selectedFlat);
+    } else {
+      const partial = houseOptions.filter(o => o.value.toLowerCase().includes(house.toLowerCase()));
+      if (partial.length > 0) {
+        message.info(`Уточните дом: ${partial.map(o => o.value).join(', ')}`);
+      } else {
+        message.warning('Выберите дом из выпадающего списка');
+      }
+    }
+  };
+
   // При выборе квартиры — ищем
   const handleFlatSelect = (value: string) => {
     setSelectedFlat(value);
@@ -366,21 +388,23 @@ const ClientsPage: React.FC = () => {
           </AutoComplete>
         </Col>
         <Col xs={12} md={3}>
-          <Select
+          <AutoComplete
             style={{ width: '100%' }}
-            value={selectedHouse || undefined}
-            placeholder={selectedStreet ? (houseSearching ? 'Загрузка...' : '🏡 Дом...') : 'Сначала улицу'}
+            value={selectedHouse}
+            options={houseOptions}
             disabled={!selectedStreet}
-            showSearch
-            loading={houseSearching}
-            filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+            onSearch={handleHouseSearch}
             onSelect={handleHouseSelect}
-            onChange={(v) => { if (!v) { setSelectedHouse(''); setSelectedBuildingId(null); setSelectedFlat(''); setFlatOptions([]); } }}
             allowClear
             onClear={() => { setSelectedHouse(''); setSelectedBuildingId(null); setSelectedFlat(''); setFlatOptions([]); if (selectedStreet) doSearch(selectedStreet, '', ''); }}
-            options={houseOptions}
-            notFoundContent={houseSearching ? 'Загрузка...' : 'Нет домов'}
-          />
+          >
+            <Input
+              placeholder={selectedStreet ? (houseSearching ? 'Загрузка...' : '🏡 Дом...') : 'Сначала улицу'}
+              disabled={!selectedStreet}
+              onPressEnter={handleHouseEnter}
+              allowClear
+            />
+          </AutoComplete>
         </Col>
         <Col xs={12} md={3}>
           <AutoComplete
