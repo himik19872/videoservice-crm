@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout, theme } from 'antd';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { useNotifications } from './hooks/useNotifications';
 import MasterLayout from './layouts/MasterLayout';
 import AdminLayout from './layouts/AdminLayout';
 import DispatcherLayout from './layouts/DispatcherLayout';
@@ -69,6 +70,7 @@ const { Content } = Layout;
 
 function AppContent() {
   const { user, isAuthenticated } = useAuth();
+  useNotifications();  // WebSocket + браузерные уведомления
 
   if (!isAuthenticated) {
     return <LoginPage />;

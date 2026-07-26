@@ -686,6 +686,59 @@ class OrderViewSet(viewsets.ModelViewSet):
                 master_lon=master_lon,
             )
 
+            # === Уведомления о смене статуса ===
+            status_labels = {
+                'assigned': '👨‍🔧 Назначена',
+                'accepted': '✅ Принята',
+                'in_progress': '🔧 В работе',
+                'paused': '⏸️ На паузе',
+                'need_help': '🆘 Требуется помощь',
+                'completed': '✔️ Выполнена',
+                'confirmed': '🎯 Подтверждена',
+                'cancelled': '❌ Отменена',
+            }
+            status_label = status_labels.get(order.status, order.status)
+            notification_title = f'Заявка #{order.number}: {status_label}'
+            notification_body = f'{order.address or order.full_address}'
+            if notes:
+                notification_body += f' — {notes[:80]}'
+
+            # Уведомляем всех, кроме инициатора
+            from django.contrib.auth.models import User
+            staff_roles = ['admin', 'dispatcher', 'chief_engineer', 'tech_director',
+                          'executive_director', 'general_director', 'supervisor',
+                          'secretary', 'clerk']
+            staff_users = User.objects.filter(
+                profile__role__in=staff_roles
+            ).exclude(id=request.user.id)
+
+            for u in staff_users:
+                try:
+                    send_push_notification(
+                        u.id, notification_title, notification_body,
+                        data={
+                            'type': 'order_status',
+                            'order_id': order.id,
+                            'order_number': order.number,
+                            'status': order.status,
+                            'important': order.status in ('need_help',),
+                        }
+                    )
+                except Exception:
+                    pass
+
+            # Если назначен мастер — уведомляем мастера отдельно
+            if order.status == 'assigned' and order.master_id:
+                try:
+                    send_push_notification(
+                        order.master.user_id,
+                        f'🔔 Вам назначена заявка #{order.number}',
+                        notification_body,
+                        data={'type': 'order_assigned', 'order_id': order.id, 'order_number': order.number}
+                    )
+                except Exception:
+                    pass
+
             now = timezone.now()
             status_time_map = {
                 'assigned': 'assigned_at',
