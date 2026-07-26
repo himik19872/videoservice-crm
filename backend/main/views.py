@@ -1279,10 +1279,6 @@ class OrderViewSet(viewsets.ModelViewSet):
         order = self.get_object()
         if not order.master:
             return Response({'error': 'У заявки нет назначенного мастера'}, status=400)
-        try:
-            device = order.master.traccar_device
-        except Exception:
-            return Response({'error': 'У мастера не привязан GPS-трекер'}, status=400)
 
         # Собираем точки: координаты мастера на каждый момент истории
         history = OrderHistory.objects.filter(order=order).order_by('changed_at')
@@ -1295,16 +1291,36 @@ class OrderViewSet(viewsets.ModelViewSet):
                 'lon': h.master_lon,
             })
 
-        # Текущая позиция мастера
-        current = {
-            'lat': device.last_latitude,
-            'lon': device.last_longitude,
-            'speed': device.last_speed,
-            'is_online': device.is_online,
-            'last_update': device.last_update.isoformat() if device.last_update else None,
-        }
+        # Текущая позиция: Traccar (если есть), иначе последняя точка из истории
+        current = None
+        source = None
+        try:
+            device = order.master.traccar_device
+            if device and device.last_latitude is not None:
+                current = {
+                    'lat': device.last_latitude,
+                    'lon': device.last_longitude,
+                    'speed': device.last_speed,
+                    'is_online': device.is_online,
+                    'last_update': device.last_update.isoformat() if device.last_update else None,
+                }
+                source = 'traccar'
+        except Exception:
+            pass
 
-        return Response({'history': result, 'current': current})
+        if current is None:
+            last_hist = history.filter(master_lat__isnull=False, master_lon__isnull=False).last()
+            if last_hist:
+                current = {
+                    'lat': last_hist.master_lat,
+                    'lon': last_hist.master_lon,
+                    'speed': None,
+                    'is_online': (timezone.now() - last_hist.changed_at).total_seconds() < 3600,
+                    'last_update': last_hist.changed_at.isoformat() if last_hist.changed_at else None,
+                }
+                source = 'phone'
+
+        return Response({'history': result, 'current': current, 'source': source})
 
     @action(detail=True, methods=['get', 'post'])
     def comments(self, request, pk=None):
