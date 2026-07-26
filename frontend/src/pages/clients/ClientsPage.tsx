@@ -193,22 +193,26 @@ const ClientsPage: React.FC = () => {
     }
   };
 
-  // При вводе дома — ищем точное совпадение в опциях для buildingId
+  // При вводе дома — просто обновляем текст, buildingId не трогаем
   const handleHouseSearch = (v: string) => {
     setSelectedHouse(v);
-    const found = v ? houseOptions.find(o => o.value.toLowerCase() === v.toLowerCase()) : null;
-    setSelectedBuildingId(found?.buildingId || null);
+    // buildingId ставится только при выборе из списка (handleHouseSelect)
+    // или при точном совпадении после ввода полного названия (handleHouseEnter)
   };
 
   const handleHouseEnter = () => {
     const house = selectedHouse.trim();
     if (!house || !selectedStreet) return;
-    if (selectedBuildingId) {
-      doSearch(selectedStreet, selectedHouse, selectedFlat);
+    // Ищем точное совпадение в опциях (только при нажатии Enter)
+    const found = houseOptions.find(o => o.value.toLowerCase() === house.toLowerCase());
+    if (found?.buildingId) {
+      setSelectedBuildingId(found.buildingId);
+      doSearch(selectedStreet, house, selectedFlat);
     } else {
+      // Показываем доступные варианты
       const partial = houseOptions.filter(o => o.value.toLowerCase().includes(house.toLowerCase()));
       if (partial.length > 0) {
-        message.info(`Уточните дом: ${partial.map(o => o.value).join(', ')}`);
+        message.info(`Уточните: ${partial.map(o => o.value).join(' | ')}`);
       } else {
         message.warning('Выберите дом из выпадающего списка');
       }
