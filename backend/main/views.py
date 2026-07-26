@@ -1557,9 +1557,65 @@ class BuildingViewSet(viewsets.ModelViewSet):
                 'number': f,
                 'residents_count': residents.count(),
                 'active_residents_count': residents.filter(is_active=True).count(),
-                'residents': list(residents.values('id', 'name', 'phone')[:10]),
+                'residents': list(residents.values('id', 'name', 'phone', 'is_active')[:10]),
             })
         return Response(result)
+
+    @action(detail=True, methods=['post'])
+    def add_resident(self, request, pk=None):
+        """Добавить жителя в квартиру дома.
+        Поля: apartment (номер), name, phone, entrance_number."""
+        building = self.get_object()
+        apartment = request.data.get('apartment', '').strip()
+        name = request.data.get('name', '').strip()
+        phone = request.data.get('phone', '').strip()
+        entrance_number = request.data.get('entrance_number', '').strip()
+
+        if not apartment:
+            return Response({'error': 'Укажите номер квартиры'}, status=400)
+        if not name and not phone:
+            return Response({'error': 'Укажите ФИО или телефон'}, status=400)
+
+        # Формируем адрес
+        street_type = building.get_street_type_display().lower()
+        addr_parts = [f'{street_type} {building.street_name}', f'д. {building.house_number}']
+        if building.building_number:
+            addr_parts.append(f'корп. {building.building_number}')
+        addr_parts.append(f'кв. {apartment}')
+        address = ', '.join(addr_parts)
+
+        entrance_obj = None
+        if entrance_number:
+            try:
+                entrance_obj = BuildingEntrance.objects.get(
+                    building=building, number=int(entrance_number)
+                )
+            except (BuildingEntrance.DoesNotExist, ValueError):
+                pass
+
+        client = Client.objects.create(
+            name=name or f'Житель кв. {apartment}',
+            phone=phone,
+            address=address,
+            building=building,
+            apartment=apartment,
+            entrance=entrance_obj,
+            region=building.region,
+            district=building.district,
+            management_company=building.management_company_fk,
+            source='manual',
+        )
+
+        # Возвращаем обновлённый список жителей квартиры
+        residents = Client.objects.filter(building=building, apartment=apartment)
+        return Response({
+            'ok': True,
+            'client_id': client.id,
+            'apartment': apartment,
+            'residents_count': residents.count(),
+            'active_residents_count': residents.filter(is_active=True).count(),
+            'residents': list(residents.values('id', 'name', 'phone', 'is_active')),
+        })
 
     @action(detail=True, methods=['post'])
     def apply_to_residents(self, request, pk=None):

@@ -46,6 +46,11 @@ const BuildingDetailPage: React.FC = () => {
   const [editingEntrance, setEditingEntrance] = useState<any>(null);
   const [entForm] = Form.useForm();
 
+  // Модалка добавления жителя в квартиру
+  const [residentModalOpen, setResidentModalOpen] = useState(false);
+  const [residentForm] = Form.useForm();
+  const [addingResident, setAddingResident] = useState(false);
+
   // 2GIS ссылка
   const gisUrl = building
     ? `https://2gis.ru/spb/search/${encodeURIComponent(`${building.street_name}, ${building.house_number}${building.building_number ? ' корпус ' + building.building_number : ''}, ${building.city}`)}`
@@ -146,6 +151,25 @@ const BuildingDetailPage: React.FC = () => {
       }
     } catch { message.error('Ошибка Dadata'); }
     finally { setDadataLoading(false); }
+  };
+
+  // Добавление жителя в квартиру
+  const handleAddResident = async (values: any) => {
+    setAddingResident(true);
+    try {
+      const res = await api.post(`/buildings/${id}/add_resident/`, {
+        apartment: values.apartment,
+        name: values.name || '',
+        phone: values.phone || '',
+        entrance_number: values.entrance_number || '',
+      });
+      message.success(`Добавлен житель в кв. ${res.data.apartment}`);
+      setResidentModalOpen(false);
+      residentForm.resetFields();
+      fetchAll();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка добавления');
+    } finally { setAddingResident(false); }
   };
 
   // Смена УК
@@ -340,48 +364,96 @@ const BuildingDetailPage: React.FC = () => {
       </Card>
 
       {/* Квартиры */}
-      {apartmentsList && apartmentsList.length > 0 && (
-        <>
-          <Divider />
-          <Card title={`🚪 Квартиры (${apartmentsList.length})`}>
-            <Table
-              dataSource={apartmentsList}
-              rowKey="id"
-              size="small"
-              pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'], showTotal: (t: number) => `Всего: ${t}` }}
-              rowKey="number"
-              columns={[
-                { title: 'Кв.', dataIndex: 'number', key: 'num', width: 80 },
-                { title: 'Жителей', dataIndex: 'residents_count', key: 'rc', width: 100,
-                  render: (v: number, r: any) => (
-                    <Space>
-                      <Text>{v}</Text>
-                      {r.active_residents_count < v && <Tag color="orange" style={{ fontSize: 10 }}>—{v - r.active_residents_count} неакт.</Tag>}
-                    </Space>
-                  ),
-                },
-                { title: 'Активных', dataIndex: 'active_residents_count', key: 'ac', width: 100,
-                  render: (v: number) => <Tag color={v > 0 ? 'green' : 'default'}>{v}</Tag>,
-                },
-                {
-                  title: '', key: 'act', width: 80,
-                  render: (_: any, r: any) => {
-                    const firstResident = r.residents?.[0];
-                    if (firstResident) {
-                      return (
-                        <Link to={`/clients/${firstResident.id}`}>
-                          <Button size="small" icon={<ApartmentOutlined />}>Открыть</Button>
+      <Divider />
+      <Card
+        title={`🚪 Квартиры (${apartmentsList.length})`}
+        extra={
+          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { residentForm.resetFields(); setResidentModalOpen(true); }}>
+            Добавить квартиру
+          </Button>
+        }
+      >
+        {apartmentsList.length === 0 ? (
+          <Text type="secondary">Нет жителей. Нажмите «Добавить квартиру» чтобы добавить первого жителя.</Text>
+        ) : (
+          <Table
+            dataSource={apartmentsList}
+            rowKey="number"
+            size="small"
+            pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'], showTotal: (t: number) => `Всего: ${t}` }}
+            columns={[
+              { title: 'Кв.', dataIndex: 'number', key: 'num', width: 80 },
+              { title: 'Жителей', dataIndex: 'residents_count', key: 'rc', width: 100,
+                render: (v: number, r: any) => (
+                  <Space>
+                    <Text>{v}</Text>
+                    {r.active_residents_count < v && <Tag color="orange" style={{ fontSize: 10 }}>—{v - r.active_residents_count} неакт.</Tag>}
+                  </Space>
+                ),
+              },
+              {
+                title: 'Жители', key: 'res', width: 300,
+                render: (_: any, r: any) => (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {(r.residents || []).map((res: any) => (
+                      <Tag key={res.id} color={res.is_active !== false ? 'blue' : 'default'}>
+                        <Link to={`/clients/${res.id}`} style={{ color: 'inherit' }}>
+                          {res.name || res.phone}
                         </Link>
-                      );
-                    }
-                    return <Button size="small" disabled>—</Button>;
-                  },
+                      </Tag>
+                    ))}
+                  </div>
+                ),
+              },
+              {
+                title: '', key: 'act', width: 80,
+                render: (_: any, r: any) => {
+                  const firstResident = r.residents?.[0];
+                  if (firstResident) {
+                    return (
+                      <Link to={`/clients/${firstResident.id}`}>
+                        <Button size="small" icon={<ApartmentOutlined />}>Открыть</Button>
+                      </Link>
+                    );
+                  }
+                  return <Button size="small" disabled>—</Button>;
                 },
-              ]}
-            />
-          </Card>
-        </>
-      )}
+              },
+            ]}
+          />
+        )}
+      </Card>
+
+      {/* Модалка: добавить жителя */}
+      <Modal
+        title="Добавить жителя в квартиру"
+        open={residentModalOpen}
+        onCancel={() => setResidentModalOpen(false)}
+        footer={null}
+        width={450}
+      >
+        <Form form={residentForm} layout="vertical" onFinish={handleAddResident}>
+          <Form.Item name="apartment" label="Номер квартиры" rules={[{ required: true, message: 'Введите номер' }]}>
+            <Input placeholder="например: 544" />
+          </Form.Item>
+          <Form.Item name="name" label="ФИО">
+            <Input placeholder="Иванов Иван Иванович" />
+          </Form.Item>
+          <Form.Item name="phone" label="Телефон">
+            <Input placeholder="+7 (999) 123-45-67" />
+          </Form.Item>
+          <Form.Item name="entrance_number" label="Номер подъезда">
+            <Select placeholder="Выберите подъезд" allowClear>
+              {(building?.entrances || []).map((e: any) => (
+                <Select.Option key={e.id} value={e.number}>Подъезд {e.number}</Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={addingResident} block>
+            Добавить
+          </Button>
+        </Form>
+      </Modal>
 
       {/* История заявок */}
       <Divider />
