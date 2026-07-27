@@ -13,7 +13,7 @@ https://github.com/himik19872/videoservice-crm
 
 
 
-https://gitverse.ru/himik19872/videoservice-crm
+
 
 
 ## ✅ Что уже работает
