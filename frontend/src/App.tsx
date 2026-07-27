@@ -157,6 +157,7 @@ function AppContent() {
           <Route path="/equipment/:id" element={<EquipmentDetailPage />} />
           <Route path="/masters" element={<MastersPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/beward-devices" element={<BewardDevicesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -184,6 +185,7 @@ function AppContent() {
           <Route path="/estimates/:id" element={<EstimateDetailPage />} />
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
           {user?.role === 'accountant' && <Route path="/settings/admin" element={<AdminSettingsPage />} />}
+          <Route path="/beward-devices" element={<BewardDevicesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AdminLayout>

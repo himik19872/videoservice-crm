@@ -4279,6 +4279,23 @@ class BewardDeviceViewSet(viewsets.ModelViewSet):
     search_fields = ['ip_address', 'address', 'region', 'notes']
     pagination_class = None  # все записи сразу (9555 шт.), фильтрация на фронте
 
+    def get_queryset(self):
+        return BewardDevice.objects.select_related('building', 'entrance').all()
+
+    def check_permissions(self, request):
+        # проверяем IsAuthenticated
+        super().check_permissions(request)
+        # чтение — всем авторизованным
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return
+        # изменение — только уполномоченным ролям
+        from rest_framework.exceptions import PermissionDenied
+        allowed = ('admin', 'dispatcher', 'engineer', 'chief_engineer',
+                   'tech_director', 'executive_director', 'general_director', 'supervisor')
+        role = getattr(request.user.profile, 'role', None)
+        if role not in allowed:
+            raise PermissionDenied('Нет прав на изменение справочника Beward')
+
     @action(detail=False, methods=['get'])
     def export(self, request):
         """Экспорт объединённого справочника Beward + подъезды с IP в Excel."""
