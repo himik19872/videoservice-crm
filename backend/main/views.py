@@ -12,7 +12,6 @@ from django.shortcuts import get_object_or_404
 from django.http import HttpResponse
 from datetime import timedelta
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, UserProfile, WorkShift, OrderMedia, PushToken
-from .models import AuditLog
 from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial, Message
@@ -26,7 +25,7 @@ from .models import OutgoingInvoice, OutgoingInvoiceItem
 from .models import CallLog
 from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, AsteriskIvrOption
 from .models import AsteriskVoicemail, AsteriskCallRecording
-from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem, Apartment
+from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem
 from .models import MCContact, MCPayment, MCComment
 from django.db.models import Q
 from .serializers import (
@@ -53,8 +52,6 @@ from .serializers import AsteriskVoicemailSerializer, AsteriskCallRecordingSeria
 from .serializers import BuildingEntranceSerializer, ManagementCompanySerializer, TariffSerializer, PaymentRecordSerializer, BewardDeviceSerializer
 from .serializers import BuildingSystemSerializer
 from .serializers import MCContactSerializer, MCPaymentSerializer, MCCommentSerializer
-from .serializers import ApartmentSerializer, ApartmentDetailSerializer
-from .serializers import AuditLogSerializer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -272,7 +269,7 @@ class ClientViewSet(viewsets.ModelViewSet):
     serializer_class = ClientSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['region', 'is_legal', 'legal_type']
-    search_fields = ['name', 'phone', 'email', 'address', 'inn', 'apartment', 'personal_account_number']
+    search_fields = ['name', 'phone', 'email', 'address', 'inn']
 
     def get_queryset(self):
         queryset = Client.objects.all()
@@ -287,31 +284,6 @@ class ClientViewSet(viewsets.ModelViewSet):
         no_building = self.request.query_params.get('no_building', '').strip()
         if no_building == 'true':
             queryset = queryset.filter(building__isnull=True)
-
-        # Фильтр по району
-        region_id = self.request.query_params.get('region_id', '').strip()
-        if region_id:
-            queryset = queryset.filter(region_id=int(region_id))
-
-        # Фильтр по управляющей компании
-        mc_id = self.request.query_params.get('management_company_id', '').strip()
-        if mc_id:
-            queryset = queryset.filter(management_company_id=int(mc_id))
-
-        # Поиск по лицевому счёту
-        personal_account = self.request.query_params.get('personal_account', '').strip()
-        if personal_account:
-            queryset = queryset.filter(personal_account_number__icontains=personal_account)
-
-        # Фильтр по конкретному дому (building_id) — точный поиск, не текстовый
-        building_id = self.request.query_params.get('building_id', '').strip()
-        if building_id:
-            queryset = queryset.filter(building_id=int(building_id))
-
-        # Фильтр по номеру квартиры (точный)
-        apartment = self.request.query_params.get('apartment', '').strip()
-        if apartment:
-            queryset = queryset.filter(apartment=apartment)
 
         # Если не администратор, показываем только клиентов своего региона
         if user.is_authenticated and not user.is_staff:
@@ -401,82 +373,7 @@ class ClientViewSet(viewsets.ModelViewSet):
                 result.append({'id': b.id, 'label': b.street_name, 'sub': f'{cnt} домов', 'street': b.street_name})
         return Response(result)
 
-    @action(detail=False, methods=['get'])
-    def house_autocomplete(self, request):
-        """Дома на выбранной улице.
-        ?street=Ленина — вернёт все дома на этой улице."""
-        street = request.query_params.get('street', '').strip()
-        if not street or len(street) < 2:
-            return Response([])
 
-        buildings = Building.objects.filter(
-            street_name__icontains=street
-        ).order_by('house_number', 'building_number').distinct('house_number', 'building_number')[:50]
-
-        result, seen = [], set()
-        for b in buildings:
-            key = f'{b.house_number}|{b.building_number or ""}'
-            if key not in seen:
-                seen.add(key)
-                label = f'д. {b.house_number}'
-                if b.building_number:
-                    label += f' корп. {b.building_number}'
-                result.append({
-                    'id': b.id,
-                    'label': label,
-                    'sub': b.street_name,
-                    'house': b.house_number,
-                    'building': b.building_number or '',
-                })
-
-        # Сортируем численно: д. 2, д. 5, д. 10, а не д. 10, д. 2, д. 5
-        def house_sort_key(item):
-            try:
-                return (int(item['house']), item['building'])
-            except ValueError:
-                return (0, item['house'])
-        result.sort(key=house_sort_key)
-
-        return Response(result)
-
-    @action(detail=False, methods=['get'])
-    def flat_autocomplete(self, request):
-        """Квартиры в выбранном доме.
-        ?building_id=123 — вернёт все квартиры клиентов в этом доме."""
-        building_id = request.query_params.get('building_id', '').strip()
-        if not building_id:
-            return Response([])
-
-        try:
-            building_id = int(building_id)
-        except ValueError:
-            return Response([])
-
-        # Ищем квартиры клиентов в этом доме
-        flats = Client.objects.filter(
-            building_id=building_id
-        ).exclude(
-            Q(apartment='') | Q(apartment__isnull=True)
-        ).values_list('apartment', flat=True).distinct()
-
-        # Сортируем как числа (544 после 543, а не после 4999)
-        def sort_key(v):
-            try:
-                return (0, int(v))
-            except ValueError:
-                return (1, v.lower(), 0)
-
-        sorted_flats = sorted(set(flats), key=sort_key)
-
-        result = []
-        for f in sorted_flats:
-            c = Client.objects.filter(building_id=building_id, apartment=f).first()
-            result.append({
-                'id': c.id if c else 0,
-                'label': f,
-                'sub': c.name if c else '',
-            })
-        return Response(result)
 
 
     @action(detail=True, methods=['get'])
@@ -685,59 +582,6 @@ class OrderViewSet(viewsets.ModelViewSet):
                 master_lat=master_lat,
                 master_lon=master_lon,
             )
-
-            # === Уведомления о смене статуса ===
-            status_labels = {
-                'assigned': '👨‍🔧 Назначена',
-                'accepted': '✅ Принята',
-                'in_progress': '🔧 В работе',
-                'paused': '⏸️ На паузе',
-                'need_help': '🆘 Требуется помощь',
-                'completed': '✔️ Выполнена',
-                'confirmed': '🎯 Подтверждена',
-                'cancelled': '❌ Отменена',
-            }
-            status_label = status_labels.get(order.status, order.status)
-            notification_title = f'Заявка #{order.number}: {status_label}'
-            notification_body = f'{order.address or order.full_address}'
-            if notes:
-                notification_body += f' — {notes[:80]}'
-
-            # Уведомляем всех, кроме инициатора
-            from django.contrib.auth.models import User
-            staff_roles = ['admin', 'dispatcher', 'chief_engineer', 'tech_director',
-                          'executive_director', 'general_director', 'supervisor',
-                          'secretary', 'clerk']
-            staff_users = User.objects.filter(
-                profile__role__in=staff_roles
-            ).exclude(id=request.user.id)
-
-            for u in staff_users:
-                try:
-                    send_push_notification(
-                        u.id, notification_title, notification_body,
-                        data={
-                            'type': 'order_status',
-                            'order_id': order.id,
-                            'order_number': order.number,
-                            'status': order.status,
-                            'important': order.status in ('need_help',),
-                        }
-                    )
-                except Exception:
-                    pass
-
-            # Если назначен мастер — уведомляем мастера отдельно
-            if order.status == 'assigned' and order.master_id:
-                try:
-                    send_push_notification(
-                        order.master.user_id,
-                        f'🔔 Вам назначена заявка #{order.number}',
-                        notification_body,
-                        data={'type': 'order_assigned', 'order_id': order.id, 'order_number': order.number}
-                    )
-                except Exception:
-                    pass
 
             now = timezone.now()
             status_time_map = {
@@ -1310,6 +1154,102 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(OrderCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
+    # ══════════════════════════════════════════════════════════════
+    # Сметы / КП — привязка к заявке
+    # ══════════════════════════════════════════════════════════════
+
+    @action(detail=True, methods=['post'])
+    def link_estimate(self, request, pk=None):
+        """Привязать существующую смету/КП к заявке."""
+        order = self.get_object()
+        estimate_id = request.data.get('estimate_id')
+        if not estimate_id:
+            return Response({'error': 'Укажите estimate_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            estimate = CommercialEstimate.objects.get(id=estimate_id)
+        except CommercialEstimate.DoesNotExist:
+            return Response({'error': 'Смета не найдена'}, status=status.HTTP_404_NOT_FOUND)
+
+        estimate.order = order
+        estimate.save()
+
+        OrderHistory.objects.create(
+            order=order, changed_by=request.user,
+            old_status=order.status, new_status=order.status,
+            notes=f'📎 Привязана смета №{estimate.number} ({estimate.total} ₽)'
+        )
+
+        return Response({'ok': True, 'estimate_id': estimate.id, 'estimate_number': estimate.number})
+
+    @action(detail=True, methods=['post'])
+    def unlink_estimate(self, request, pk=None):
+        """Отвязать смету от заявки."""
+        order = self.get_object()
+        estimate_id = request.data.get('estimate_id')
+        if not estimate_id:
+            return Response({'error': 'Укажите estimate_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            estimate = CommercialEstimate.objects.get(id=estimate_id, order=order)
+        except CommercialEstimate.DoesNotExist:
+            return Response({'error': 'Смета не найдена или не привязана к этой заявке'}, status=status.HTTP_404_NOT_FOUND)
+
+        estimate.order = None
+        estimate.save()
+
+        OrderHistory.objects.create(
+            order=order, changed_by=request.user,
+            old_status=order.status, new_status=order.status,
+            notes=f'📎 Отвязана смета №{estimate.number}'
+        )
+
+        return Response({'ok': True, 'estimate_id': estimate.id})
+
+    @action(detail=True, methods=['post'])
+    def create_estimate(self, request, pk=None):
+        """Создать новую смету/КП прямо из заявки (с авто-заполнением клиента и адреса)."""
+        order = self.get_object()
+
+        name = request.data.get('name', '').strip()
+        if not name:
+            name = f'КП по заявке №{order.number}'
+
+        legal_entity_id = request.data.get('legal_entity_id')
+        note = request.data.get('note', '')
+
+        # Авто-нумерация
+        last = CommercialEstimate.objects.order_by('-id').first()
+        next_num = (last.id + 1) if last else 1
+        number = f'КП-{timezone.localdate().strftime("%y%m%d")}-{next_num:04d}'
+
+        estimate = CommercialEstimate.objects.create(
+            number=number,
+            name=name,
+            client=order.client,
+            legal_entity_id=legal_entity_id,
+            order=order,
+            status='draft',
+            employee=request.user.get_full_name() or request.user.username,
+            note=note or f'Авто-создано из заявки №{order.number}',
+            created_by=request.user,
+        )
+
+        OrderHistory.objects.create(
+            order=order, changed_by=request.user,
+            old_status=order.status, new_status=order.status,
+            notes=f'📎 Создана смета №{estimate.number}'
+        )
+
+        return Response(CommercialEstimateSerializer(estimate).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'])
+    def estimates_list(self, request, pk=None):
+        """Список привязанных смет (подробный)."""
+        order = self.get_object()
+        estimates = order.estimates.all()
+        return Response(CommercialEstimateSerializer(estimates, many=True).data)
+
 
 class ReportViewSet(viewsets.ModelViewSet):
     queryset = Report.objects.all()
@@ -1480,7 +1420,7 @@ class BuildingViewSet(viewsets.ModelViewSet):
     serializer_class = BuildingSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['region', 'city', 'street_type', 'equipment_type']
-    search_fields = ['street_name', 'house_number', 'building_number', 'city', 'notes', 'management_company', 'management_company_fk__name', 'management_company_fk__short_name']
+    search_fields = ['street_name', 'house_number', 'building_number', 'city', 'notes']
     ordering_fields = ['street_name', 'house_number', 'created_at']
     pagination_class = None  # все 1825 домов сразу
 
@@ -1590,95 +1530,6 @@ class BuildingViewSet(viewsets.ModelViewSet):
                 created += 1
             return Response({'ok': True, 'entrances_created': created})
         return Response({'error': 'Укажите entrances_count и apartments_count'}, status=400)
-
-    @action(detail=True, methods=['get'])
-    def resident_flats(self, request, pk=None):
-        """
-        Квартиры клиентов в этом доме (из поля apartment, не Apartment-модель).
-        Работает для домов с 500+ квартирами.
-        """
-        building = self.get_object()
-        flats = Client.objects.filter(
-            building=building
-        ).exclude(
-            Q(apartment='') | Q(apartment__isnull=True)
-        ).values_list('apartment', flat=True).distinct().order_by('apartment')
-
-        # Интеллектуальная сортировка: 1, 2, 10, а не 1, 10, 2
-        def sort_key(v):
-            try:
-                return (0, int(v), '')
-            except ValueError:
-                return (1, 0, v.lower())
-
-        sorted_flats = sorted(set(flats), key=sort_key)
-
-        result = []
-        for f in sorted_flats:
-            residents = Client.objects.filter(building=building, apartment=f)
-            result.append({
-                'number': f,
-                'residents_count': residents.count(),
-                'active_residents_count': residents.filter(is_active=True).count(),
-                'residents': list(residents.values('id', 'name', 'phone', 'is_active')[:10]),
-            })
-        return Response(result)
-
-    @action(detail=True, methods=['post'])
-    def add_resident(self, request, pk=None):
-        """Добавить жителя в квартиру дома.
-        Поля: apartment (номер), name, phone, entrance_number."""
-        building = self.get_object()
-        apartment = request.data.get('apartment', '').strip()
-        name = request.data.get('name', '').strip()
-        phone = request.data.get('phone', '').strip()
-        entrance_number = request.data.get('entrance_number', '').strip()
-
-        if not apartment:
-            return Response({'error': 'Укажите номер квартиры'}, status=400)
-        if not name and not phone:
-            return Response({'error': 'Укажите ФИО или телефон'}, status=400)
-
-        # Формируем адрес
-        street_type = building.get_street_type_display().lower()
-        addr_parts = [f'{street_type} {building.street_name}', f'д. {building.house_number}']
-        if building.building_number:
-            addr_parts.append(f'корп. {building.building_number}')
-        addr_parts.append(f'кв. {apartment}')
-        address = ', '.join(addr_parts)
-
-        entrance_obj = None
-        if entrance_number:
-            try:
-                entrance_obj = BuildingEntrance.objects.get(
-                    building=building, number=int(entrance_number)
-                )
-            except (BuildingEntrance.DoesNotExist, ValueError):
-                pass
-
-        client = Client.objects.create(
-            name=name or f'Житель кв. {apartment}',
-            phone=phone,
-            address=address,
-            building=building,
-            apartment=apartment,
-            entrance=entrance_obj,
-            region=building.region,
-            district=building.district,
-            management_company=building.management_company_fk,
-            source='manual',
-        )
-
-        # Возвращаем обновлённый список жителей квартиры
-        residents = Client.objects.filter(building=building, apartment=apartment)
-        return Response({
-            'ok': True,
-            'client_id': client.id,
-            'apartment': apartment,
-            'residents_count': residents.count(),
-            'active_residents_count': residents.filter(is_active=True).count(),
-            'residents': list(residents.values('id', 'name', 'phone', 'is_active')),
-        })
 
     @action(detail=True, methods=['post'])
     def apply_to_residents(self, request, pk=None):
@@ -1965,21 +1816,18 @@ class SystemSettingsViewSet(viewsets.ViewSet):
                 return Response({'found': False, 'message': 'Компания не найдена'})
 
             s = suggestions[0]
-            d = s.get('data')
-            if not d or not isinstance(d, dict):
-                return Response({'found': False, 'message': 'Данные компании недоступны (возможно, организация ликвидирована)'})
-
+            d = s.get('data', {})
             return Response({
                 'found': True,
-                'name': (d.get('name') or {}).get('full_with_opf', '') or s.get('value', ''),
-                'short_name': (d.get('name') or {}).get('short_with_opf', ''),
+                'name': d.get('name', {}).get('full_with_opf', '') or s.get('value', ''),
+                'short_name': d.get('name', {}).get('short_with_opf', ''),
                 'inn': d.get('inn', inn),
                 'kpp': d.get('kpp', ''),
                 'ogrn': d.get('ogrn', ''),
-                'legal_address': (d.get('address') or {}).get('unrestricted_value', '') or (d.get('address') or {}).get('value', ''),
-                'director': (d.get('management') or {}).get('name', ''),
-                'director_post': (d.get('management') or {}).get('post', ''),
-                'status': (d.get('state') or {}).get('status', ''),
+                'legal_address': d.get('address', {}).get('unrestricted_value', '') or d.get('address', {}).get('value', ''),
+                'director': d.get('management', {}).get('name', ''),
+                'director_post': d.get('management', {}).get('post', ''),
+                'status': d.get('state', {}).get('status', ''),
             })
         except Exception as e:
             return Response({'error': f'Ошибка запроса к DaData: {str(e)}'}, status=500)
@@ -3774,49 +3622,6 @@ class CallLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['phone', 'client__name']
 
 
-class ApartmentViewSet(viewsets.ReadOnlyModelViewSet):
-    """Квартиры — группировка клиентов по building+номер."""
-    queryset = Apartment.objects.select_related('building', 'entrance').all()
-    serializer_class = ApartmentSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['building']
-    search_fields = ['number', 'building__street_name', 'building__city']
-    pagination_class = None
-
-    def get_serializer_class(self):
-        if self.action == 'retrieve':
-            return ApartmentDetailSerializer
-        return ApartmentSerializer
-
-
-# ══════════════════════════════════════════════════════════════════
-# Аудит действий сотрудников
-# ══════════════════════════════════════════════════════════════════
-
-class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """Журнал действий сотрудников (только чтение)."""
-    queryset = AuditLog.objects.select_related('user').all()
-    serializer_class = AuditLogSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['action', 'model_name', 'user']
-    search_fields = ['object_repr', 'model_name', 'user__username', 'user__first_name', 'user__last_name']
-    ordering_fields = ['created_at', 'action', 'model_name']
-    ordering = ['-created_at']
-
-    def get_queryset(self):
-        user = self.request.user
-        if not user.is_authenticated:
-            return AuditLog.objects.none()
-        # Только админы и директора видят всё
-        try:
-            role = user.userprofile.role
-        except Exception:
-            role = ''
-        if user.is_staff or role in ['admin', 'general_director', 'executive_director', 'technical_director']:
-            return AuditLog.objects.select_related('user').all()
-        return AuditLog.objects.select_related('user').filter(user=user)
-
-
 # ══════════════════════════════════════════════════════════════════
 # ЕРЦ (Единый расчётный центр)
 # ══════════════════════════════════════════════════════════════════
@@ -3906,16 +3711,6 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'short_name', 'inn']
     pagination_class = None  # все 49 компаний сразу
 
-    @action(detail=False, methods=['get'])
-    def lookup_inn(self, request):
-        """Поиск организации по ИНН через DaData Party API."""
-        inn = request.query_params.get('inn', '').strip()
-        if not inn:
-            return Response({'success': False, 'error': 'Укажите ИНН'}, status=400)
-        from .dadata_service import suggest_party_by_inn
-        result = suggest_party_by_inn(inn)
-        return Response(result)
-
     @action(detail=True, methods=['get'])
     def buildings(self, request, pk=None):
         """Список домов, которые обслуживает эта УК (из Building FK)"""
@@ -3961,44 +3756,26 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def generate_clients(self, request, pk=None):
-        """Создать клиентов-квартиры для домов этой УК по подъездам.
-        Если передан building_id — только для одного дома, иначе для всех."""
+        """Создать клиентов-квартиры для дома этой УК по подъездам."""
         company = self.get_object()
         building_id = request.data.get('building_id')
-
-        buildings_qs = company.buildings_list.all()
-        if building_id:
-            buildings_qs = buildings_qs.filter(id=building_id)
-
-        total_created = 0
-        for building in buildings_qs:
-            for entrance in building.entrances.all():
-                if entrance.apartment_from and entrance.apartment_to:
-                    for apt in range(entrance.apartment_from, entrance.apartment_to + 1):
-                        apt_str = str(apt)
-                        # Создаём квартиру
-                        apt_obj, _ = Apartment.objects.get_or_create(
-                            building=building, number=apt_str,
-                            defaults={'entrance': entrance}
-                        )
-                        if not apt_obj.entrance:
-                            apt_obj.entrance = entrance
-                            apt_obj.save(update_fields=['entrance'])
-                        # Создаём клиента
-                        _, c = Client.objects.get_or_create(
-                            building=building, apartment=apt_str,
-                            defaults={
-                                'name': f'Квартира {apt_str}',
-                                'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt_str}',
-                                'management_company': company,
-                                'entrance': entrance,
-                                'apartment_obj': apt_obj,
-                                'source': 'manual', 'erc_enabled': True,
-                            }
-                        )
-                        total_created += 1
-
-        return Response({'ok': True, 'clients_created': total_created})
+        building = get_object_or_404(Building, id=building_id)
+        created = 0
+        for entrance in building.entrances.all():
+            if entrance.apartment_from and entrance.apartment_to:
+                for apt in range(entrance.apartment_from, entrance.apartment_to + 1):
+                    _, c = Client.objects.get_or_create(
+                        building=building, apartment=str(apt),
+                        defaults={
+                            'name': f'Квартира {apt}',
+                            'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt}',
+                            'management_company': company,
+                            'entrance': entrance,
+                            'source': 'manual', 'erc_enabled': True,
+                        }
+                    )
+                    created += 1
+        return Response({'ok': True, 'building_id': building.id, 'clients_created': created})
 
     @action(detail=True, methods=['post'])
     def apply_tariff(self, request, pk=None):
@@ -4170,23 +3947,12 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
 
                 if create_clients and apt_from and apt_to:
                     for apt_num in range(apt_from, apt_to + 1):
-                        apt_str = str(apt_num)
-                        # Создаём квартиру (объект)
-                        apt_obj, _ = Apartment.objects.get_or_create(
-                            building=building, number=apt_str,
-                            defaults={'entrance': entrance}
-                        )
-                        if not apt_obj.entrance:
-                            apt_obj.entrance = entrance
-                            apt_obj.save(update_fields=['entrance'])
-                        # Создаём клиента
                         Client.objects.get_or_create(
-                            building=building, apartment=apt_str,
+                            building=building, apartment=str(apt_num),
                             defaults={
-                                'name': f'Квартира {apt_str}',
-                                'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt_str}',
+                                'name': f'Квартира {apt_num}',
+                                'address': f'г. {building.city}, {building.street_name}, д. {building.house_number}, кв. {apt_num}',
                                 'management_company': company, 'entrance': entrance,
-                                'apartment_obj': apt_obj,
                                 'source': 'manual', 'erc_enabled': True,
                             }
                         )
@@ -4219,80 +3985,6 @@ class BewardDeviceViewSet(viewsets.ModelViewSet):
     filterset_fields = ['building', 'entrance']
     search_fields = ['ip_address', 'address', 'region', 'notes']
     pagination_class = None  # все записи сразу (9555 шт.), фильтрация на фронте
-
-    @action(detail=False, methods=['get'])
-    def export(self, request):
-        """Экспорт объединённого справочника Beward + подъезды с IP в Excel."""
-        import openpyxl, io
-        from django.http import HttpResponse
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = 'Beward + подъезды'
-
-        # Заголовки
-        headers = ['Источник', 'IP-адрес', 'Район', 'Адрес', 'Подъезд',
-                   'Квартиры (с)', 'Квартиры (по)', 'Код доступа', 'Код программирования',
-                   'Код открытия (доп.)', 'Дом (ID)', 'Подъезд (ID)', 'Примечания']
-        ws.append(headers)
-
-        # Стираем старые стили — жирный заголовок
-        for col in range(1, len(headers) + 1):
-            ws.cell(1, col).font = openpyxl.styles.Font(bold=True)
-
-        # 1. Данные из BewardDevice
-        for d in BewardDevice.objects.select_related('building', 'entrance').all():
-            ws.append([
-                'Beward',
-                d.ip_address,
-                d.region,
-                d.address,
-                d.entrance_number,
-                '',  # apartment_range — текст, разберём ниже
-                '',  # 
-                d.access_code,
-                d.programming_code,
-                d.door_opening_code,
-                str(d.building_id or ''),
-                str(d.entrance_id or ''),
-                d.apartment_range,  # пусть будет в примечаниях для Beward
-            ])
-
-        # 2. Подъезды с IP (из BuildingEntrance)
-        from .models import BuildingEntrance as BldEntrance
-        for e in BldEntrance.objects.select_related('building').exclude(ip_address=''):
-            ws.append([
-                'Подъезд дома',
-                e.ip_address,
-                e.building.district if e.building else '',
-                str(e.building) if e.building else '',
-                str(e.number),
-                str(e.apartment_from) if e.apartment_from else '',
-                str(e.apartment_to) if e.apartment_to else '',
-                e.access_code or '',
-                e.programming_code or '',
-                '',
-                str(e.building_id or ''),
-                str(e.id),
-                e.notes or '',
-            ])
-
-        # Автоширина колонок
-        for col_cells in ws.columns:
-            max_len = 0
-            for cell in col_cells:
-                if cell.value:
-                    max_len = max(max_len, len(str(cell.value)))
-            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 2, 40)
-
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
-
-        response = HttpResponse(output.read(),
-                                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        response['Content-Disposition'] = 'attachment; filename=beward_full_export.xlsx'
-        return response
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -5043,58 +4735,6 @@ def import_erc_update_view(request):
 # Импорт справочника Beward (IP-адреса и коды)
 # ══════════════════════════════════════════════════════════════════
 
-def _find_building_for_beward(address: str, ent_num=None):
-    """
-    Ищет Building по адресу из Beward-файла.
-    Возвращает (building, entrance_obj) или (None, None).
-    Ищет по: улица + номер дома + корпус. Без улицы — только если один результат.
-    """
-    import re as _re
-    building = None
-    entrance_obj = None
-    if not address:
-        return None, None
-
-    addr = _re.sub(r',(?!\s)', ', ', address)
-    # Дом: «д. 15», «дом 15 корп. 1», «д.15/1»
-    m = _re.search(r'(?:дом|дсм|д\.)\s*(\d+[а-яА-Я]?)\s*(?:корп\.?\s*(\d+)|к\.\s*(\d+))?', addr)
-    house = m.group(1) if m else ''
-    building_num = (m.group(2) or m.group(3)) if m else ''
-
-    # Улица
-    parts = [p.strip() for p in addr.split(',')]
-    street_candidates = [p for p in parts if any(t in p.lower() for t in
-        ['улица', 'проспект', 'шоссе', 'пр-кт', 'пер', 'переулок', 'бульвар', 'наб', 'пр ', 'аллея'])]
-    street_raw = street_candidates[-1] if street_candidates else (parts[1] if len(parts) > 1 else parts[0] if parts else '')
-    street = street_raw
-    for prefix in ['улица ', 'проспект ', 'переулок ', 'шоссе ', 'бульвар ', 'набережная ']:
-        if street.lower().startswith(prefix):
-            street = street[len(prefix):]
-            break
-
-    if street and house:
-        qs = Building.objects.filter(house_number=house, street_name__icontains=street.strip())
-        if building_num:
-            qs = qs.filter(building_number=building_num)
-        building = qs.first()
-
-    if not building and house:
-        qs = Building.objects.filter(house_number=house, city__icontains='Санкт')
-        if building_num:
-            qs = qs.filter(building_number=building_num)
-        if qs.count() == 1:
-            building = qs.first()
-
-    if building and ent_num:
-        try:
-            ent_int = int(ent_num)
-            entrance_obj = building.entrances.filter(number=ent_int).first()
-        except (ValueError, TypeError):
-            pass
-
-    return building, entrance_obj
-
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def import_beward_ip_view(request):
@@ -5143,8 +4783,22 @@ def import_beward_ip_view(request):
             except (ValueError, TypeError):
                 ent_num = entrance_raw
 
-            # Находим Building через общий парсер
-            building, entrance_obj = _find_building_for_beward(address, ent_num)
+            # Пробуем найти Building
+            building = None
+            if address:
+                addr = re.sub(r',(?!\s)', ', ', address)
+                # Грубый парсинг
+                m = re.search(r'(?:дом|дсм|д\.)\s*(\d+[а-яА-Я]?)', addr)
+                house = m.group(1) if m else ''
+                parts = [p.strip() for p in addr.split(',')]
+                street_candidates = [p for p in parts if 'улица' in p.lower() or 'проспект' in p.lower() or 'шоссе' in p.lower() or 'пр-кт' in p.lower() or 'пер' in p.lower()]
+                street = street_candidates[-1] if street_candidates else (parts[1] if len(parts) > 1 else parts[0] if parts else '')
+                for prefix in ['улица ', 'проспект ', 'переулок ', 'шоссе ']:
+                    if street.lower().startswith(prefix):
+                        street = street[len(prefix):]
+                if street and house:
+                    qs = Building.objects.filter(house_number=house, street_name__icontains=street.strip())
+                    building = qs.first()
 
             BewardDevice.objects.update_or_create(
                 ip_address=ip_addr,
@@ -5153,7 +4807,6 @@ def import_beward_ip_view(request):
                     'address': address,
                     'entrance_number': ent_num,
                     'building': building,
-                    'entrance': entrance_obj,
                 }
             )
             if building:
@@ -5235,19 +4888,47 @@ def import_beward_codes_view(request):
                 stats['skipped'] += 1
                 continue
 
+            # Парсим адрес — улучшенный поиск улицы и дома
+            addr = address
+
+            # Ищем дом: «дом 21», «дом 8», «д. 15»
+            m = re.search(r'(?:дом|д\.)\s*(\d+[а-яА-Я]?)', addr.lower())
+            house = m.group(1) if m else ''
+
+            # Ищем корпус
+            m = re.search(r'корпус\s*(\d+[а-яА-Я]?)', addr.lower())
+            bldg = m.group(1) if m else ''
+
+            # Улица — ищем «улица XXX», «шоссе XXX», «проспект XXX»
+            street = ''
+            for pattern in [r'(?:улица|шоссе|проспект|переулок|бульвар)\s+([^,]+)', r'(?:ул\.|ш\.)\s+([^,]+)']:
+                m = re.search(pattern, addr, re.IGNORECASE)
+                if m:
+                    street = m.group(1).strip()
+                    break
+
+            # Находим Building
+            building = None
+            if house:
+                qs = Building.objects.filter(house_number=house)
+                if street:
+                    qs_street = qs.filter(street_name__icontains=street.strip())
+                    if qs_street.exists():
+                        qs = qs_street
+                if bldg and qs.count() > 1:
+                    qs_b = qs.filter(building_number=bldg)
+                    if qs_b.exists():
+                        qs = qs_b
+                building = qs.first()
+
             # Парсим номер подъезда
             ent_num = None
             try:
                 ent_num = int(float(entrance_raw))
             except (ValueError, TypeError):
-                pass
-            if ent_num is None:
                 m = re.search(r'\d+', str(entrance_raw))
                 if m:
                     ent_num = int(m.group(0))
-
-            # Находим Building через общий парсер
-            building, entrance_obj = _find_building_for_beward(address, ent_num)
 
             # Создаём/обновляем BuildingEntrance
             entrance = None

@@ -1,0 +1,495 @@
+import React, { useState, useEffect } from 'react';
+import { Form, Input, Button, Select, Typography, Card, message, Divider, Row, Col, Radio, Modal, Tag, Space, Checkbox } from 'antd';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import api from '../../services/api';
+import AddressSuggest from '../../components/AddressSuggest';
+import InnSuggest from '../../components/InnSuggest';
+
+const { Title, Text } = Typography;
+
+// Быстрые шаблоны частых проблем
+const QUICK_PROBLEMS = [
+  'Не доводит доводчик',
+  'Не работает доводчик',
+  'Стучит дверь',
+  'Не работает ЭМЗ',
+  'Не держит ЭМЗ',
+  'Сильно держит ЭМЗ',
+  'Обрыв провода на ЭМЗ',
+  'Оборван провод у входной двери',
+  'Обесточен домофон',
+  'Не работает домофон',
+  'Не работает кл.',
+  'Не работают ключи у всей парадной',
+  'Не работает считыватель',
+  'Запрограммировать кл.',
+  'Перезаписать кл. абонента',
+  'Допрограммировать кл.',
+  'Обрыв провода в квартире',
+  'Замена УКП',
+  'Установка УКП',
+  'Не открыть с ПУ',
+  'Нет слышимости в ПУ',
+  'Нет слышимости на панели',
+  'Полифония',
+];
+
+const OrdersCreatePage: React.FC = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const preselectedClientId = searchParams.get('client_id');
+  const [loading, setLoading] = useState(false);
+  const [regions, setRegions] = useState([]);
+  const [clientOptions, setClientOptions] = useState<{ value: number; label: string; client: any }[]>([]);
+  const [users, setUsers] = useState([]);
+  const [form] = Form.useForm();
+  const [clientMode, setClientMode] = useState<'existing' | 'new'>(preselectedClientId ? 'existing' : 'existing');
+  const [clientType, setClientType] = useState<'individual' | 'legal'>('individual');
+  const [creatingClient, setCreatingClient] = useState(false);
+  const [clientSearching, setClientSearching] = useState(false);
+  // Похожие заявки (предложение объединить)
+  const [similarOrders, setSimilarOrders] = useState<any[]>([]);
+  const [similarModalOpen, setSimilarModalOpen] = useState(false);
+  const [newOrderId, setNewOrderId] = useState<number | null>(null);
+  const [selectedSimilarIds, setSelectedSimilarIds] = useState<number[]>([]);
+  const [linkingOrders, setLinkingOrders] = useState(false);
+
+  useEffect(() => {
+    fetchRegions();
+    fetchUsers();
+    // Если пришли из карточки клиента — загружаем его данные
+    if (preselectedClientId) {
+      loadPreselectedClient();
+    }
+  }, []);
+
+  const loadPreselectedClient = async () => {
+    try {
+      const res = await api.get(`/clients/${preselectedClientId}/`);
+      const c = res.data;
+      setClientOptions([{ value: c.id, label: `${c.full_name} — ${c.address}`, client: c }]);
+      form.setFieldsValue({ client_id: c.id });
+      // Заполняем адрес из клиента
+      form.setFieldsValue({ client_address: c.address, client_phone: c.phone });
+    } catch (e) {}
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/users/');
+      setUsers((response.data.results || response.data).map((u: any) => ({
+        ...u, full_name: u.user?.first_name ? `${u.user.last_name} ${u.user.first_name}`.trim() : u.user?.username, role: u.role
+      })));
+    } catch (error) {}
+  };
+
+  const fetchRegions = async () => {
+    try {
+      const response = await api.get('/regions/');
+      setRegions(response.data.results || response.data);
+    } catch (error) {}
+  };
+
+  // Поиск клиентов через autocomplete + DaData адресные подсказки
+  const handleClientSearch = async (value: string) => {
+    if (!value || value.length < 2) {
+      if (!preselectedClientId) setClientOptions([]);
+      return;
+    }
+    setClientSearching(true);
+    try {
+      // Параллельно: клиенты CRM + адреса DaData
+      const [crmRes, dadataRes] = await Promise.all([
+        api.get('/clients/autocomplete/', { params: { q: value } }).then(r => r.data || []),
+        api.get('/clients/address_suggest/', { params: { q: value } }).then(r => r.data || []).catch(() => []),
+      ]);
+
+      const options: any[] = [];
+
+      // Клиенты из CRM
+      crmRes.forEach((c: any) => {
+        options.push({
+          value: c.id,
+          label: c.is_legal
+            ? `👤 ${c.name} — ИНН ${c.inn || '—'} — ${c.address}`
+            : `👤 ${c.name} — ${c.address}`,
+          client: c,
+          type: 'client',
+        });
+      });
+
+      // Адресные подсказки DaData
+      if (dadataRes.length > 0) {
+        // Разделитель
+        if (options.length > 0) {
+          options.push({ value: -1, label: '── 📍 Адресные подсказки ──', disabled: true, client: null, type: 'divider' });
+        }
+        dadataRes.forEach((d: any) => {
+          options.push({
+            value: `dadata_${d.value}`,
+            label: `📍 ${d.unrestricted_value || d.value}`,
+            client: null,
+            type: 'dadata',
+            dadata: d,
+          });
+        });
+      }
+
+      setClientOptions(options);
+    } catch { setClientOptions([]); }
+    finally { setClientSearching(false); }
+  };
+
+  const handleClientSelect = (val: any) => {
+    // Если выбрали адрес из DaData — переключаемся на создание нового клиента
+    if (typeof val === 'string' && val.startsWith('dadata_')) {
+      const found = clientOptions.find(o => o.value === val);
+      if (found?.dadata) {
+        const d = found.dadata;
+        form.setFieldsValue({ client_id: undefined });
+        setClientMode('new');
+        setTimeout(() => {
+          form.setFieldsValue({
+            new_client_address: d.unrestricted_value || d.value,
+          });
+        }, 100);
+        message.info('Заполните ФИО и телефон для нового клиента');
+        return;
+      }
+    }
+
+    // Стандартный выбор клиента из CRM
+    const found = clientOptions.find(c => c.value === val);
+    if (found?.client) {
+      const c = found.client;
+      form.setFieldsValue({
+        client_address: c.address,
+        client_phone: c.phone,
+        management_company: c.management_company || '',
+      });
+    }
+  };
+
+  const handleInnFound = (company: any) => {
+    form.setFieldsValue({
+      new_client_name: company.name || company.short_name,
+      new_client_inn: company.inn,
+      new_client_kpp: company.kpp,
+      new_client_ogrn: company.ogrn,
+      new_client_address: company.legal_address,
+      new_client_director: company.director,
+    });
+  };
+
+  const onFinish = async (values: any) => {
+    setLoading(true);
+    try {
+      let clientId = values.client_id;
+
+      if (clientMode === 'new') {
+        setCreatingClient(true);
+        const clientPayload: any = {
+          full_name: values.new_client_name,
+          phone: values.new_client_phone,
+          address: values.new_client_address || '',
+          region_id: values.region_id,
+          is_legal: clientType === 'legal',
+        };
+        if (clientType === 'legal') {
+          clientPayload.inn = values.new_client_inn || '';
+          clientPayload.kpp = values.new_client_kpp || '';
+          clientPayload.ogrn = values.new_client_ogrn || '';
+          clientPayload.legal_address = values.new_client_address || '';
+          clientPayload.director_name = values.new_client_director || '';
+        }
+        const clientRes = await api.post('/clients/', clientPayload);
+        clientId = clientRes.data.id;
+        message.success('Клиент создан');
+        setCreatingClient(false);
+      }
+
+      const orderPayload: any = {
+        client_id: clientId,
+        region_id: values.region_id,
+        order_type: values.order_type,
+        description: values.description,
+        priority: values.priority || 'medium',
+        city: values.city || '',
+        street_name: values.street_name || '',
+        house_number: values.house_number || '',
+        building_number: values.building_number || '',
+        apartment: values.apartment || '',
+        entrance: values.entrance || '',
+        cost: values.cost || undefined,
+        payment_type: values.payment_type || undefined,
+        is_warranty: values.is_warranty ?? false,
+        photo_report_required: values.photo_report_required ?? false,
+        helper_ids: values.helper_ids || [],
+        scheduled_at: values.scheduled_at || undefined,
+        deadline: values.deadline || undefined,
+      };
+
+      const orderRes = await api.post('/orders/', orderPayload);
+      const newOrder = orderRes.data;
+      message.success('Заявка создана');
+
+      // Проверяем похожие открытые заявки в том же доме/подъезде
+      const buildingId = values.building_id;
+      const entrance = values.entrance || '';
+      const city = values.city || '';
+      const street = values.street_name || '';
+      const house = values.house_number || '';
+
+      if (buildingId || (city && street && house)) {
+        const params: any = {};
+        if (buildingId) params.building_id = buildingId;
+        else { params.city = city; params.street_name = street; params.house_number = house; }
+        if (entrance) params.entrance = entrance;
+
+        const similarRes = await api.get('/orders/find_similar/', { params });
+        const similar = (similarRes.data || []).filter((o: any) => o.id !== newOrder.id);
+
+        if (similar.length > 0) {
+          setSimilarOrders(similar);
+          setNewOrderId(newOrder.id);
+          setSimilarModalOpen(true);
+          return; // не уходим со страницы, пока пользователь не решит
+        }
+      }
+
+      navigate('/orders');
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || error.response?.data?.error || 'Ошибка создания заявки');
+    } finally {
+      setLoading(false);
+      setCreatingClient(false);
+    }
+  };
+
+  const handleLinkSimilar = async () => {
+    if (!newOrderId || selectedSimilarIds.length === 0) return;
+    setLinkingOrders(true);
+    try {
+      await api.post(`/orders/${newOrderId}/link_orders/`, { child_ids: selectedSimilarIds, reason: 'Одинаковая неисправность в подъезде' });
+      message.success(`Объединено заявок: ${selectedSimilarIds.length}`);
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка объединения');
+    } finally {
+      setLinkingOrders(false);
+      setSimilarModalOpen(false);
+      navigate('/orders');
+    }
+  };
+
+  const skipLinking = () => {
+    setSimilarModalOpen(false);
+    navigate('/orders');
+  };
+
+  return (
+    <Card>
+      <Title level={3}>Создать новую заявку</Title>
+
+      <Form form={form} layout="vertical" onFinish={onFinish} style={{ maxWidth: 700 }}
+        initialValues={{ priority: 'medium' }}>
+
+        <Divider>👤 Клиент</Divider>
+
+        <Form.Item label="Тип клиента">
+          <Radio.Group value={clientType} onChange={e => { setClientType(e.target.value); form.setFieldValue('client_id', undefined); }}>
+            <Radio.Button value="individual">👤 Частное лицо</Radio.Button>
+            <Radio.Button value="legal">🏢 Юридическое лицо</Radio.Button>
+          </Radio.Group>
+        </Form.Item>
+
+        <Form.Item label="Клиент">
+          <Radio.Group value={clientMode} onChange={e => { setClientMode(e.target.value); form.setFieldValue('client_id', undefined); }}
+            style={{ marginBottom: 12 }}>
+            <Radio.Button value="existing">Из списка</Radio.Button>
+            <Radio.Button value="new">➕ Быстрое создание</Radio.Button>
+          </Radio.Group>
+        </Form.Item>
+
+        {clientMode === 'existing' ? (
+          <Form.Item name="client_id" rules={[{ required: true, message: 'Выберите клиента' }]}>
+            <Select
+              showSearch
+              placeholder="🔍 Введите адрес, ФИО или телефон для поиска..."
+              filterOption={false}
+              onSearch={handleClientSearch}
+              onSelect={handleClientSelect}
+              options={clientOptions}
+              loading={clientSearching}
+              notFoundContent={clientSearching ? 'Поиск...' : 'Начните вводить адрес или ФИО (мин. 2 символа)'}
+            />
+          </Form.Item>
+        ) : (
+          <Card size="small" title={clientType === 'legal' ? 'Новое юридическое лицо' : 'Новый клиент'} style={{ marginBottom: 16 }}>
+            <Form.Item name="new_client_name" label={clientType === 'legal' ? 'Название' : 'ФИО'}
+              rules={[{ required: true, message: 'Введите' }]}>
+              <Input />
+            </Form.Item>
+            <Form.Item name="new_client_phone" label="Телефон" rules={[{ required: true, message: 'Введите телефон' }]}>
+              <Input placeholder="+7 (999) 123-45-67" />
+            </Form.Item>
+            {clientType === 'legal' && (
+              <>
+                <Form.Item name="new_client_inn" label="ИНН"><InnSuggest onFound={handleInnFound} /></Form.Item>
+                <Row gutter={12}>
+                  <Col span={12}><Form.Item name="new_client_kpp" label="КПП"><Input maxLength={9} /></Form.Item></Col>
+                  <Col span={12}><Form.Item name="new_client_ogrn" label="ОГРН"><Input maxLength={15} /></Form.Item></Col>
+                </Row>
+                <Form.Item name="new_client_director" label="Руководитель"><Input /></Form.Item>
+              </>
+            )}
+            <Form.Item name="new_client_address" label="Адрес"><Input /></Form.Item>
+          </Card>
+        )}
+
+        {/* Адрес клиента (автозаполняется при выборе) */}
+        <Form.Item name="client_address" label="Адрес клиента (авто)">
+          <Input placeholder="Заполнится при выборе клиента" readOnly style={{ background: '#f5f5f5' }} />
+        </Form.Item>
+
+        <Form.Item name="region_id" label="Район" rules={[{ required: true, message: 'Выберите район' }]}>
+          <Select placeholder="Выберите район"
+            options={regions.map((r: any) => ({ value: r.id, label: r.name }))} />
+        </Form.Item>
+
+        <Form.Item name="order_type" label="Тип заявки" rules={[{ required: true }]}>
+          <Select placeholder="Выберите тип">
+            <Select.Option value="repair">🔧 Ремонт</Select.Option>
+            <Select.Option value="sale">💰 Продажа</Select.Option>
+            <Select.Option value="installation">🏗️ Монтаж</Select.Option>
+            <Select.Option value="maintenance">🔄 ТО</Select.Option>
+            <Select.Option value="inspection">🔍 Обследование</Select.Option>
+            <Select.Option value="connection">🔌 Подключение</Select.Option>
+          </Select>
+        </Form.Item>
+
+        <Form.Item name="helper_ids" label="👥 Помощники">
+          <Select mode="multiple" placeholder="Выберите сотрудников" allowClear>
+            {users.map((u: any) => (
+              <Select.Option key={u.id} value={u.id}>{u.full_name || u.username} ({u.role})</Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+
+        <Divider>📍 Адрес заявки</Divider>
+
+        <Form.Item label="Быстрый ввод" help="Подстановка из DaData">
+          <AddressSuggest onSelect={(addr: any) => {
+            form.setFieldsValue({ city: addr.city, street_name: addr.street_name,
+              house_number: addr.house_number, building_number: addr.building_number,
+              apartment: addr.apartment, entrance: addr.entrance });
+          }} />
+        </Form.Item>
+
+        <Row gutter={12}>
+          <Col span={12}><Form.Item name="city" label="Город"><Input /></Form.Item></Col>
+          <Col span={12}><Form.Item name="street_name" label="Улица"><Input /></Form.Item></Col>
+        </Row>
+        <Row gutter={12}>
+          <Col span={6}><Form.Item name="house_number" label="Дом"><Input /></Form.Item></Col>
+          <Col span={6}><Form.Item name="building_number" label="Корпус"><Input /></Form.Item></Col>
+          <Col span={6}><Form.Item name="apartment" label="Квартира"><Input /></Form.Item></Col>
+          <Col span={6}><Form.Item name="entrance" label="Подъезд"><Input /></Form.Item></Col>
+        </Row>
+
+        <Divider>📝 Описание</Divider>
+
+        {/* Быстрые шаблоны проблем */}
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12, marginBottom: 6, display: 'block' }}>⚡ Частые проблемы — кликните, чтобы добавить:</Text>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {QUICK_PROBLEMS.map((p) => (
+              <Tag
+                key={p}
+                style={{ cursor: 'pointer', margin: 0, userSelect: 'none' }}
+                color="default"
+                onClick={() => {
+                  const current = form.getFieldValue('description') || '';
+                  const newText = current ? current + '\n' + p : p;
+                  form.setFieldsValue({ description: newText });
+                }}
+              >
+                {p}
+              </Tag>
+            ))}
+          </div>
+        </div>
+
+        <Form.Item name="description" label="Описание проблемы" rules={[{ required: true }]}>
+          <Input.TextArea rows={4} placeholder="Опишите проблему" />
+        </Form.Item>
+
+        <Row gutter={12}>
+          <Col span={12}><Form.Item name="priority" label="Приоритет">
+            <Select><Select.Option value="low">Низкий</Select.Option><Select.Option value="medium">Средний</Select.Option>
+              <Select.Option value="high">Высокий</Select.Option><Select.Option value="urgent">Срочный</Select.Option></Select>
+          </Form.Item></Col>
+          <Col span={12}><Form.Item name="cost" label="Стоимость"><Input placeholder="₽" /></Form.Item></Col>
+        </Row>
+
+        <Row gutter={12}>
+          <Col span={12}><Form.Item name="payment_type" label="Тип оплаты">
+            <Select allowClear placeholder="Не указан"><Select.Option value="cash">Наличные</Select.Option><Select.Option value="cashless">Безналичные</Select.Option></Select>
+          </Form.Item></Col>
+          <Col span={12}><Form.Item name="is_warranty" label="Гарантия" valuePropName="checked">
+            <Radio.Group><Radio value={true}>Гарантийная</Radio><Radio value={false}>Платная</Radio></Radio.Group>
+          </Form.Item></Col>
+        </Row>
+
+        <Button type="primary" htmlType="submit" loading={loading} block>
+          Создать заявку
+        </Button>
+      </Form>
+
+      {/* Модалка: похожие заявки */}
+      <Modal
+        title="🔍 Найдены похожие заявки в этом доме/подъезде"
+        open={similarModalOpen}
+        onOk={handleLinkSimilar}
+        onCancel={skipLinking}
+        okText={selectedSimilarIds.length > 0 ? `Объединить (${selectedSimilarIds.length})` : 'Пропустить'}
+        cancelText="Пропустить"
+        confirmLoading={linkingOrders}
+        width={650}
+      >
+        <Text type="secondary">
+          Новая заявка <Text strong>#{newOrderId}</Text>. Возможно, это одна и та же проблема — объедините заявки, чтобы мастер закрыл их одновременно.
+        </Text>
+        <Divider style={{ margin: '12px 0' }} />
+        <div style={{ maxHeight: 350, overflowY: 'auto' }}>
+          {similarOrders.map((o: any) => (
+            <div key={o.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'flex-start' }}>
+              <Checkbox
+                checked={selectedSimilarIds.includes(o.id)}
+                onChange={e => {
+                  if (e.target.checked) setSelectedSimilarIds([...selectedSimilarIds, o.id]);
+                  else setSelectedSimilarIds(selectedSimilarIds.filter(x => x !== o.id));
+                }}
+                style={{ marginTop: 2 }}
+              />
+              <div style={{ marginLeft: 8, flex: 1 }}>
+                <Space>
+                  <Text strong>#{o.number}</Text>
+                  <Tag color={o.status === 'assigned' ? 'purple' : 'blue'}>
+                    {o.status === 'new' ? 'Новая' : o.status === 'assigned' ? 'Назначена' : o.status}
+                  </Tag>
+                  <Tag>{o.order_type}</Tag>
+                </Space>
+                <div><Text type="secondary">{o.address}</Text></div>
+                {o.apartment && <div>Кв. {o.apartment}</div>}
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{o.description}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+    </Card>
+  );
+};
+
+
+export default OrdersCreatePage;

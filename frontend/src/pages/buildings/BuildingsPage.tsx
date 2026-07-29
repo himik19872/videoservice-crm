@@ -41,32 +41,19 @@ const BuildingsPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [regions, setRegions] = useState<Region[]>([]);
-  const [companies, setCompanies] = useState<any[]>([]);
   const [searchText, setSearchText] = useState('');
 
-  // Загрузка зданий с debounce: полный список или поиск
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    const timer = setTimeout(() => {
-      const params: any = {};
-      if (searchText) params.search = searchText;
-      fetchBuildings(params);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchText, isAuthenticated]);
-
-  // Справочники — один раз
   useEffect(() => {
     if (isAuthenticated) {
+      fetchBuildings();
       fetchRegions();
-      fetchCompanies();
     }
   }, [isAuthenticated]);
 
-  const fetchBuildings = async (params: any = {}) => {
+  const fetchBuildings = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/buildings/', { params });
+      const response = await api.get('/buildings/');
       setBuildings(response.data.results || response.data);
     } catch (error) {
       message.error('Ошибка загрузки домов');
@@ -84,21 +71,6 @@ const BuildingsPage: React.FC = () => {
     }
   };
 
-  const fetchCompanies = async () => {
-    try {
-      const r = await api.get('/management-companies/');
-      setCompanies(r.data.results || r.data || []);
-    } catch (e) {}
-  };
-
-  // Загружаем справочники при первом входе
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchRegions();
-      fetchCompanies();
-    }
-  }, [isAuthenticated]);
-
   const handleCreateBuilding = async (values: BuildingFormValues) => {
     try {
       const response = await api.post('/buildings/', values);
@@ -115,28 +87,28 @@ const BuildingsPage: React.FC = () => {
     navigate(`/buildings/${building.id}`);
   };
 
+  const filteredBuildings = buildings.filter((b) => {
+    const s = searchText.toLowerCase();
+    return (
+      b.street_name?.toLowerCase().includes(s) ||
+      b.house_number?.toLowerCase().includes(s) ||
+      b.city?.toLowerCase().includes(s)
+    );
+  });
+
   const columns = [
     {
       title: 'Адрес',
       key: 'address',
-      width: 350,
+      width: 300,
       render: (_: any, record: Building) =>
-        <div style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
-          {`${record.street_type_display} ${record.street_name}, ${record.house_number}${record.building_number ? ' корп.' + record.building_number : ''}`}
-        </div>,
+        `${record.street_type_display} ${record.street_name}, ${record.house_number}${record.building_number ? ' корп.' + record.building_number : ''}`,
     },
     {
       title: 'Город',
       dataIndex: 'city',
       key: 'city',
       width: 120,
-    },
-    {
-      title: 'УК / ТСЖ',
-      dataIndex: 'management_company_name',
-      key: 'mc',
-      width: 200,
-      render: (v: string, r: any) => <div style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{v || r.management_company || '-'}</div>,
     },
     {
       title: 'Район',
@@ -200,7 +172,7 @@ const BuildingsPage: React.FC = () => {
 
       <Table
         columns={columns}
-        dataSource={buildings}
+        dataSource={filteredBuildings}
         loading={loading}
         rowKey="id"
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `Всего: ${total}` }}
@@ -248,14 +220,6 @@ const BuildingsPage: React.FC = () => {
               <InputNumber min={1} style={{ width: 120 }} />
             </Form.Item>
           </Space>
-
-          <Form.Item name="management_company_fk" label="УК / ТСЖ">
-            <Select
-              allowClear showSearch placeholder="Выберите УК"
-              filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
-              options={companies.map((c: any) => ({ label: c.short_name || c.name, value: c.id }))}
-            />
-          </Form.Item>
 
           <Form.Item name="equipment_type" label="Тип оборудования">
             <Select options={EQUIPMENT_TYPES} />

@@ -1,0 +1,67 @@
+[
+  {
+    "model": "auth.user",
+    "pk": 1,
+    "fields": {
+      "username": "admin",
+      "email": "admin@domofon.ru",
+      "first_name": "Администратор",
+      "last_name": "Системы",
+      "is_staff": true,
+      "is_superuser": true,
+      "password": "pbkdf2_sha256$600000$yJU6ABqVyjME3CIPEjEjOK$ebGMqqUo1rSgHZq1X06OjW8Zwnt0pMYFh+zUqEa9C58="
+    }
+  },
+  {
+    "model": "auth.user",
+    "pk": 2,
+    "fields": {
+      "username": "dispatcher",
+      "email": "dispatcher@domofon.ru",
+      "first_name": "Диспетчер",
+      "last_name": "Центральный",
+      "is_staff": true,
+      "is_superuser": false,
+      "password": "pbkdf2_sha256$600000$yJU6ABqVyjME3CIPEjEjOK$ebGMqqUo1rSgHZq1X06OjW8Zwnt0pMYFh+zUqEa9C58="
+    }
+  },
+  {
+    "model": "auth.user",
+    "pk": 3,
+    "fields": {
+      "username": "master1",
+      "email": "master1@domofon.ru",
+      "first_name": "Иван",
+      "last_name": "Иванов",
+      "is_staff": false,
+      "is_superuser": false,
+      "password": "pbkdf2_sha256$600000$yJU6ABqVyjME3CIPEjEjOK$ebGMqqUo1rSgHZq1X06OjW8Zwnt0pMYFh+zUqEa9C58="
+    }
+  },
+  {
+    "model": "auth.user",
+    "pk": 4,
+    "fields": {
+      "username": "master2",
+      "email": "master2@domofon.ru",
+      "first_name": "Петр",
+      "last_name": "Петров",
+      "is_staff": false,
+      "is_superuser": false,
+      "password": "pbkdf2_sha256$600000$yJU6ABqVyjME3CIPEjEjOK$ebGMqqUo1rSgHZq1X06OjW8Zwnt0pMYFh+zUqEa9C58="
+    }
+  },
+  {
+    "model": "auth.user",
+    "pk": 5,
+    "fields": {
+      "username": "master3",
+      "email": "master3@domofon.ru",
+      "first_name": "Сидор",
+      "last_name": "Сидоров",
+      "is_staff": false,
+      "is_superuser": false,
+      "password": "pbkdf2_sha256$600000$yJU6ABqVyjME3CIPEjEjOK$ebGMqqUo1rSgHZq1X06OjW8Zwnt0pMYFh+zUqEa9C58="
+    }
+  }
+]

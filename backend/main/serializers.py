@@ -17,62 +17,6 @@ from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, 
 from .models import MCContact, MCPayment, MCComment
 
 
-from .models import AuditLog  # noqa
-from .models import Apartment  # noqa
-
-
-class AuditLogSerializer(serializers.ModelSerializer):
-    user_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = AuditLog
-        fields = ['id', 'user', 'user_name', 'action', 'model_name',
-                  'object_id', 'object_repr', 'details', 'ip_address', 'created_at']
-
-    def get_user_name(self, obj):
-        if obj.user:
-            return obj.user.get_full_name() or obj.user.username
-        return '—'
-
-
-class ApartmentSerializer(serializers.ModelSerializer):
-    building_address = serializers.SerializerMethodField()
-    residents_count = serializers.SerializerMethodField()
-    active_residents_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Apartment
-        fields = ['id', 'building', 'building_address', 'entrance', 'number',
-                  'residents_count', 'active_residents_count']
-
-    def get_building_address(self, obj):
-        return str(obj.building) if obj.building else ''
-
-    def get_residents_count(self, obj):
-        return obj.residents.count()
-
-    def get_active_residents_count(self, obj):
-        return obj.residents.filter(is_active=True).count()
-
-
-class ApartmentDetailSerializer(ApartmentSerializer):
-    residents = serializers.SerializerMethodField()
-    orders = serializers.SerializerMethodField()
-
-    class Meta(ApartmentSerializer.Meta):
-        fields = ApartmentSerializer.Meta.fields + ['residents', 'orders']
-
-    def get_residents(self, obj):
-        from .serializers import ClientSerializer
-        return ClientSerializer(obj.residents.all().order_by('-is_active', 'name'), many=True).data
-
-    def get_orders(self, obj):
-        orders = list(obj.building.orders.filter(apartment=obj.number).order_by('-created_at')[:50]) if obj.building else []
-        return [{'id': o.id, 'number': o.number, 'order_type': o.get_order_type_display(),
-                 'status': o.get_status_display(), 'created_at': o.created_at.isoformat(),
-                 'description': o.description[:100]} for o in orders]
-
-
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     master_profile = serializers.SerializerMethodField()
@@ -422,6 +366,7 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     parent_order = serializers.SerializerMethodField()
     linked_orders = serializers.SerializerMethodField()
+    estimates = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -437,13 +382,13 @@ class OrderSerializer(serializers.ModelSerializer):
             'completed_at', 'confirmed_at', 'confirmed_by',
             'helpers', 'history', 'media', 'issue_orders',
             'entrance_ip', 'entrance_access_code', 'entrance_programming_code',
-            'parent_order', 'parent_order_id', 'linked_orders',
+            'parent_order', 'parent_order_id', 'linked_orders', 'estimates',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'number', 'assigned_at', 'scheduled_at', 'accepted_at', 'started_at',
             'paused_at', 'completed_at', 'confirmed_at', 'confirmed_by',
-            'created_at', 'updated_at', 'helpers', 'history', 'media', 'issue_orders'
+            'created_at', 'updated_at', 'helpers', 'history', 'media', 'issue_orders', 'estimates'
         ]
 
     def get_client_info(self, obj):
@@ -549,6 +494,18 @@ class OrderSerializer(serializers.ModelSerializer):
         """Дочерние заявки (объединённые в эту)."""
         return [{'id': o.id, 'number': o.number, 'status': o.status, 'address': o.address}
                 for o in obj.linked_orders.all()]
+
+    def get_estimates(self, obj):
+        """Привязанные сметы/КП."""
+        return [{
+            'id': e.id,
+            'number': e.number,
+            'name': e.name,
+            'status': e.status,
+            'status_display': e.get_status_display(),
+            'total': str(e.total),
+            'created_at': e.created_at.isoformat() if e.created_at else None,
+        } for e in obj.estimates.all()]
 
 
 class ReportSerializer(serializers.ModelSerializer):
@@ -1486,20 +1443,3 @@ class CallLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = CallLog
         fields = '__all__'
-
-
-class AuditLogSerializer(serializers.ModelSerializer):
-    """Журнал действий сотрудников"""
-    user_name = serializers.SerializerMethodField()
-    action_display = serializers.CharField(source='get_action_display', read_only=True)
-
-    class Meta:
-        model = AuditLog
-        fields = ['id', 'user', 'user_name', 'action', 'action_display',
-                  'model_name', 'object_id', 'object_repr', 'details',
-                  'ip_address', 'created_at']
-
-    def get_user_name(self, obj):
-        if obj.user:
-            return obj.user.get_full_name() or obj.user.username
-        return 'Система'

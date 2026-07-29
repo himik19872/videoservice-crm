@@ -16,42 +16,6 @@ def generate_order_number():
     return f'ЗАЯВ-{date_part}-{random_part}'
 
 
-class AuditLog(models.Model):
-    """Журнал действий сотрудников."""
-    ACTION_CHOICES = [
-        ('create', 'Создание'),
-        ('update', 'Изменение'),
-        ('delete', 'Удаление'),
-        ('login', 'Вход'),
-        ('logout', 'Выход'),
-        ('import', 'Импорт'),
-        ('export', 'Экспорт'),
-        ('migrate', 'Перенос данных'),
-        ('other', 'Прочее'),
-    ]
-
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs', verbose_name=_('Сотрудник'))
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES, verbose_name=_('Действие'))
-    model_name = models.CharField(max_length=100, blank=True, verbose_name=_('Модель'))
-    object_id = models.CharField(max_length=50, blank=True, verbose_name=_('ID объекта'))
-    object_repr = models.CharField(max_length=300, blank=True, verbose_name=_('Представление объекта'))
-    details = models.JSONField(default=dict, blank=True, verbose_name=_('Детали'))
-    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name=_('IP-адрес'))
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Время'))
-
-    class Meta:
-        verbose_name = _('Запись аудита')
-        verbose_name_plural = _('Журнал аудита')
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['user', '-created_at']),
-            models.Index(fields=['action', '-created_at']),
-        ]
-
-    def __str__(self):
-        return f'[{self.created_at.strftime("%d.%m.%Y %H:%M")}] {self.user} — {self.get_action_display()}: {self.object_repr}'
-
-
 class Building(models.Model):
     """Обслуживаемый адрес (дом) — основа адресной системы.
     
@@ -133,34 +97,6 @@ class Building(models.Model):
     @property
     def full_address(self):
         return str(self)
-
-
-class Apartment(models.Model):
-    """Квартира — уникальный объект учета (building + number)."""
-    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='apartments', verbose_name=_('Дом'))
-    entrance = models.ForeignKey('BuildingEntrance', on_delete=models.SET_NULL, null=True, blank=True, related_name='apartments', verbose_name=_('Подъезд'))
-    number = models.CharField(max_length=20, verbose_name=_('Номер квартиры'))
-
-    class Meta:
-        verbose_name = _('Квартира')
-        verbose_name_plural = _('Квартиры')
-        unique_together = ['building', 'number']
-        ordering = ['building', 'number']
-        indexes = [
-            models.Index(fields=['building', 'number']),
-        ]
-
-    def __str__(self):
-        building_str = str(self.building) if self.building else '?'
-        return f'{building_str}, кв. {self.number}'
-
-    @property
-    def active_residents(self):
-        return self.residents.filter(is_active=True)
-
-    @property
-    def all_residents(self):
-        return self.residents.all()
 
 
 class BuildingEntrance(models.Model):
@@ -466,8 +402,6 @@ class Client(models.Model):
                               choices=[('manual', _('Ручной ввод')), ('excel_import', _('Импорт Excel (ТСЖ)')), ('erc', _('ЕРЦ')), ('bitrix24', _('Битрикс24'))])
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата добавления'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
-    is_active = models.BooleanField(default=True, verbose_name=_('Активен'), help_text=_('Снимите галочку для умерших/съехавших — они исключаются из статистики'))
-    apartment_obj = models.ForeignKey('Apartment', on_delete=models.SET_NULL, null=True, blank=True, related_name='residents', verbose_name=_('Квартира (объект)'))
 
     class Meta:
         verbose_name = _('Клиент')

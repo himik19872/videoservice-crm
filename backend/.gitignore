@@ -1,0 +1,115 @@
+# ======================
+# Python / Django
+# ======================
+__pycache__/
+*.py[cod]
+*.pyo
+*.swp
+*.swo
+*~
+*.sqlite3
+*.db
+*.log
+.env
+*.egg-info/
+dist/
+build/
+*.egg
+.DS_Store
+.idea/
+.vscode/
+*.bak
+
+# Django media/uploads
+media/
+staticfiles/
+backend/media/
+
+# CSV / Excel data files (не храним в git)
+*.csv
+*.xlsx
+*.xls
+!frontend/public/*.csv
+
+# Временные скрипты конвертации
+backend/convert_csv.py
+backend/debug_addr.py
+
+# ======================
+# Node.js / Frontend
+# ======================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Production build (будет пересобираться на сервере)
+frontend/build/
+
+# ======================
+# Docker
+# ======================
+docker-compose.override.yml
+
+# ======================
+# Mobile (Expo)
+# ======================
+mobile/.expo/
+mobile/dist/
+mobile/node_modules/
+mobile/*.jks
+mobile/*.keystore
+*.apk
+*.aab
+*.ipa
+mobile/.expo-shared/
+
+# ======================
+# OS files
+# ======================
+Thumbs.db
+.DS_Store
+*.tmp
+
+# ======================
+# Project plans (local)
+# ======================
+
+# ======================
+# ⚠️ Конфиденциальные данные — НИКОГДА не коммитить!
+# ======================
+# Excel-файлы с данными клиентов / ЕРЦ / ТСЖ
+*.xlsx
+*.xls
+*.csv
+*.ods
+
+# Папки с данными
+data/
+exports/
+backups/
+тест-ипорт/
+*.sql
+*.dump
+
+# Пароли и ключи (если есть отдельные файлы)
+*.secret
+*.key
+*.pem
+credentials.*
+.gigacode/
+
+# ======================
+# Python venv
+# ======================
+backend/venv/
+venv/
+.venv/
+
+# ======================
+# Secrets / Tokens
+# ======================
+*.secret
+*.token
+credentials.json
+service-account.json
