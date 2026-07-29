@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, ActivityIndicator, Alert,
+  TextInput, ActivityIndicator, Alert, SafeAreaView,
+  KeyboardAvoidingView, Platform, StatusBar,
 } from 'react-native';
 import api from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
@@ -151,7 +152,12 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
       {/* Header with recipient selector */}
       <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <TouchableOpacity
@@ -197,7 +203,7 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         keyExtractor={item => String(item.id)}
         renderItem={renderMessage}
         style={styles.messageList}
-        contentContainerStyle={styles.messageContent}
+        contentContainerStyle={[styles.messageContent, { paddingBottom: 16 }]}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -209,8 +215,15 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         }
       />
 
-      {/* Input area */}
-      <View style={[styles.inputRow, { backgroundColor: theme.card, borderTopColor: theme.border }]}>
+      {/* Input area — с отступом от системной навигационной панели */}
+      <View style={[
+        styles.inputRow,
+        {
+          backgroundColor: theme.card,
+          borderTopColor: theme.border,
+          paddingBottom: Platform.OS === 'android' ? 12 : 8,
+        },
+      ]}>
         <TextInput
           style={[styles.textInput, {
             backgroundColor: theme.inputBg,
@@ -232,7 +245,8 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           <Text style={styles.sendBtnText}>▶</Text>
         </TouchableOpacity>
       </View>
-    </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
