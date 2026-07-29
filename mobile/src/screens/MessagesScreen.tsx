@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, ActivityIndicator, Alert, SafeAreaView,
-  KeyboardAvoidingView, Platform, StatusBar,
+  TextInput, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,6 +32,7 @@ interface ChatUser {
 const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [recipient, setRecipient] = useState<ChatUser | null>(null);
@@ -152,7 +154,7 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -221,7 +223,7 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         {
           backgroundColor: theme.card,
           borderTopColor: theme.border,
-          paddingBottom: Platform.OS === 'android' ? 12 : 8,
+          paddingBottom: Math.max(insets.bottom, 8),
         },
       ]}>
         <TextInput
@@ -246,7 +248,7 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         </TouchableOpacity>
       </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 

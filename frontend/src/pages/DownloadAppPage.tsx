@@ -23,12 +23,18 @@ const DownloadAppPage: React.FC = () => {
       const items = res.data.results || res.data;
       if (items.length > 0) {
         setLatestVersion(items[0]);
-      } else {
-        setError('Нет доступных версий для скачивания');
       }
     } catch (e) {
-      // Если не авторизован — просто показываем прямую ссылку
-      setError('');
+      // Не авторизован — используем версию по умолчанию
+      setLatestVersion({
+        id: 1,
+        version: '1.0.1',
+        version_code: 2,
+        file_size: 96461936,
+        changelog: '- Исправлен чат: нижняя панель не перекрывается системными кнопками\n- Добавлена авто-проверка обновлений\n- Кнопка ручной проверки в шапке',
+        created_at: '2026-07-29',
+        platform_display: 'Android',
+      });
     } finally {
       setLoading(false);
     }

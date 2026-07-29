@@ -3,7 +3,7 @@ import { Row, Col, Card, Typography, Statistic, Tag, List, Table, Progress, Spin
 import {
   OrderedListOutlined, CheckCircleOutlined, ClockCircleOutlined,
   UsergroupAddOutlined, DollarOutlined, EnvironmentOutlined,
-  DashboardOutlined, ReloadOutlined,
+  DashboardOutlined, ReloadOutlined, DownloadOutlined, QrcodeOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
@@ -141,6 +141,30 @@ const DashboardPage: React.FC = () => {
   return (
     <div>
       <Title level={3}><DashboardOutlined /> Сводка ({dayjs().format('DD.MM.YYYY')})</Title>
+
+      {/* Ссылка на скачивание приложения */}
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <Row align="middle" justify="space-between">
+          <Col>
+            <Space>
+              <DownloadOutlined style={{ fontSize: 18, color: '#1677ff' }} />
+              <Text strong>Мобильное приложение</Text>
+              <Text type="secondary">— скачайте для Android</Text>
+            </Space>
+          </Col>
+          <Col>
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              href="/download-app"
+              target="_blank"
+              size="small"
+            >
+              Страница скачивания
+            </Button>
+          </Col>
+        </Row>
+      </Card>
 
       <Row gutter={12} style={{ marginBottom: 16 }}>
         <Col span={4}><Card size="small"><Statistic title="Всего заявок" value={summary.totalOrders} prefix={<OrderedListOutlined />} valueStyle={{ color: '#1677ff' }} /></Card></Col>

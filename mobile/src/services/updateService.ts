@@ -55,48 +55,37 @@ export async function checkForUpdates(): Promise<{
 export async function downloadAndInstall(downloadUrl: string): Promise<boolean> {
   try {
     const baseUrl = await getBaseUrl();
-    // downloadUrl уже содержит полный путь, но если это относительный — дополняем
     const fullUrl = downloadUrl.startsWith('http')
       ? downloadUrl
       : `${baseUrl.replace('/api', '')}${downloadUrl}`;
 
     const fileUri = FileSystem.documentDirectory + 'update.apk';
 
-    // Показываем уведомление о начале загрузки
-    Alert.alert(
-      'Загрузка обновления',
-      'Идёт загрузка новой версии приложения... Пожалуйста, подождите.',
-      [{ text: 'OK' }],
-    );
-
     const downloadRes = await FileSystem.downloadAsync(fullUrl, fileUri);
 
     if (downloadRes.status !== 200) {
-      Alert.alert('Ошибка', 'Не удалось загрузить обновление');
+      Alert.alert('Ошибка загрузки', `Сервер вернул статус ${downloadRes.status}`);
       return false;
     }
 
-    // На Android открываем APK через Intent
+    // Открываем APK через Intent
     if (Platform.OS === 'android') {
       try {
         const IntentLauncher = require('expo-intent-launcher');
-        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
           data: downloadRes.uri,
-          flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+          flags: 1,
           type: 'application/vnd.android.package-archive',
         });
       } catch {
-        // Fallback: открываем через Linking
         await Linking.openURL(downloadRes.uri);
       }
     } else {
-      // iOS: открываем URL
       await Linking.openURL(downloadRes.uri);
     }
 
     return true;
   } catch (e: any) {
-    console.error('Download/install error:', e);
     Alert.alert('Ошибка обновления', e?.message || 'Не удалось установить обновление');
     return false;
   }

@@ -3902,7 +3902,7 @@ class AppVersionViewSet(viewsets.ModelViewSet):
             'changelog': latest.changelog,
             'file_size': latest.file_size,
             'file_hash': latest.file_hash,
-            'download_url': request.build_absolute_uri(f'/api/app-versions/{latest.id}/download/') if has_update and latest.apk_file else None,
+            'download_url': self._get_public_download_url(latest) if has_update and latest.apk_file else None,
             'released_at': latest.created_at.isoformat(),
         })
 
@@ -3921,6 +3921,15 @@ class AppVersionViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         response['Content-Length'] = version.file_size
         return response
+
+    def _get_public_download_url(self, version):
+        """Формирует URL для скачивания с внешним IP (из настроек)."""
+        settings = SystemSettings.objects.first()
+        if settings:
+            ip = settings.external_ip or '83.243.73.86'
+            port = settings.external_port or 3000
+            return f'http://{ip}:{port}/api/app-versions/{version.id}/download/'
+        return f'http://83.243.73.86:3000/api/app-versions/{version.id}/download/'
 
 
 # ══════════════════════════════════════════════════════════════════
