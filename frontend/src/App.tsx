@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout, theme } from 'antd';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { useNotifications } from './hooks/useNotifications';
 import MasterLayout from './layouts/MasterLayout';
 import AdminLayout from './layouts/AdminLayout';
 import DispatcherLayout from './layouts/DispatcherLayout';
@@ -45,6 +46,8 @@ import EstimateSettingsPage from './pages/settings/EstimateSettingsPage';
 import UpdatePage from './pages/settings/UpdatePage';
 import SystemStatsPage from './pages/settings/SystemStatsPage';
 import MigrationPage from './pages/settings/MigrationPage';
+import AuditLogPage from './pages/AuditLogPage';
+import ApartmentDetailPage from './pages/apartments/ApartmentDetailPage';
 import DispatchersPage from './pages/dispatchers/DispatchersPage';
 import DashboardPage from './pages/DashboardPage';
 import ImportPage from './pages/ImportPage';
@@ -67,6 +70,7 @@ const { Content } = Layout;
 
 function AppContent() {
   const { user, isAuthenticated } = useAuth();
+  useNotifications();  // WebSocket + браузерные уведомления
 
   if (!isAuthenticated) {
     return <LoginPage />;
@@ -176,6 +180,7 @@ function AppContent() {
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/messages" element={<MessagesPage />} />
+          <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/estimates" element={<EstimatesPage />} />
           <Route path="/estimates/:id" element={<EstimateDetailPage />} />
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
@@ -214,6 +219,7 @@ function AppContent() {
           <Route path="/supply-invoices" element={<SupplyInvoicesPage />} />
           <Route path="/issue-orders" element={<IssueOrdersPage />} />
           <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
+          <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/estimates" element={<EstimatesPage />} />
           <Route path="/estimates/:id" element={<EstimateDetailPage />} />
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
@@ -269,6 +275,8 @@ function AppContent() {
         <Route path="/settings/update" element={<UpdatePage />} />
         <Route path="/settings/stats" element={<SystemStatsPage />} />
         <Route path="/settings/migration" element={<MigrationPage />} />
+        <Route path="/audit-log" element={<AuditLogPage />} />
+        <Route path="/apartments/:id" element={<ApartmentDetailPage />} />
         <Route path="/settings/legal-entities" element={<LegalEntitiesPage />} />
         <Route path="/settings/estimate-template" element={<EstimateSettingsPage />} />
         <Route path="/settings/admin" element={<AdminSettingsPage />} />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Table, Button, Space, Modal, Form, Input, message, Select, Popconfirm, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, DownloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import api from '../services/api';
 import type { BewardDevice } from '../types';
 
@@ -35,23 +35,6 @@ const BewardDevicesPage: React.FC = () => {
 
   const openCreate = () => { setEditing(null); form.resetFields(); setModalOpen(true); };
   const openEdit = (rec: BewardDevice) => { setEditing(rec); form.setFieldsValue(rec); setModalOpen(true); };
-
-  const handleExport = async () => {
-    try {
-      const res = await api.get('/beward-devices/export/', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'beward_full_export.xlsx');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      message.success('Файл скачан');
-    } catch (e) {
-      message.error('Ошибка экспорта');
-    }
-  };
 
   const handleDelete = async (id: number) => {
     try { await api.delete(`/beward-devices/${id}/`); message.success('Удалён'); fetchData(); }
@@ -127,7 +110,6 @@ const BewardDevicesPage: React.FC = () => {
             allowClear
           />
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Добавить</Button>
-          <Button icon={<DownloadOutlined />} onClick={handleExport}>Экспорт Excel</Button>
         </Space>
       </Space>
 
