@@ -132,6 +132,53 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// ═══ Утилиты для офлайн-кеша заявок ═══
+
+const ORDERS_CACHE_KEY = 'offline_orders_cache';
+const ORDERS_CACHE_TIME_KEY = 'offline_orders_cache_time';
+
+/** Сохранить заявки локально */
+export async function cacheOrders(orders: any[]) {
+  await AsyncStorage.setItem(ORDERS_CACHE_KEY, JSON.stringify(orders));
+  await AsyncStorage.setItem(ORDERS_CACHE_TIME_KEY, Date.now().toString());
+}
+
+/** Загрузить заявки из локального кеша */
+export async function getCachedOrders(): Promise<any[]> {
+  const raw = await AsyncStorage.getItem(ORDERS_CACHE_KEY);
+  if (!raw) return [];
+  return JSON.parse(raw);
+}
+
+/** Получить время последнего кеширования */
+export async function getCacheTime(): Promise<number | null> {
+  const raw = await AsyncStorage.getItem(ORDERS_CACHE_TIME_KEY);
+  return raw ? parseInt(raw, 10) : null;
+}
+
+/** Обновить одну заявку в кеше (офлайн-смена статуса) */
+export async function updateCachedOrder(orderId: number, updates: Record<string, any>): Promise<any[]> {
+  const orders = await getCachedOrders();
+  const idx = orders.findIndex((o: any) => o.id === orderId);
+  if (idx >= 0) {
+    orders[idx] = { ...orders[idx], ...updates, _offline_updated: true };
+    await cacheOrders(orders);
+  }
+  return orders;
+}
+
+/** Сохранить одну заявку в кеш (после загрузки) */
+export async function cacheSingleOrder(order: any) {
+  const orders = await getCachedOrders();
+  const idx = orders.findIndex((o: any) => o.id === order.id);
+  if (idx >= 0) {
+    orders[idx] = { ...orders[idx], ...order, _offline_updated: false };
+  } else {
+    orders.unshift(order);
+  }
+  await cacheOrders(orders);
+}
+
 export function useOffline(): OfflineContextType {
   const ctx = useContext(OfflineContext);
   if (!ctx) throw new Error('useOffline must be used within OfflineProvider');

@@ -40,13 +40,16 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Перехватчик: при 401 — сбрасываем токен
+// Перехватчик: при 401 — сбрасываем токен ТОЛЬКО если сеть доступна
+// При ошибке сети (нет ответа от сервера) — не сбрасываем токен
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
+    // Если сервер ответил 401 — токен недействителен, сбрасываем
     if (error.response?.status === 401) {
       await AsyncStorage.removeItem('token');
     }
+    // Если ошибка сети (нет ответа) — не сбрасываем токен, сессия сохраняется
     return Promise.reject(error);
   },
 );

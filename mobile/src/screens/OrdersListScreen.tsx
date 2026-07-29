@@ -6,7 +6,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
-import { useOffline } from '../contexts/OfflineContext';
+import { useOffline, cacheOrders, getCachedOrders, getCacheTime } from '../contexts/OfflineContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { Order } from '../types';
 
@@ -48,8 +48,15 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
     try {
       const res = await api.get('/orders/?page_size=100');
       setOrders(res.data.results || res.data);
+      // Кешируем заявки для офлайн-режима
+      await cacheOrders(res.data.results || res.data);
     } catch (e) {
       console.error('Fetch orders error:', e);
+      // При ошибке сети — загружаем из кеша
+      const cached = await getCachedOrders();
+      if (cached.length > 0) {
+        setOrders(cached);
+      }
     } finally {
       setRefreshing(false);
     }

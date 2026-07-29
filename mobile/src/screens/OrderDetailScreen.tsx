@@ -8,7 +8,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import api from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
-import { useOffline, setOfflineApi } from '../contexts/OfflineContext';
+import { useOffline, cacheSingleOrder, getCachedOrders } from '../contexts/OfflineContext';
 import type { Order } from '../types';
 
 interface Props {
@@ -57,9 +57,19 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     try {
       const res = await api.get(`/orders/${id}/`);
       setOrder(res.data);
+      // Кешируем заявку для офлайн-режима
+      await cacheSingleOrder(res.data);
     } catch (e) {
-      Alert.alert('Ошибка', 'Не удалось загрузить заявку');
-      navigation.goBack();
+      // При ошибке сети — пробуем загрузить из кеша
+      const cached = await getCachedOrders();
+      const cachedOrder = cached.find((o: any) => o.id === id);
+      if (cachedOrder) {
+        setOrder(cachedOrder);
+        console.log('[Offline] Order loaded from cache:', id);
+      } else {
+        Alert.alert('Ошибка', 'Нет сети и заявка не найдена в кеше');
+        navigation.goBack();
+      }
     } finally {
       setLoading(false);
     }

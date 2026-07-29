@@ -147,15 +147,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const restoreSession = async () => {
     const token = await AsyncStorage.getItem('token');
+    const savedUser = await AsyncStorage.getItem('saved_user');
     if (token) {
       try {
         const res = await api.get('/users/me/');
         setUser(res.data);
-        // Теперь notifReady гарантированно true — setupNotifications уже завершился
+        // Кешируем пользователя локально для офлайн-режима
+        await AsyncStorage.setItem('saved_user', JSON.stringify(res.data));
         await registerPushToken();
       } catch {
-        await AsyncStorage.removeItem('token');
+        // Если сеть недоступна — восстанавливаем из кеша
+        if (savedUser) {
+          try {
+            setUser(JSON.parse(savedUser));
+            console.log('[Auth] Session restored from cache (offline)');
+          } catch {}
+        } else {
+          // Если и кеша нет — сбрасываем
+          await AsyncStorage.removeItem('token');
+        }
       }
+    } else if (savedUser) {
+      // Токена нет, но есть кеш пользователя — показываем экран логина
+      await AsyncStorage.removeItem('saved_user');
     }
     setIsLoading(false);
   };
