@@ -422,6 +422,8 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     parent_order = serializers.SerializerMethodField()
     linked_orders = serializers.SerializerMethodField()
+    # Сметы / КП
+    estimates = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -437,7 +439,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'completed_at', 'confirmed_at', 'confirmed_by',
             'helpers', 'history', 'media', 'issue_orders',
             'entrance_ip', 'entrance_access_code', 'entrance_programming_code',
-            'parent_order', 'parent_order_id', 'linked_orders',
+            'parent_order', 'parent_order_id', 'linked_orders', 'estimates',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -549,6 +551,14 @@ class OrderSerializer(serializers.ModelSerializer):
         """Дочерние заявки (объединённые в эту)."""
         return [{'id': o.id, 'number': o.number, 'status': o.status, 'address': o.address}
                 for o in obj.linked_orders.all()]
+
+    def get_estimates(self, obj):
+        """Сметы / КП, привязанные к заявке."""
+        return [{
+            'id': e.id, 'number': e.number, 'name': e.name,
+            'status': e.status, 'status_display': e.get_status_display(),
+            'total': str(e.total), 'created_at': e.created_at.isoformat(),
+        } for e in obj.estimates.all()]
 
 
 class ReportSerializer(serializers.ModelSerializer):

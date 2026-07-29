@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined } from '@ant-design/icons';
+import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox, Popconfirm } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -36,6 +36,20 @@ const OrdersDetailPage: React.FC = () => {
   const [linkSearchText, setLinkSearchText] = useState('');
   const [linkSearchResults, setLinkSearchResults] = useState<any[]>([]);
   const [selectedLinkIds, setSelectedLinkIds] = useState<number[]>([]);
+  // Сметы / КП
+  const [estimates, setEstimates] = useState<any[]>([]);
+  const [estimatesLoading, setEstimatesLoading] = useState(false);
+  const [createEstimateModalOpen, setCreateEstimateModalOpen] = useState(false);
+  const [linkEstimateModalOpen, setLinkEstimateModalOpen] = useState(false);
+  const [allEstimates, setAllEstimates] = useState<any[]>([]);
+  const [estimateForm, setEstimateForm] = useState({
+    name: '', discount: 0, commission: 0, dealer_fee: 0,
+    unexpected_costs: 0, delivery_type: 'client', delivery_cost: 0,
+    tax_type: 'usn', tax_rate: 6, note: '',
+    employee: '', employee_phone: '',
+  });
+  const [estimateItems, setEstimateItems] = useState<any[]>([]);
+  const [createEstimateSaving, setCreateEstimateSaving] = useState(false);
 
   useEffect(() => {
     fetchOrder();
@@ -43,8 +57,21 @@ const OrdersDetailPage: React.FC = () => {
   }, [id]);
 
   useEffect(() => {
-    if (order) fetchComments();
+    if (order) {
+      fetchComments();
+      fetchEstimates();
+    }
   }, [order?.id]);
+
+  const fetchEstimates = async () => {
+    if (!order) return;
+    setEstimatesLoading(true);
+    try {
+      const res = await api.get(`/estimates/?order=${order.id}&page_size=50`);
+      setEstimates(res.data.results || res.data);
+    } catch (e) { /* ignore */ }
+    finally { setEstimatesLoading(false); }
+  };
 
   const fetchAssignableUsers = async () => {
     if (!isStaff) return;
@@ -302,6 +329,92 @@ const OrdersDetailPage: React.FC = () => {
     } finally {
       setGpsLoading(false);
     }
+  };
+
+  const handleCreateEstimate = async () => {
+    if (!order || !estimateForm.name.trim()) {
+      message.warning('Введите название сметы');
+      return;
+    }
+    setCreateEstimateSaving(true);
+    try {
+      // Создаём смету
+      const res = await api.post('/estimates/', {
+        ...estimateForm,
+        client_id: order.client?.id,
+        order_id: order.id,
+        status: 'draft',
+      });
+      const estimateId = res.data.id;
+      // Добавляем позиции, если есть
+      for (const item of estimateItems) {
+        await api.post(`/estimates/${estimateId}/add_item/`, item);
+      }
+      message.success('Смета создана и привязана к заявке');
+      setCreateEstimateModalOpen(false);
+      setEstimateForm({ name: '', discount: 0, commission: 0, dealer_fee: 0, unexpected_costs: 0, delivery_type: 'client', delivery_cost: 0, tax_type: 'usn', tax_rate: 6, note: '', employee: '', employee_phone: '' });
+      setEstimateItems([]);
+      fetchEstimates();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка создания сметы');
+    } finally {
+      setCreateEstimateSaving(false);
+    }
+  };
+
+  const handleLinkEstimate = async () => {
+    if (!order || selectedLinkIds.length === 0) return;
+    try {
+      for (const estId of selectedLinkIds) {
+        await api.patch(`/estimates/${estId}/`, { order: order.id });
+      }
+      message.success(`Привязано смет: ${selectedLinkIds.length}`);
+      setLinkEstimateModalOpen(false);
+      setSelectedLinkIds([]);
+      fetchEstimates();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка привязки сметы');
+    }
+  };
+
+  const handleUnlinkEstimate = async (estimateId: number) => {
+    try {
+      await api.patch(`/estimates/${estimateId}/`, { order: null });
+      message.success('Смета отвязана');
+      fetchEstimates();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка');
+    }
+  };
+
+  const openCreateEstimateModal = () => {
+    setEstimateForm({
+      name: `Смета по заявке #${order?.number || ''}`,
+      discount: 0, commission: 0, dealer_fee: 0,
+      unexpected_costs: 0, delivery_type: 'client', delivery_cost: 0,
+      tax_type: 'usn', tax_rate: 6, note: '',
+      employee: '', employee_phone: '',
+    });
+    setEstimateItems([]);
+    setCreateEstimateModalOpen(true);
+  };
+
+  const openLinkEstimateModal = async () => {
+    setSelectedLinkIds([]);
+    try {
+      const res = await api.get('/estimates/?page_size=50&status=draft');
+      const all = res.data.results || res.data;
+      // Исключаем уже привязанные к этой заявке
+      setAllEstimates(all.filter((e: any) => !e.order || e.order !== order?.id));
+    } catch (e) { setAllEstimates([]); }
+    setLinkEstimateModalOpen(true);
+  };
+
+  const addEstimateItem = () => {
+    setEstimateItems(prev => [...prev, {
+      item_type: 'custom_service',
+      name: '', unit: 'шт', quantity: 1, cost_price: 0, sale_price: 0, discount: 0,
+    }]);
   };
 
   const handleConfirm = async () => {
@@ -659,6 +772,184 @@ const OrdersDetailPage: React.FC = () => {
                 { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 50, render: (v: string) => v || 'шт.' },
               ]}
             />
+          )}
+        </div>
+      </Modal>
+
+      {/* Сметы / КП */}
+      <Divider />
+      <Space style={{ marginBottom: 8 }}>
+        <Title level={5} style={{ margin: 0 }}>📋 Сметы / КП</Title>
+        <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreateEstimateModal}>
+          Создать смету
+        </Button>
+        <Button size="small" icon={<LinkOutlined />} onClick={openLinkEstimateModal}>
+          Привязать существующую
+        </Button>
+      </Space>
+      {estimatesLoading ? (
+        <Spin size="small" />
+      ) : estimates.length === 0 ? (
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>Нет привязанных смет</Text>
+      ) : (
+        <Table
+          dataSource={estimates}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          style={{ marginBottom: 12 }}
+          columns={[
+            {
+              title: 'Номер', dataIndex: 'number', key: 'number',
+              render: (v: string, r: any) => (
+                <a onClick={() => navigate(`/estimates/${r.id}`)} style={{ cursor: 'pointer' }}>
+                  {v}
+                </a>
+              ),
+            },
+            { title: 'Название', dataIndex: 'name', key: 'name' },
+            {
+              title: 'Статус', dataIndex: 'status_display', key: 'status',
+              render: (v: string) => {
+                const colors: Record<string, string> = { 'Черновик': 'default', 'Отправлено': 'blue', 'Согласовано': 'green', 'Отклонено': 'red', 'В работе': 'orange', 'Завершено': 'green' };
+                return <Tag color={colors[v] || 'default'}>{v}</Tag>;
+              },
+            },
+            { title: 'Сумма', dataIndex: 'total', key: 'total', render: (v: string) => `${Number(v).toLocaleString('ru-RU')} ₽` },
+            {
+              title: '', key: 'actions', width: 80,
+              render: (_: any, r: any) => (
+                <Popconfirm title="Отвязать смету от заявки?" onConfirm={() => handleUnlinkEstimate(r.id)}>
+                  <Button size="small" danger icon={<DisconnectOutlined />} />
+                </Popconfirm>
+              ),
+            },
+          ]}
+        />
+      )}
+
+      {/* Модалка: создать смету */}
+      <Modal
+        title="Создать смету / КП"
+        open={createEstimateModalOpen}
+        onCancel={() => setCreateEstimateModalOpen(false)}
+        onOk={handleCreateEstimate}
+        confirmLoading={createEstimateSaving}
+        okText="Создать"
+        cancelText="Отмена"
+        width={700}
+      >
+        <Descriptions bordered size="small" column={2} style={{ marginBottom: 12 }}>
+          <Descriptions.Item label="Название" span={2}>
+            <Input value={estimateForm.name} onChange={e => setEstimateForm(f => ({ ...f, name: e.target.value }))} />
+          </Descriptions.Item>
+          <Descriptions.Item label="Скидка (%)">
+            <InputNumber min={0} max={100} value={estimateForm.discount} onChange={v => setEstimateForm(f => ({ ...f, discount: v || 0 }))} style={{ width: '100%' }} />
+          </Descriptions.Item>
+          <Descriptions.Item label="Доставка (₽)">
+            <InputNumber min={0} value={estimateForm.delivery_cost} onChange={v => setEstimateForm(f => ({ ...f, delivery_cost: v || 0 }))} style={{ width: '100%' }} />
+          </Descriptions.Item>
+          <Descriptions.Item label="Непредвиденные (₽)">
+            <InputNumber min={0} value={estimateForm.unexpected_costs} onChange={v => setEstimateForm(f => ({ ...f, unexpected_costs: v || 0 }))} style={{ width: '100%' }} />
+          </Descriptions.Item>
+          <Descriptions.Item label="Примечание" span={2}>
+            <Input.TextArea rows={2} value={estimateForm.note} onChange={e => setEstimateForm(f => ({ ...f, note: e.target.value }))} />
+          </Descriptions.Item>
+        </Descriptions>
+        <Space style={{ marginBottom: 8 }}>
+          <Text strong>Позиции сметы:</Text>
+          <Button size="small" icon={<PlusOutlined />} onClick={addEstimateItem}>Добавить позицию</Button>
+        </Space>
+        {estimateItems.map((item, idx) => (
+          <Card key={idx} size="small" style={{ marginBottom: 8 }}>
+            <Row gutter={8} align="middle">
+              <Col span={8}>
+                <Input placeholder="Наименование" value={item.name} onChange={e => {
+                  const newItems = [...estimateItems];
+                  newItems[idx].name = e.target.value;
+                  setEstimateItems(newItems);
+                }} size="small" />
+              </Col>
+              <Col span={3}>
+                <Input placeholder="Ед." value={item.unit} onChange={e => {
+                  const newItems = [...estimateItems];
+                  newItems[idx].unit = e.target.value;
+                  setEstimateItems(newItems);
+                }} size="small" />
+              </Col>
+              <Col span={2}>
+                <InputNumber min={1} value={item.quantity} onChange={v => {
+                  const newItems = [...estimateItems];
+                  newItems[idx].quantity = v || 1;
+                  setEstimateItems(newItems);
+                }} size="small" style={{ width: '100%' }} />
+              </Col>
+              <Col span={3}>
+                <InputNumber min={0} placeholder="Цена" value={item.sale_price} onChange={v => {
+                  const newItems = [...estimateItems];
+                  newItems[idx].sale_price = v || 0;
+                  setEstimateItems(newItems);
+                }} size="small" style={{ width: '100%' }} />
+              </Col>
+              <Col span={2}>
+                <InputNumber min={0} placeholder="Себест." value={item.cost_price} onChange={v => {
+                  const newItems = [...estimateItems];
+                  newItems[idx].cost_price = v || 0;
+                  setEstimateItems(newItems);
+                }} size="small" style={{ width: '100%' }} />
+              </Col>
+              <Col span={3}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Сумма: {(item.sale_price * item.quantity).toLocaleString('ru-RU')} ₽
+                </Text>
+              </Col>
+              <Col span={3}>
+                <Button size="small" danger onClick={() => {
+                  setEstimateItems(prev => prev.filter((_, i) => i !== idx));
+                }}>✕</Button>
+              </Col>
+            </Row>
+          </Card>
+        ))}
+        {estimateItems.length > 0 && (
+          <div style={{ textAlign: 'right', marginTop: 8 }}>
+            <Text strong>
+              Итого позиций: {estimateItems.reduce((sum, i) => sum + (i.sale_price * i.quantity), 0).toLocaleString('ru-RU')} ₽
+            </Text>
+          </div>
+        )}
+      </Modal>
+
+      {/* Модалка: привязать существующую смету */}
+      <Modal
+        title="Привязать существующую смету"
+        open={linkEstimateModalOpen}
+        onOk={handleLinkEstimate}
+        onCancel={() => setLinkEstimateModalOpen(false)}
+        okText="Привязать"
+        cancelText="Отмена"
+        okButtonProps={{ disabled: selectedLinkIds.length === 0 }}
+        width={600}
+      >
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          {allEstimates.length === 0 ? (
+            <Text type="secondary">Нет доступных смет для привязки</Text>
+          ) : (
+            allEstimates.map((e: any) => (
+              <div key={e.id} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center' }}>
+                <Checkbox
+                  checked={selectedLinkIds.includes(e.id)}
+                  onChange={ev => {
+                    if (ev.target.checked) setSelectedLinkIds([...selectedLinkIds, e.id]);
+                    else setSelectedLinkIds(selectedLinkIds.filter(x => x !== e.id));
+                  }}
+                />
+                <span style={{ marginLeft: 8 }}>
+                  <Text strong>{e.number}</Text> — {e.name} &nbsp;
+                  {e.total && <Tag color="blue">{Number(e.total).toLocaleString('ru-RU')} ₽</Tag>}
+                </span>
+              </div>
+            ))
           )}
         </div>
       </Modal>
