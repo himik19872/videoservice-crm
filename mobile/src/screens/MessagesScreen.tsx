@@ -37,7 +37,7 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [text, setText] = useState('');
   const [recipient, setRecipient] = useState<ChatUser | null>(null);
   const [users, setUsers] = useState<ChatUser[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [searchUser, setSearchUser] = useState('');
   const [showUsers, setShowUsers] = useState(false);
   const [unread, setUnread] = useState(0);
   const flatListRef = useRef<FlatList>(null);
@@ -77,9 +77,9 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (search = '') => {
     try {
-      const res = await api.get('/messages/users/');
+      const res = await api.get('/messages/users/', { params: { search } });
       setUsers(res.data || []);
     } catch (e) {}
   };
@@ -180,21 +180,37 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       {/* User list dropdown */}
       {showUsers && (
         <View style={[styles.userList, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={styles.userSearchRow}>
+            <TextInput
+              style={[styles.userSearchInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+              placeholder="Поиск по имени, должности..."
+              placeholderTextColor={theme.textTertiary}
+              value={searchUser}
+              onChangeText={(v) => { setSearchUser(v); fetchUsers(v); }}
+              autoFocus
+            />
+          </View>
           <TouchableOpacity
             style={[styles.userItem, !recipient && { backgroundColor: theme.primary + '20' }]}
-            onPress={() => { setRecipient(null); setShowUsers(false); }}
+            onPress={() => { setRecipient(null); setShowUsers(false); setSearchUser(''); }}
           >
-            <Text style={{ color: theme.text }}>📢 Всем (broadcast)</Text>
+            <Text style={{ color: theme.text, fontWeight: '600' }}>📢 Общий чат (всем)</Text>
           </TouchableOpacity>
-          {users.filter(u => u.id !== user?.id).map(u => (
-            <TouchableOpacity
-              key={u.id}
-              style={[styles.userItem, recipient?.id === u.id && { backgroundColor: theme.primary + '20' }]}
-              onPress={() => { setRecipient(u); setShowUsers(false); }}
-            >
-              <Text style={{ color: theme.text }}>{getUserLabel(u)}</Text>
-            </TouchableOpacity>
-          ))}
+          <View style={{ maxHeight: 350 }}>
+            <FlatList
+              data={users.filter(u => u.id !== user?.id)}
+              keyExtractor={u => String(u.id)}
+              renderItem={({ item: u }) => (
+                <TouchableOpacity
+                  style={[styles.userItem, recipient?.id === u.id && { backgroundColor: theme.primary + '20' }]}
+                  onPress={() => { setRecipient(u); setShowUsers(false); setSearchUser(''); }}
+                >
+                  <Text style={{ color: theme.text }}>{u.full_name}</Text>
+                  <Text style={{ color: theme.textTertiary, fontSize: 12 }}>{u.role_label || u.role}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
         </View>
       )}
 
@@ -270,8 +286,15 @@ const styles = StyleSheet.create({
   },
   unreadText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   userList: {
-    maxHeight: 300, borderBottomWidth: 1, borderLeftWidth: 1, borderRightWidth: 1,
+    borderBottomWidth: 1, borderLeftWidth: 1, borderRightWidth: 1,
     marginHorizontal: 8, borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
+  },
+  userSearchRow: {
+    padding: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
+  },
+  userSearchInput: {
+    height: 36, paddingHorizontal: 10, borderRadius: 8,
+    borderWidth: 1, fontSize: 14,
   },
   userItem: {
     padding: 12, borderBottomWidth: StyleSheet.hairlineWidth,

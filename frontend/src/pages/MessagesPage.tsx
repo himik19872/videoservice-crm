@@ -58,9 +58,9 @@ const MessagesPage: React.FC = () => {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (search = '') => {
     try {
-      const res = await api.get('/messages/users/');
+      const res = await api.get('/messages/users/', { params: { search } });
       setUsers(res.data || []);
     } catch (e) {}
   };
@@ -92,16 +92,19 @@ const MessagesPage: React.FC = () => {
         {/* Выбор получателя */}
         <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 8 }}>
           <Select
+            showSearch
             allowClear
-            placeholder="Всем (broadcast)"
-            style={{ minWidth: 200 }}
+            placeholder="Общий чат (всем)"
+            style={{ minWidth: 280 }}
             value={recipient}
             onChange={setRecipient}
+            onSearch={(val) => fetchUsers(val)}
+            filterOption={false}
             options={[
-              { value: null as any, label: '📢 Всем сотрудникам' },
+              { value: undefined as any, label: '📢 Общий чат (всем)' },
               ...users.filter(u => u.id !== user?.id).map(u => ({
                 value: u.id,
-                label: `${u.full_name} (${u.username})`,
+                label: `${u.full_name} — ${u.role_label || u.role}`,
               })),
             ]}
           />

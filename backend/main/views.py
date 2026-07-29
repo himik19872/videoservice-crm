@@ -3183,10 +3183,21 @@ class MessageViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user.is_authenticated:
             return Message.objects.none()
-        # Видим свои сообщения, адресованные нам, и broadcast
-        return Message.objects.filter(
-            Q(sender=user) | Q(recipient=user) | Q(is_broadcast=True)
-        ).distinct()
+
+        recipient_id = self.request.query_params.get('recipient', '').strip()
+
+        if recipient_id:
+            # Диалог с конкретным сотрудником: только сообщения между нами
+            try:
+                rid = int(recipient_id)
+                return Message.objects.filter(
+                    Q(sender=user, recipient_id=rid) | Q(sender_id=rid, recipient=user)
+                ).distinct()
+            except ValueError:
+                return Message.objects.none()
+        else:
+            # Общий чат: только broadcast-сообщения
+            return Message.objects.filter(is_broadcast=True).distinct()
 
     def perform_create(self, serializer):
         serializer.save(sender=self.request.user)
@@ -3207,14 +3218,49 @@ class MessageViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def users(self, request):
-        """Список сотрудников для выбора получателя"""
-        from .models import User
-        users = User.objects.filter(is_active=True).values('id', 'username', 'first_name', 'last_name')
-        return Response([{
-            'id': u['id'],
-            'username': u['username'],
-            'full_name': f"{u['first_name']} {u['last_name']}".strip() or u['username']
-        } for u in users])
+        """Список сотрудников для выбора получателя (с ролью и поиском)."""
+        from django.contrib.auth.models import User as AuthUser
+        search = request.query_params.get('search', '').strip()
+
+        qs = AuthUser.objects.filter(is_active=True).select_related('profile').order_by('first_name', 'last_name')
+
+        if search:
+            qs = qs.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(profile__role__icontains=search)
+            ).distinct()
+
+        role_labels = {
+            'admin': 'Админ', 'dispatcher': 'Диспетчер', 'master': 'Мастер',
+            'installer': 'Монтажник', 'clerk': 'Делопроизводитель',
+            'accountant': 'Бухгалтер', 'cashier': 'Кассир', 'secretary': 'Секретарь',
+            'engineer': 'Инженер', 'supervisor': 'Начальник сервиса',
+            'operator': 'Оператор', 'sales': 'Менеджер продаж', 'warehouse': 'Кладовщик',
+            'tech_support': 'Техподдержка', 'chief_engineer': 'Главный инженер',
+            'tech_director': 'Технический директор', 'executive_director': 'Исполнительный директор',
+            'general_director': 'Генеральный директор',
+        }
+
+        users = []
+        for u in qs[:100]:
+            try:
+                role = u.profile.role
+            except Exception:
+                role = 'master'
+            full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+            users.append({
+                'id': u.id,
+                'username': u.username,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'full_name': full_name,
+                'role': role,
+                'role_label': role_labels.get(role, role),
+            })
+
+        return Response(users)
 
 
 # ══════════════════════════════════════════════════════════════════
