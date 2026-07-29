@@ -38,6 +38,7 @@ const MessagesScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [recipient, setRecipient] = useState<ChatUser | null>(null);
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [searchUser, setSearchUser] = useState('');
+  const [loading, setLoading] = useState(true);
   const [showUsers, setShowUsers] = useState(false);
   const [unread, setUnread] = useState(0);
   const flatListRef = useRef<FlatList>(null);
