@@ -1,14 +1,48 @@
 import * as FileSystem from 'expo-file-system';
-import { Alert, Platform, Linking } from 'react-native';
+import { Alert, Platform, Linking, ToastAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api, { getBaseUrl } from './api';
+import api from './api';
 import Constants from 'expo-constants';
 
 const LAST_CHECK_KEY = '@app_last_update_check';
 
+/** Получить код версии из разных источников */
+function getVersionCode(): number {
+  // 1. Из Constants (Expo managed)
+  const expoCfg = Constants.expoConfig as any;
+  if (expoCfg?.android?.versionCode) return parseInt(String(expoCfg.android.versionCode), 10);
+  if (expoCfg?.version) return parseInt(String(expoCfg.version), 10) || 1;
+
+  // 2. Из нативного манифеста
+  try {
+    const nativeVersion = Constants.nativeAppVersion;
+    if (nativeVersion) return parseInt(nativeVersion.replace(/\./g, ''), 10) || 1;
+  } catch {}
+
+  // 3. Из платформенных констант
+  if (Platform.OS === 'android') {
+    try {
+      const buildVersion = (Constants as any).nativeBuildVersion;
+      if (buildVersion) return parseInt(buildVersion, 10) || 1;
+    } catch {}
+  }
+
+  return 1;
+}
+
+function getVersionName(): string {
+  try {
+    const expoCfg = Constants.expoConfig as any;
+    if (expoCfg?.version) return expoCfg.version;
+  } catch {}
+  try {
+    return Constants.nativeAppVersion || '1.0.0';
+  } catch {}
+  return '1.0.0';
+}
+
 /**
  * Проверяет наличие обновления на сервере.
- * Вызывать при старте приложения и при ручной проверке.
  */
 export async function checkForUpdates(): Promise<{
   hasUpdate: boolean;
@@ -20,18 +54,15 @@ export async function checkForUpdates(): Promise<{
   fileHash?: string;
 } | null> {
   try {
-    const versionCode = Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.version || '1';
-    const version = Constants.expoConfig?.version || '1.0.0';
+    const versionCode = getVersionCode();
+    const version = getVersionName();
+
+    console.log('[Update] Checking: platform=android, version_code=' + versionCode + ', version=' + version);
 
     const res = await api.get('/app-versions/check/', {
-      params: {
-        platform: 'android',
-        version_code: versionCode,
-        version,
-      },
+      params: { platform: 'android', version_code: versionCode, version },
     });
 
-    // Сохраняем время последней проверки
     await AsyncStorage.setItem(LAST_CHECK_KEY, new Date().toISOString());
 
     return {
@@ -43,58 +74,85 @@ export async function checkForUpdates(): Promise<{
       fileSize: res.data.file_size,
       fileHash: res.data.file_hash,
     };
-  } catch (e) {
-    console.log('Update check failed:', e);
+  } catch (e: any) {
+    console.log('[Update] Check failed:', e?.message || e);
     return null;
   }
 }
 
 /**
- * Скачивает APK и открывает его для установки.
+ * Скачивает APK и запускает установку.
+ * Использует Linking.openURL для открытия файла — самый надёжный способ на Android.
  */
 export async function downloadAndInstall(downloadUrl: string): Promise<boolean> {
   try {
-    const baseUrl = await getBaseUrl();
-    const fullUrl = downloadUrl.startsWith('http')
-      ? downloadUrl
-      : `${baseUrl.replace('/api', '')}${downloadUrl}`;
+    const fileUri = FileSystem.cacheDirectory + 'update.apk';
 
-    const fileUri = FileSystem.documentDirectory + 'update.apk';
+    Alert.alert(
+      'Загрузка обновления',
+      'Начинается загрузка обновления. Это может занять несколько минут...',
+      [{ text: 'OK' }],
+    );
 
-    const downloadRes = await FileSystem.downloadAsync(fullUrl, fileUri);
+    console.log('[Update] Downloading from:', downloadUrl);
+    const downloadRes = await FileSystem.downloadAsync(downloadUrl, fileUri);
+    console.log('[Update] Download result:', downloadRes.status, downloadRes.uri);
 
     if (downloadRes.status !== 200) {
-      Alert.alert('Ошибка загрузки', `Сервер вернул статус ${downloadRes.status}`);
+      Alert.alert('Ошибка загрузки', `Код ответа: ${downloadRes.status}`);
       return false;
     }
 
-    // Открываем APK через Intent
+    // На Android — открываем APK через системный инсталлятор
     if (Platform.OS === 'android') {
       try {
+        // Способ 1: IntentLauncher с content URI
         const IntentLauncher = require('expo-intent-launcher');
-        IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
           data: downloadRes.uri,
           flags: 1,
           type: 'application/vnd.android.package-archive',
         });
-      } catch {
-        await Linking.openURL(downloadRes.uri);
+        return true;
+      } catch (err1: any) {
+        console.log('[Update] IntentLauncher failed:', err1?.message);
+        // Способ 2: Linking (работает если FileProvider настроен)
+        try {
+          await Linking.openURL(downloadRes.uri);
+          return true;
+        } catch (err2: any) {
+          console.log('[Update] Linking failed:', err2?.message);
+          // Способ 3: просто открываем файл (пользователь сам нажмёт установить)
+          try {
+            const IntentLauncher = require('expo-intent-launcher');
+            await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+              data: downloadRes.uri,
+              flags: 1,
+              type: 'application/vnd.android.package-archive',
+            });
+            return true;
+          } catch {
+            Alert.alert(
+              'Файл загружен',
+              'APK сохранён в кеше приложения. Найдите его в файловом менеджере и установите вручную.\n\nПуть: ' + downloadRes.uri,
+            );
+            return false;
+          }
+        }
       }
     } else {
       await Linking.openURL(downloadRes.uri);
+      return true;
     }
-
-    return true;
   } catch (e: any) {
-    Alert.alert('Ошибка обновления', e?.message || 'Не удалось установить обновление');
+    console.log('[Update] Install error:', e?.message, e?.stack);
+    Alert.alert('Ошибка обновления', e?.message || 'Не удалось установить. Попробуйте ещё раз.');
     return false;
   }
 }
 
 /**
  * Автоматическая проверка при старте.
- * Если обновление обязательно — блокирует работу до установки.
- * Если необязательно — предлагает обновиться.
  */
 export async function autoCheckUpdates(onResult: (update: {
   hasUpdate: boolean;
@@ -106,9 +164,8 @@ export async function autoCheckUpdates(onResult: (update: {
   const update = await checkForUpdates();
 
   if (!update || !update.hasUpdate) {
-    return; // Нет обновлений
+    return;
   }
 
-  // Вызываем колбэк — App.tsx сам решит что показать
   onResult(update);
 }
