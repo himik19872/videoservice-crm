@@ -588,10 +588,10 @@ class ReportSerializer(serializers.ModelSerializer):
 
 class OrderCreateSerializer(serializers.ModelSerializer):
     client_id = serializers.PrimaryKeyRelatedField(
-        queryset=Client.objects.all(), source='client'
+        queryset=Client.objects.all(), source='client', required=False, allow_null=True
     )
     region_id = serializers.PrimaryKeyRelatedField(
-        queryset=Region.objects.all(), source='region'
+        queryset=Region.objects.all(), source='region', required=False, allow_null=True
     )
     master_id = serializers.PrimaryKeyRelatedField(
         queryset=Master.objects.all(), source='master', required=False, allow_null=True

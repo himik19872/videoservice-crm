@@ -574,7 +574,7 @@ class Order(models.Model):
 
     number = models.CharField(max_length=20, unique=True, verbose_name=_('Номер'), default=generate_order_number)
     order_type = models.CharField(max_length=20, choices=ORDER_TYPES, verbose_name=_('Тип заявки'))
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='orders', verbose_name=_('Клиент'))
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders', verbose_name=_('Клиент'))
     master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, related_name='orders', verbose_name=_('Исполнитель'))
     helpers = models.ManyToManyField(User, blank=True, related_name='helper_orders', verbose_name=_('Помощники'))
     equipment = models.ForeignKey(Equipment, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders', verbose_name=_('Оборудование'))
