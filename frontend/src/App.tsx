@@ -61,6 +61,7 @@ import TariffsPage from './pages/TariffsPage';
 import EntrancesPage from './pages/EntrancesPage';
 import EntranceDetailPage from './pages/EntranceDetailPage';
 import BewardDevicesPage from './pages/BewardDevicesPage';
+import DownloadAppPage from './pages/DownloadAppPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
 import MasterOrdersPage from './pages/master/MasterOrdersPage';
 import MasterProfilePage from './pages/master/MasterProfilePage';
@@ -71,6 +72,11 @@ const { Content } = Layout;
 function AppContent() {
   const { user, isAuthenticated } = useAuth();
   useNotifications();  // WebSocket + браузерные уведомления
+
+  // Публичная страница скачивания приложения (без авторизации)
+  if (window.location.pathname === '/download-app') {
+    return <DownloadAppPage />;
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />;

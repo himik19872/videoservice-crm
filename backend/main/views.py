@@ -3869,9 +3869,11 @@ class AppVersionViewSet(viewsets.ModelViewSet):
     filterset_fields = ['platform', 'is_active']
 
     def get_permissions(self):
-        if self.action in ('check', 'download'):
-            # Проверка обновлений и скачивание — публичные (с авторизацией)
+        if self.action in ('check',):
             return [IsAuthenticated()]
+        if self.action == 'download':
+            # Скачивание APK — публичное (для страницы загрузки)
+            return [AllowAny()]
         return [IsAdminUser()]
 
     @action(detail=False, methods=['get'])
