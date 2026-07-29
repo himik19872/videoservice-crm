@@ -866,6 +866,34 @@ class SystemSettings(models.Model):
         return 'Системные настройки'
 
 
+class AppVersion(models.Model):
+    """Версия мобильного приложения для OTA-обновлений."""
+    PLATFORM_CHOICES = [
+        ('android', _('Android')),
+        ('ios', _('iOS')),
+    ]
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES, default='android', verbose_name=_('Платформа'))
+    version = models.CharField(max_length=20, verbose_name=_('Версия (semver)'), help_text='Например: 1.2.3')
+    version_code = models.PositiveIntegerField(default=1, verbose_name=_('Код версии (build number)'))
+    changelog = models.TextField(blank=True, verbose_name=_('Что нового'))
+    apk_file = models.FileField(upload_to='app/', null=True, blank=True, verbose_name=_('APK/IPA файл'))
+    file_size = models.PositiveIntegerField(default=0, verbose_name=_('Размер файла (байт)'))
+    file_hash = models.CharField(max_length=64, blank=True, verbose_name=_('SHA256 хеш файла'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активна'))
+    is_required = models.BooleanField(default=False, verbose_name=_('Обязательное обновление'))
+    min_android_version = models.CharField(max_length=10, default='5.0', verbose_name=_('Мин. версия Android'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
+
+    class Meta:
+        verbose_name = _('Версия приложения')
+        verbose_name_plural = _('Версии приложения')
+        ordering = ['-version_code']
+        unique_together = [['platform', 'version_code']]
+
+    def __str__(self):
+        return f'v{self.version} ({self.get_platform_display()}) — build {self.version_code}'
+
+
 class OrderMedia(models.Model):
     """Фото/видео отчёты мастера по заявке"""
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='media', verbose_name=_('Заявка'))

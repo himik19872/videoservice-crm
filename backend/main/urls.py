@@ -18,6 +18,7 @@ from .views import (
     OutgoingInvoiceViewSet,
     CallLogViewSet,
     AuditLogViewSet,
+    AppVersionViewSet,
     AsteriskSipPeerViewSet, AsteriskTrunkViewSet, AsteriskRouteViewSet,
     AsteriskIvrViewSet, AsteriskIvrOptionViewSet,
     AsteriskVoicemailViewSet, AsteriskCallRecordingViewSet,
@@ -93,6 +94,7 @@ router.register(r'asterisk/ivr-options', AsteriskIvrOptionViewSet, basename='ast
 router.register(r'asterisk/voicemails', AsteriskVoicemailViewSet, basename='asterisk-voicemails')
 router.register(r'asterisk/recordings', AsteriskCallRecordingViewSet, basename='asterisk-recordings')
 router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
+router.register(r'app-versions', AppVersionViewSet, basename='app-versions')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),

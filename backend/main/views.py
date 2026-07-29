@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django_filters.rest_framework import DjangoFilterBackend
@@ -28,6 +28,7 @@ from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, 
 from .models import AsteriskVoicemail, AsteriskCallRecording
 from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem, Apartment
 from .models import MCContact, MCPayment, MCComment
+from .models import AppVersion  # noqa
 from django.db.models import Q
 from .serializers import (
     RegionSerializer, MasterSerializer, ClientSerializer,
@@ -55,6 +56,7 @@ from .serializers import BuildingSystemSerializer
 from .serializers import MCContactSerializer, MCPaymentSerializer, MCCommentSerializer
 from .serializers import ApartmentSerializer, ApartmentDetailSerializer
 from .serializers import AuditLogSerializer
+from .serializers import AppVersionSerializer  # noqa
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -3853,6 +3855,70 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         if user.is_staff or role in ['admin', 'general_director', 'executive_director', 'technical_director']:
             return AuditLog.objects.select_related('user').all()
         return AuditLog.objects.select_related('user').filter(user=user)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Версии мобильного приложения (OTA-обновления)
+# ══════════════════════════════════════════════════════════════════
+
+class AppVersionViewSet(viewsets.ModelViewSet):
+    """Управление версиями мобильного приложения."""
+    queryset = AppVersion.objects.all()
+    serializer_class = AppVersionSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['platform', 'is_active']
+
+    def get_permissions(self):
+        if self.action in ('check', 'download'):
+            # Проверка обновлений и скачивание — публичные (с авторизацией)
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+
+    @action(detail=False, methods=['get'])
+    def check(self, request):
+        """Проверить наличие обновления.
+        Параметры: ?platform=android&version_code=15&version=1.2.0
+        """
+        platform = request.query_params.get('platform', 'android')
+        current_version_code = int(request.query_params.get('version_code', 0))
+        current_version = request.query_params.get('version', '0')
+
+        latest = AppVersion.objects.filter(
+            platform=platform, is_active=True
+        ).order_by('-version_code').first()
+
+        if not latest:
+            return Response({'has_update': False, 'message': 'Нет доступных версий'})
+
+        has_update = latest.version_code > current_version_code
+
+        return Response({
+            'has_update': has_update,
+            'is_required': latest.is_required if has_update else False,
+            'latest_version': latest.version,
+            'latest_version_code': latest.version_code,
+            'changelog': latest.changelog,
+            'file_size': latest.file_size,
+            'file_hash': latest.file_hash,
+            'download_url': request.build_absolute_uri(f'/api/app-versions/{latest.id}/download/') if has_update and latest.apk_file else None,
+            'released_at': latest.created_at.isoformat(),
+        })
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """Скачать APK/IPA файл"""
+        version = get_object_or_404(AppVersion, pk=pk, is_active=True)
+        if not version.apk_file:
+            return Response({'error': 'Файл не загружен'}, status=404)
+
+        file_path = version.apk_file.path
+        filename = f'videoservice-v{version.version}.apk'
+
+        from django.http import FileResponse
+        response = FileResponse(open(file_path, 'rb'), content_type='application/vnd.android.package-archive')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Length'] = version.file_size
+        return response
 
 
 # ══════════════════════════════════════════════════════════════════

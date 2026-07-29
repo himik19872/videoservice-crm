@@ -19,6 +19,7 @@ from .models import MCContact, MCPayment, MCComment
 
 from .models import AuditLog  # noqa
 from .models import Apartment  # noqa
+from .models import AppVersion  # noqa
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
@@ -773,6 +774,26 @@ class SystemSettingsPublicSerializer(serializers.ModelSerializer):
         fields = ['cp_logo_url', 'cp_header_text', 'cp_footer_text',
                   'cp_signature_name', 'cp_signature_title', 'cp_validity_days',
                   'cp_color', 'cp_show_logo']
+
+
+class AppVersionSerializer(serializers.ModelSerializer):
+    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AppVersion
+        fields = ['id', 'platform', 'platform_display', 'version', 'version_code',
+                  'changelog', 'file_size', 'file_hash',
+                  'is_required', 'min_android_version',
+                  'download_url', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def get_download_url(self, obj):
+        if obj.apk_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(f'/api/app-versions/{obj.id}/download/')
+        return None
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
