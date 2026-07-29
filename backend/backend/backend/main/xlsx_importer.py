@@ -196,23 +196,24 @@ def _extract_row(ws, row_num: int, fmt: str) -> Optional[Dict[str, Any]]:
         balance_end = cell(15).replace(',', '.')    # колонка 15 = Сальдо на конец
         bs = _safe_float(balance_start_dt) - _safe_float(balance_start_kt)
 
+        # ЛО — такой же формат адреса как Коммунар/СПб
+        parsed = _parse_erc_address(raw_address)
         return {
-            'apartment': '',
+            'apartment': parsed['apartment'],
             'name': name,
             'personal_account': personal_account,
             'raw_address': raw_address,
             'phone': '',
             'source': 'ЕРЦ ЛО',
             'source_file': '',
-            # Оставляем пустыми — будет нормализация через DaData в import_xlsx_file
-            '_city': '',
-            '_street_name': '',
-            '_street_type': '',
-            '_house_number': '',
-            '_building_number': '',
-            '_apartment': '',
-            '_district': '',
-            '_region': '',
+            '_city': parsed['city'],
+            '_street_name': parsed['street'],
+            '_street_type': parsed['street_type'],
+            '_house_number': parsed['house'],
+            '_building_number': parsed['building'],
+            '_apartment': parsed['apartment'],
+            '_district': parsed['district'],
+            '_region': parsed['region'],
             'balance_start': bs,
             'charged': _safe_float(charged),
             'paid': _safe_float(paid),
@@ -326,7 +327,7 @@ def _parse_erc_address(raw_address: str) -> dict:
         if len(parts) >= 3:
             # Город
             city_raw = parts[2].strip()
-            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст|тер)$', '', city_raw).strip()
+            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст)$', '', city_raw).strip()
             if not city:
                 city = city_raw
         if len(parts) >= 4:
@@ -335,7 +336,7 @@ def _parse_erc_address(raw_address: str) -> dict:
         # ── Город (1-й элемент) ──
         if parts:
             city_raw = parts[0]
-            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст|тер)$', '', city_raw).strip()
+            city = re.sub(r'\s+(г|п|д|гп|сп|рп|с|ст)$', '', city_raw).strip()
             if not city:
                 city = city_raw
 
@@ -399,51 +400,29 @@ def _parse_erc_address(raw_address: str) -> dict:
             if num_end:
                 apartment = num_end.group(1)
 
-    # ── Определяем район по подгороду в скобках (формат СПб: «Улица (Пушкин)») ──
-    # Ищем подгород в скобках — он определяет административный район
-    bracket_match = re.search(r'\(([^)]+)\)', raw_address)
-    sub_city = bracket_match.group(1).strip() if bracket_match else ''
-
-    if sub_city:
-        sub_district_map = {
-            'ломоносов': 'Петродворцовый р-н',
-            'петергоф': 'Петродворцовый р-н',
-            'стрельна': 'Петродворцовый р-н',
-            'пушкин': 'Пушкинский р-н',
-            'павловск': 'Пушкинский р-н',
-            'шушары': 'Пушкинский р-н',
-            'колпино': 'Колпинский р-н',
-            'металлострой': 'Колпинский р-н',
-            'кронштадт': 'Кронштадтский р-н',
-            'сестрорецк': 'Курортный р-н',
-            'зеленогорск': 'Курортный р-н',
-            'красное село': 'Красносельский р-н',
-            'горелово': 'Красносельский р-н',
-        }
-        district = sub_district_map.get(sub_city.lower(), '')
-
-    # Если нет скобок — старый алгоритм
-    if not district:
-        if 'Гатчин' in raw_address or 'Коммунар' in raw_address or 'Тайцы' in raw_address:
-            district = 'Гатчинский р-н'
-        elif 'Ломоносов' in raw_address or 'Петергоф' in raw_address or 'Стрельна' in raw_address:
-            district = 'Петродворцовый р-н'
-        elif 'Пушкин' in raw_address or 'Павловск' in raw_address or 'Шушары' in raw_address:
-            district = 'Пушкинский р-н'
-        elif 'Колпин' in raw_address:
-            district = 'Колпинский р-н'
-        elif 'Аннино' in raw_address or 'Горбунки' in raw_address or 'Виллози' in raw_address:
-            district = 'Ломоносовский р-н'
-        elif 'Кипень' in raw_address or 'Келози' in raw_address or 'Карлино' in raw_address:
-            district = 'Ломоносовский р-н'
-        elif 'Яльгелево' in raw_address or 'Разбегаево' in raw_address or 'Пеники' in raw_address:
-            district = 'Ломоносовский р-н'
-        elif 'Ижора' in raw_address:
-            district = 'Ломоносовский р-н'
-        elif 'Сертолово' in raw_address or 'Агалат' in raw_address:
-            district = 'Всеволожский р-н'
-        elif 'Горелово' in raw_address or 'Красное Село' in raw_address:
-            district = 'Красносельский р-н'
+    # ── Определяем район ──
+    if 'Гатчин' in raw_address or 'Коммунар' in raw_address or 'Тайцы' in raw_address:
+        district = 'Гатчинский р-н'
+    elif 'Ломоносов' in raw_address or 'Петергоф' in raw_address or 'Стрельна' in raw_address:
+        district = 'Петродворцовый р-н'
+    elif raw_address.startswith('Санкт-Петербург,'):
+        district = 'Петродворцовый р-н'  # по умолчанию для СПб пригородов
+    elif 'Пушкин' in raw_address:
+        district = 'Пушкинский р-н'
+    elif 'Колпин' in raw_address:
+        district = 'Колпинский р-н'
+    elif 'Аннино' in raw_address or 'Горбунки' in raw_address or 'Виллози' in raw_address:
+        district = 'Ломоносовский р-н'
+    elif 'Кипень' in raw_address or 'Келози' in raw_address or 'Карлино' in raw_address:
+        district = 'Ломоносовский р-н'
+    elif 'Яльгелево' in raw_address or 'Разбегаево' in raw_address or 'Пеники' in raw_address:
+        district = 'Ломоносовский р-н'
+    elif 'Ижора' in raw_address:
+        district = 'Ломоносовский р-н'
+    elif 'Сертолово' in raw_address or 'Агалат' in raw_address:
+        district = 'Всеволожский р-н'
+    elif 'Горелово' in raw_address or 'Красное Село' in raw_address:
+        district = 'Красносельский р-н'
 
     return {
         'city': city,
@@ -523,16 +502,11 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
         'total_rows': 0, 'clients_created': 0, 'clients_updated': 0,
         'buildings_created': 0, 'entrances_created': 0,
         'erc_created': 0, 'erc_updated': 0, 'dormitories': 0,
-        'skipped': 0, 'errors': [], 'failed_rows': [],
+        'skipped': 0, 'errors': [],
     }
 
     if period_date is None:
         period_date = date(2026, 5, 1)
-
-    # ── Кеш существующих клиентов по л/с (ускоряет импорт в 10-50 раз) ──
-    account_map = {}
-    for c in Client.objects.exclude(personal_account_number='').iterator():
-        account_map[c.personal_account_number] = c
 
     for r in range(data_start, ws.max_row + 1):
         try:
@@ -560,96 +534,22 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
 
             stats['total_rows'] += 1
 
-            # ── Нормализация адреса ──
+            # ── Нормализация через Dadata + fallback ──
+            # Если row_data содержит пред-распарсенные поля (_city, _street_name...) — используем их
             pre_city = row_data.get('_city', '')
             pre_street = row_data.get('_street_name', '')
             pre_house = row_data.get('_house_number', '')
             pre_apt = row_data.get('_apartment', '')
 
-            if fmt == 'agalatovo':
-                # Агалатово: собираем адрес из кусочков → нормализуем через DaData
-                parts = []
-                rgn = row_data.get('_region', '')
-                dst = row_data.get('_district', '')
-                if rgn:
-                    parts.append(rgn)
-                if dst:
-                    parts.append(dst)
-                if pre_city:
-                    parts.append(pre_city)
-                if pre_street and pre_street != '-':
-                    parts.append(pre_street)
-                if pre_house:
-                    parts.append(f'д {pre_house}')
-                if pre_apt:
-                    parts.append(f'кв {pre_apt}')
-                raw_for_dadata = ', '.join(parts)
-
-                addr = normalize_address(raw_for_dadata)
-                city = addr.get('city', '') or pre_city or 'Санкт-Петербург'
-                region_str = addr.get('region', '') or rgn
-                district = addr.get('district', '') or dst
-                street_name = addr.get('street_name', '') or (pre_street if pre_street != '-' else '')
-                street_type = addr.get('street_type', '') or 'street'
-                house_number = addr.get('house_number', '') or pre_house
-                building_number = addr.get('building_number', '') or ''
-                apartment = pre_apt or row_data.get('apartment', '') or addr.get('apartment', '')
-
-            elif fmt == 'lo':
-                # ЛО: DaData не понимает обратный формат — прямой парсер
-                parsed = _parse_erc_address(raw_address)
-                city = parsed.get('city', '') or 'Санкт-Петербург'
-                region_str = parsed.get('region', '')
-                district = parsed.get('district', '')
-                street_name = parsed.get('street', '')
-                street_type = parsed.get('street_type', 'street')
-                house_number = parsed.get('house', '')
-                building_number = parsed.get('building', '')
-                apartment = parsed.get('apartment', '')
-
-            elif fmt in ('erc', 'tszh'):
-                # СПб / Коммунар / ТСЖ: _extract_row уже распарсил через _parse_erc_address — берём готовое
+            if pre_city or pre_house:
                 city = pre_city or 'Санкт-Петербург'
                 region_str = row_data.get('_region', '')
                 district = row_data.get('_district', '')
                 street_name = pre_street
-                street_type = row_data.get('_street_type', 'street')
+                street_type = 'street'
                 house_number = pre_house
-                building_number = row_data.get('_building_number', '')
-                apartment = pre_apt
-
-            elif raw_address:
-                # Прочие форматы: пробуем DaData, при неудаче — fallback-парсер
-                addr = normalize_address(raw_address)
-                if not addr.get('street_name') or len(addr.get('street_name', '')) < 3:
-                    parsed = _parse_erc_address(raw_address)
-                    if parsed:
-                        city = parsed.get('city', '') or addr.get('city', '') or 'Санкт-Петербург'
-                        region_str = parsed.get('region', '') or addr.get('region', '')
-                        district = parsed.get('district', '') or addr.get('district', '')
-                        street_name = parsed.get('street', '') or addr.get('street_name', '')
-                        street_type = parsed.get('street_type', 'street')
-                        house_number = parsed.get('house', '') or addr.get('house_number', '')
-                        building_number = parsed.get('building', '') or addr.get('building_number', '')
-                        apartment = parsed.get('apartment', '') or row_data.get('apartment', '') or addr.get('apartment', '')
-                    else:
-                        city = addr.get('city', '') or 'Санкт-Петербург'
-                        region_str = addr.get('region', '')
-                        district = addr.get('district', '')
-                        street_name = addr.get('street_name', '')
-                        street_type = addr.get('street_type', '') or 'street'
-                        house_number = addr.get('house_number', '')
-                        building_number = addr.get('building_number', '')
-                        apartment = row_data.get('apartment', '') or addr.get('apartment', '')
-                else:
-                    city = addr.get('city', '') or 'Санкт-Петербург'
-                    region_str = addr.get('region', '')
-                    district = addr.get('district', '')
-                    street_name = addr.get('street_name', '')
-                    street_type = addr.get('street_type', '') or 'street'
-                    house_number = addr.get('house_number', '')
-                    building_number = addr.get('building_number', '')
-                    apartment = row_data.get('apartment', '') or addr.get('apartment', '')
+                building_number = ''
+                apartment = pre_apt or row_data.get('apartment', '')
             else:
                 addr = normalize_address(raw_address) if raw_address else {'success': False}
                 city = addr.get('city', '') or 'Санкт-Петербург'
@@ -660,17 +560,6 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 house_number = addr.get('house_number', '')
                 building_number = addr.get('building_number', '')
                 apartment = row_data.get('apartment', '') or addr.get('apartment', '')
-
-            # ── Проверка: адрес не распарсился ──
-            if not house_number or not city:
-                stats['failed_rows'].append({
-                    'row': r,
-                    'personal_account': personal_account,
-                    'name': name,
-                    'raw_address': raw_address,
-                    'reason': 'Не удалось определить дом/город',
-                })
-                continue
 
             # ── Регион с кодом ──
             region_obj = _get_or_create_region(city, region_str)
@@ -733,7 +622,7 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                     stats['dormitories'] += 1
 
             # ── УК ──
-            source = row_data.get('source', '')[:20]  # поле source ограничено 20 символами
+            source = row_data.get('source', '')
             mc_obj = None
             if source:
                 mc_obj, _ = ManagementCompany.objects.get_or_create(name=source)
@@ -765,28 +654,14 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 parts.append(f'кв. {apartment}')
             full_address = ', '.join(parts)
 
-            # ── Квартира (объект) ──
-            apartment_obj = None
-            if building and apartment:
-                from .models import Apartment
-                apartment_obj, _ = Apartment.objects.get_or_create(
-                    building=building, number=apartment,
-                    defaults={'entrance': entrance_obj}
-                )
-                if entrance_obj and not apartment_obj.entrance:
-                    apartment_obj.entrance = entrance_obj
-                    apartment_obj.save(update_fields=['entrance'])
-
             # ── Клиент (КЛЮЧ = personal_account) ──
-            existing = account_map.get(personal_account)
+            existing = Client.objects.filter(personal_account_number=personal_account).first()
 
             if existing:
                 if building and not existing.building:
                     existing.building = building
                 if entrance_obj and not existing.entrance:
                     existing.entrance = entrance_obj
-                if apartment_obj and not existing.apartment_obj:
-                    existing.apartment_obj = apartment_obj
                 if not existing.address or existing.address == 'г. , д. ':
                     existing.address = full_address
                 if name and existing.name == 'Не определено':
@@ -798,20 +673,18 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
                 existing.save()
                 stats['clients_updated'] += 1
             else:
-                new_client = Client.objects.create(
+                Client.objects.create(
                     name=name or 'Не определено',
                     address=full_address,
                     building=building,
                     entrance=entrance_obj,
                     apartment=apartment,
-                    apartment_obj=apartment_obj,
                     management_company=mc_obj,
                     personal_account_number=personal_account,
                     region=region_obj,
                     district=district,
-                    source=source or 'erc',
+                    source='erc',
                 )
-                account_map[personal_account] = new_client  # обновляем кеш
                 stats['clients_created'] += 1
 
             # ── ЕРЦ запись ──
@@ -837,20 +710,6 @@ def import_xlsx_file(file_path: str, source_filename: str = '', period_date: dat
 
         except Exception as e:
             stats['errors'].append(f'Строка {r}: {str(e)}')
-            try:
-                acc = str(ws.cell(r, 2).value or '')
-                nm = str(ws.cell(r, 3).value or '')
-                raw = str(ws.cell(r, 6).value or '')
-                stats['failed_rows'].append({
-                    'row': r, 'personal_account': acc, 'name': nm,
-                    'raw_address': raw, 'reason': str(e)[:200],
-                })
-            except:
-                pass
-
-        # Прогресс каждые 500 строк (чтобы видеть что процесс жив)
-        if r % 500 == 0:
-            logger.info(f'[IMPORT] row {r}/{ws.max_row}  clients:{stats["clients_created"]}+{stats["clients_updated"]}  bld:{stats["buildings_created"]}  err:{len(stats["errors"])}')
 
     logger.warning(
         f'[XLSX IMPORT] rows={stats["total_rows"]} +{stats["clients_created"]} ~{stats["clients_updated"]} '

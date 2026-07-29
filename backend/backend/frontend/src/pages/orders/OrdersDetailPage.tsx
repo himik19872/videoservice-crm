@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined, FileTextOutlined, PaperClipOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -36,6 +36,17 @@ const OrdersDetailPage: React.FC = () => {
   const [linkSearchText, setLinkSearchText] = useState('');
   const [linkSearchResults, setLinkSearchResults] = useState<any[]>([]);
   const [selectedLinkIds, setSelectedLinkIds] = useState<number[]>([]);
+
+  // Сметы / КП
+  const [estimateModalOpen, setEstimateModalOpen] = useState(false);
+  const [allEstimates, setAllEstimates] = useState<any[]>([]);
+  const [estimateSearch, setEstimateSearch] = useState('');
+  const [linkEstimateLoading, setLinkEstimateLoading] = useState(false);
+  // Создание КП из заявки
+  const [createEstimateModalOpen, setCreateEstimateModalOpen] = useState(false);
+  const [legalEntities, setLegalEntities] = useState<any[]>([]);
+  const [newEstimateForm, setNewEstimateForm] = useState({ name: '', legal_entity_id: undefined as number | undefined, note: '' });
+  const [createEstimateLoading, setCreateEstimateLoading] = useState(false);
 
   useEffect(() => {
     fetchOrder();
@@ -199,6 +210,98 @@ const OrdersDetailPage: React.FC = () => {
         }
       },
     });
+  };
+
+  // ─── Сметы / КП ───────────────────────────────────────────────
+
+  const fetchEstimatesForLink = async (search: string = '') => {
+    try {
+      const res = await api.get(`/estimates/?search=${search}&page_size=50`);
+      setAllEstimates(res.data.results || res.data || []);
+    } catch (e) {}
+  };
+
+  const fetchLegalEntities = async () => {
+    try {
+      const res = await api.get('/legal-entities/');
+      setLegalEntities(res.data.results || res.data || []);
+    } catch (e) {}
+  };
+
+  const openEstimateModal = () => {
+    setEstimateModalOpen(true);
+    setEstimateSearch('');
+    fetchEstimatesForLink();
+  };
+
+  const handleLinkEstimate = async (estimateId: number) => {
+    setLinkEstimateLoading(true);
+    try {
+      await api.post(`/orders/${order!.id}/link_estimate/`, { estimate_id: estimateId });
+      message.success('Смета привязана к заявке');
+      setEstimateModalOpen(false);
+      fetchOrder();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка привязки');
+    } finally {
+      setLinkEstimateLoading(false);
+    }
+  };
+
+  const handleUnlinkEstimate = async (estimateId: number) => {
+    Modal.confirm({
+      title: 'Отвязать смету?',
+      content: 'Смета будет отвязана от заявки, но не удалена.',
+      onOk: async () => {
+        try {
+          await api.post(`/orders/${order!.id}/unlink_estimate/`, { estimate_id: estimateId });
+          message.success('Смета отвязана');
+          fetchOrder();
+        } catch (e: any) {
+          message.error(e?.response?.data?.error || 'Ошибка');
+        }
+      },
+    });
+  };
+
+  const openCreateEstimateModal = () => {
+    setNewEstimateForm({
+      name: `КП по заявке №${order?.number || ''}`,
+      legal_entity_id: undefined,
+      note: `Авто-создано из заявки №${order?.number || ''}`,
+    });
+    setCreateEstimateModalOpen(true);
+    fetchLegalEntities();
+  };
+
+  const handleCreateEstimate = async () => {
+    if (!newEstimateForm.name.trim()) {
+      message.error('Введите название сметы');
+      return;
+    }
+    setCreateEstimateLoading(true);
+    try {
+      const payload: any = {
+        name: newEstimateForm.name.trim(),
+        note: newEstimateForm.note,
+      };
+      if (newEstimateForm.legal_entity_id) {
+        payload.legal_entity_id = newEstimateForm.legal_entity_id;
+      }
+      const res = await api.post(`/orders/${order!.id}/create_estimate/`, payload);
+      message.success(`Смета №${res.data.number} создана и привязана`);
+      setCreateEstimateModalOpen(false);
+      fetchOrder();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка создания');
+    } finally {
+      setCreateEstimateLoading(false);
+    }
+  };
+
+  const searchEstimates = (text: string) => {
+    setEstimateSearch(text);
+    fetchEstimatesForLink(text);
   };
 
   const openAssignModal = () => {
@@ -520,6 +623,168 @@ const OrdersDetailPage: React.FC = () => {
           )}
         </>
       )}
+
+      {/* Сметы и КП, привязанные к заявке */}
+      <Divider />
+      <Space style={{ marginBottom: 8 }}>
+        <Title level={5} style={{ margin: 0 }}>📎 Сметы и КП</Title>
+        <Button size="small" icon={<PaperClipOutlined />} onClick={openEstimateModal}>
+          Привязать существующую
+        </Button>
+        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreateEstimateModal}>
+          Создать КП
+        </Button>
+      </Space>
+      {order.estimates && order.estimates.length > 0 ? (
+        <Table
+          dataSource={order.estimates}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          style={{ marginBottom: 12 }}
+          columns={[
+            {
+              title: 'Номер', dataIndex: 'number', key: 'number',
+              render: (v: string, r: any) => (
+                <a onClick={() => navigate(`/estimates/${r.id}`)} style={{ cursor: 'pointer', fontWeight: 500 }}>
+                  {v}
+                </a>
+              ),
+            },
+            { title: 'Название', dataIndex: 'name', key: 'name' },
+            {
+              title: 'Статус', dataIndex: 'status', key: 'status',
+              render: (s: string, r: any) => <Tag>{r.status_display || s}</Tag>,
+            },
+            {
+              title: 'Итого', dataIndex: 'total', key: 'total',
+              render: (v: string) => <Text strong>{Number(v).toLocaleString('ru-RU')} ₽</Text>,
+            },
+            {
+              title: 'Создана', dataIndex: 'created_at', key: 'created_at',
+              render: (v: string) => v ? new Date(v).toLocaleDateString('ru-RU') : '—',
+            },
+            {
+              title: '', key: 'actions', width: 80,
+              render: (_: any, r: any) => (
+                <Button
+                  size="small"
+                  danger
+                  icon={<MinusCircleOutlined />}
+                  onClick={() => handleUnlinkEstimate(r.id)}
+                >
+                  Отвязать
+                </Button>
+              ),
+            },
+          ]}
+        />
+      ) : (
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>Нет привязанных смет или КП</Text>
+      )}
+
+      {/* Модалка: привязать существующую смету */}
+      <Modal
+        title="📎 Привязать смету к заявке"
+        open={estimateModalOpen}
+        onCancel={() => setEstimateModalOpen(false)}
+        footer={null}
+        width={700}
+      >
+        <Input.Search
+          placeholder="Поиск смет по номеру или названию..."
+          value={estimateSearch}
+          onChange={(e) => searchEstimates(e.target.value)}
+          style={{ marginBottom: 12 }}
+          allowClear
+        />
+        <Table
+          dataSource={allEstimates}
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 8 }}
+          loading={linkEstimateLoading}
+          columns={[
+            { title: 'Номер', dataIndex: 'number', key: 'number', width: 150 },
+            { title: 'Название', dataIndex: 'name', key: 'name' },
+            {
+              title: 'Статус', dataIndex: 'status', key: 'status',
+              render: (s: string, r: any) => <Tag>{r.status_display || s}</Tag>,
+            },
+            {
+              title: 'Итого', dataIndex: 'total', key: 'total',
+              render: (v: string) => <Text strong>{Number(v).toLocaleString('ru-RU')} ₽</Text>,
+            },
+            {
+              title: '', key: 'link', width: 100,
+              render: (_: any, r: any) => (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<PaperClipOutlined />}
+                  onClick={() => handleLinkEstimate(r.id)}
+                  loading={linkEstimateLoading}
+                >
+                  Привязать
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </Modal>
+
+      {/* Модалка: создать КП из заявки */}
+      <Modal
+        title="📄 Создать КП из заявки"
+        open={createEstimateModalOpen}
+        onOk={handleCreateEstimate}
+        onCancel={() => setCreateEstimateModalOpen(false)}
+        confirmLoading={createEstimateLoading}
+        okText="Создать"
+        cancelText="Отмена"
+        width={500}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            <Text strong>Название:</Text>
+            <Input
+              value={newEstimateForm.name}
+              onChange={(e) => setNewEstimateForm({ ...newEstimateForm, name: e.target.value })}
+              placeholder="Название сметы/КП"
+              style={{ marginTop: 4 }}
+            />
+          </div>
+          <div>
+            <Text strong>Юрлицо (наша компания):</Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              placeholder="Выберите юрлицо"
+              value={newEstimateForm.legal_entity_id}
+              onChange={(v) => setNewEstimateForm({ ...newEstimateForm, legal_entity_id: v })}
+              allowClear
+              options={legalEntities.map((le: any) => ({
+                value: le.id,
+                label: `${le.short_name || le.name} (ИНН: ${le.inn || '—'})`,
+              }))}
+            />
+          </div>
+          <div>
+            <Text strong>Примечание:</Text>
+            <Input.TextArea
+              value={newEstimateForm.note}
+              onChange={(e) => setNewEstimateForm({ ...newEstimateForm, note: e.target.value })}
+              rows={2}
+              style={{ marginTop: 4 }}
+            />
+          </div>
+          <div style={{ background: '#f6f8fa', padding: 12, borderRadius: 6, marginTop: 8 }}>
+            <Text type="secondary">
+              Клиент и адрес будут автоматически заполнены из заявки №{order?.number}.
+              После создания вы сможете добавить позиции (материалы и услуги) в карточке сметы.
+            </Text>
+          </div>
+        </Space>
+      </Modal>
 
       {/* Диалог / комментарии внутри заявки */}
       <Divider />

@@ -181,6 +181,21 @@ export interface Order {
   entrance_ip?: string | null;
   entrance_access_code?: string | null;
   entrance_programming_code?: string | null;
+  // Объединение заявок
+  parent_order?: { id: number; number: string } | null;
+  linked_orders?: { id: number; number: string; status: string; address: string }[];
+  // Сметы и КП
+  estimates?: EstimateInfo[];
+}
+
+export interface EstimateInfo {
+  id: number;
+  number: string;
+  name: string;
+  status: string;
+  status_display: string;
+  total: string;
+  created_at: string | null;
 }
 
 export interface IssueOrderInfo {

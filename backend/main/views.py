@@ -2138,22 +2138,7 @@ class SystemSettingsViewSet(viewsets.ViewSet):
             r = subprocess.run(['python', 'manage.py', 'migrate'], cwd='/app', capture_output=True, text=True, timeout=60)
             migrate_out = r.stdout[-300:]
 
-            # Шаг 4: сборка фронтенда
-            build_out = ''
-            frontend_dir = '/app/frontend'
-            if os.path.isdir(frontend_dir) and os.path.exists(os.path.join(frontend_dir, 'package.json')):
-                steps.append('npm install')
-                r = subprocess.run(['npm', 'install'], cwd=frontend_dir,
-                    capture_output=True, text=True, timeout=180, env={**os.environ, 'NODE_ENV': 'production'})
-                steps.append('npm build')
-                r = subprocess.run(['npm', 'run', 'build'], cwd=frontend_dir,
-                    capture_output=True, text=True, timeout=300, env={**os.environ, 'NODE_ENV': 'production', 'CI': 'true'})
-                build_out = r.stdout[-500:] + '\n' + r.stderr[-300:]
-                steps.append('build done')
-            else:
-                steps.append('no frontend dir')
-
-            # Шаг 5: перезапуск Daphne
+            # Шаг 4: перезапуск Daphne (touch asgi.py)
             subprocess.run(['touch', '/app/crm/asgi.py'], timeout=5)
 
             # Новый HEAD
@@ -2169,8 +2154,6 @@ class SystemSettingsViewSet(viewsets.ViewSet):
                 'commit': new_commit,
                 'steps': steps,
                 'migrate_output': migrate_out.strip(),
-                'build_output': build_out.strip()[-500:],
-                'frontend_built': has_host,
             })
         except Exception as e:
             return Response({'ok': False, 'error': str(e)})

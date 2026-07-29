@@ -11,13 +11,11 @@ from .views import (
     SupplierViewSet, SupplyInvoiceViewSet,
     IssueOrderViewSet, PurchaseRequestViewSet,
     ErcAccountViewSet, ErcBillingRecordViewSet,
-    ApartmentViewSet,
     BuildingEntranceViewSet, ManagementCompanyViewSet, TariffViewSet, PaymentRecordViewSet,
     BewardDeviceViewSet,
     StorageLocationViewSet,
     OutgoingInvoiceViewSet,
     CallLogViewSet,
-    AuditLogViewSet,
     AsteriskSipPeerViewSet, AsteriskTrunkViewSet, AsteriskRouteViewSet,
     AsteriskIvrViewSet, AsteriskIvrOptionViewSet,
     AsteriskVoicemailViewSet, AsteriskCallRecordingViewSet,
@@ -75,7 +73,6 @@ router.register(r'issue-orders', IssueOrderViewSet, basename='issue-orders')
 router.register(r'purchase-requests', PurchaseRequestViewSet, basename='purchase-requests')
 router.register(r'erc-accounts', ErcAccountViewSet, basename='erc-accounts')
 router.register(r'erc-billing', ErcBillingRecordViewSet, basename='erc-billing')
-router.register(r'apartments', ApartmentViewSet, basename='apartments')
 router.register(r'entrances', BuildingEntranceViewSet, basename='entrances')
 router.register(r'management-companies', ManagementCompanyViewSet, basename='management-companies')
 router.register(r'tariffs', TariffViewSet, basename='tariffs')
@@ -84,7 +81,6 @@ router.register(r'beward-devices', BewardDeviceViewSet, basename='beward-devices
 router.register(r'storage-locations', StorageLocationViewSet, basename='storage-locations')
 router.register(r'outgoing-invoices', OutgoingInvoiceViewSet, basename='outgoing-invoices')
 router.register(r'call-logs', CallLogViewSet, basename='call-logs')
-router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 router.register(r'asterisk/sip-peers', AsteriskSipPeerViewSet, basename='asterisk-sip-peers')
 router.register(r'asterisk/trunks', AsteriskTrunkViewSet, basename='asterisk-trunks')
 router.register(r'asterisk/routes', AsteriskRouteViewSet, basename='asterisk-routes')
@@ -92,7 +88,6 @@ router.register(r'asterisk/ivrs', AsteriskIvrViewSet, basename='asterisk-ivrs')
 router.register(r'asterisk/ivr-options', AsteriskIvrOptionViewSet, basename='asterisk-ivr-options')
 router.register(r'asterisk/voicemails', AsteriskVoicemailViewSet, basename='asterisk-voicemails')
 router.register(r'asterisk/recordings', AsteriskCallRecordingViewSet, basename='asterisk-recordings')
-router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),

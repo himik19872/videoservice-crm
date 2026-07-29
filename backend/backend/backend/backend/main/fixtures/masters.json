@@ -1,0 +1,35 @@
+[
+  {
+    "model": "main.master",
+    "pk": 1,
+    "fields": {
+      "user": 3,
+      "region": 1,
+      "phone": "+79001112233",
+      "is_available": true,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "main.master",
+    "pk": 2,
+    "fields": {
+      "user": 4,
+      "region": 2,
+      "phone": "+79002223344",
+      "is_available": true,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "main.master",
+    "pk": 3,
+    "fields": {
+      "user": 5,
+      "region": 3,
+      "phone": "+79003334455",
+      "is_available": true,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  }
+]

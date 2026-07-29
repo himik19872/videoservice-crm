@@ -1,0 +1,57 @@
+[
+  {
+    "model": "main.userprofile",
+    "pk": 1,
+    "fields": {
+      "user": 1,
+      "role": "admin",
+      "phone": "+79991112233",
+      "is_on_shift": false,
+      "shift_started_at": null
+    }
+  },
+  {
+    "model": "main.userprofile",
+    "pk": 2,
+    "fields": {
+      "user": 2,
+      "role": "dispatcher",
+      "phone": "+79992223344",
+      "is_on_shift": true,
+      "shift_started_at": null
+    }
+  },
+  {
+    "model": "main.userprofile",
+    "pk": 3,
+    "fields": {
+      "user": 3,
+      "role": "master",
+      "phone": "+79001112233",
+      "is_on_shift": true,
+      "shift_started_at": null
+    }
+  },
+  {
+    "model": "main.userprofile",
+    "pk": 4,
+    "fields": {
+      "user": 4,
+      "role": "master",
+      "phone": "+79002223344",
+      "is_on_shift": true,
+      "shift_started_at": null
+    }
+  },
+  {
+    "model": "main.userprofile",
+    "pk": 5,
+    "fields": {
+      "user": 5,
+      "role": "master",
+      "phone": "+79003334455",
+      "is_on_shift": false,
+      "shift_started_at": null
+    }
+  }
+]

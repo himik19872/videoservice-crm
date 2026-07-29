@@ -1,0 +1,20 @@
+[Unit]
+Description=VideoService CRM Express Proxy (:3000)
+After=network.target videoservice-crm-docker.service
+Requires=videoservice-crm-docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/himik/crm/server
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=API_HOST=localhost
+Environment=API_PORT=8000
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
