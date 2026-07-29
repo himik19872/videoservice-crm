@@ -44,6 +44,7 @@ const CompanyDetailPage: React.FC = () => {
   const [terminateOpen, setTerminateOpen] = useState(false);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const [orderCreating, setOrderCreating] = useState(false);
+  const [form] = Form.useForm();
   const [orderForm] = Form.useForm();
 
   const fetchAll = async () => {
