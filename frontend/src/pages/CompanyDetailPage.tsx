@@ -6,7 +6,7 @@ import {
 import {
   ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   PhoneOutlined, MailOutlined, DollarOutlined, CommentOutlined,
-  HomeOutlined, StopOutlined, CheckCircleOutlined,
+  HomeOutlined, StopOutlined, CheckCircleOutlined, FileAddOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import api from '../services/api';
@@ -33,6 +33,7 @@ const CompanyDetailPage: React.FC = () => {
   const [payments, setPayments] = useState<any[]>([]);
   const [allBuildings, setAllBuildings] = useState<any[]>([]);
   const [tariffs, setTariffs] = useState<any[]>([]);
+  const [estimates, setEstimates] = useState<any[]>([]);
 
   // Модалки
   const [editOpen, setEditOpen] = useState(false);
@@ -41,12 +42,14 @@ const CompanyDetailPage: React.FC = () => {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [addBldOpen, setAddBldOpen] = useState(false);
   const [terminateOpen, setTerminateOpen] = useState(false);
-  const [form] = Form.useForm();
+  const [createOrderOpen, setCreateOrderOpen] = useState(false);
+  const [orderCreating, setOrderCreating] = useState(false);
+  const [orderForm] = Form.useForm();
 
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [cRes, bRes, oRes, ctRes, cmRes, pRes, abRes, tRes] = await Promise.all([
+      const [cRes, bRes, oRes, ctRes, cmRes, pRes, abRes, tRes, estRes] = await Promise.all([
         api.get(`/management-companies/${id}/`),
         api.get(`/management-companies/${id}/buildings/`),
         api.get(`/management-companies/${id}/orders/`),
@@ -55,6 +58,7 @@ const CompanyDetailPage: React.FC = () => {
         api.get(`/management-companies/${id}/payments/`),
         api.get('/buildings/'),
         api.get('/tariffs/'),
+        api.get(`/management-companies/${id}/estimates_list/`),
       ]);
       setCompany(cRes.data);
       setBuildings(bRes.data || []);
@@ -62,6 +66,7 @@ const CompanyDetailPage: React.FC = () => {
       setContacts(ctRes.data || []);
       setComments(cmRes.data || []);
       setPayments(pRes.data || []);
+      setEstimates(estRes.data || []);
       setAllBuildings(abRes.data.results || abRes.data || []);
       setTariffs(tRes.data.results || tRes.data || []);
     } catch { message.error('Ошибка загрузки'); navigate('/management-companies'); }
@@ -127,6 +132,33 @@ const CompanyDetailPage: React.FC = () => {
     message.success('Оплата подтверждена'); fetchAll();
   };
 
+  const handleCreateOrder = async (v: any) => {
+    if (!company) return;
+    setOrderCreating(true);
+    try {
+      const payload: any = {
+        order_type: v.order_type || 'repair',
+        description: v.description,
+        priority: v.priority || 'medium',
+        region_id: v.region_id || undefined,
+        address: v.address || company.short_name || company.name,
+        management_company_id: company.id,
+      };
+      if (v.building_id) payload.building_id = v.building_id;
+      const res = await api.post('/orders/', payload);
+      message.success(`Заявка #${res.data.number} создана`);
+      setCreateOrderOpen(false);
+      orderForm.resetFields();
+      fetchAll();
+      // Открыть заявку в новой вкладке
+      navigate(`/orders/${res.data.id}`);
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Ошибка создания заявки');
+    } finally {
+      setOrderCreating(false);
+    }
+  };
+
   if (loading) return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>;
   if (!company) return null;
 
@@ -150,6 +182,9 @@ const CompanyDetailPage: React.FC = () => {
             onClick={handleToggleActive}
             type={company.is_active ? 'default' : 'primary'}>
             {company.is_active ? 'Снять с обслуживания' : 'Вернуть на обслуживание'}
+          </Button>
+          <Button icon={<FileAddOutlined />} type="primary" onClick={() => { orderForm.resetFields(); setCreateOrderOpen(true); }}>
+            Создать заявку
           </Button>
           <Button icon={<EditOutlined />} onClick={openEdit}>Редактировать</Button>
         </Space>
@@ -227,11 +262,29 @@ const CompanyDetailPage: React.FC = () => {
           children: <Table dataSource={orders} rowKey="id" size="small" pagination={{ pageSize: 20 }}
             columns={[
               { title: 'Номер', dataIndex: 'number', width: 150, render: (n: string, r: any) => <Link to={`/orders/${r.id}`}>#{n}</Link> },
+              { title: 'Клиент', dataIndex: 'client_name', width: 160, render: (v: string) => v || '—' },
+              { title: 'Адрес', dataIndex: 'address', width: 200, ellipsis: true, render: (v: string) => v || '—' },
               { title: 'Тип', dataIndex: 'order_type_display', width: 140, render: (t: string) => <Tag>{t}</Tag> },
               { title: 'Статус', dataIndex: 'status_display', width: 130, render: (t: string) => <Tag>{t}</Tag> },
               { title: 'Мастер', dataIndex: 'master_name', width: 160 },
               { title: 'Дата', dataIndex: 'created_at', width: 120, render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
             ]} locale={{ emptyText: 'Заявок нет' }} />
+        },
+
+        // ═══ Сметы ═══
+        {
+          key: 'estimates', label: `📑 Сметы (${estimates.length})`,
+          children: <Table dataSource={estimates} rowKey="id" size="small" pagination={{ pageSize: 20 }}
+            columns={[
+              { title: 'Номер', dataIndex: 'number', width: 150, render: (n: string, r: any) => <Link to={`/estimates/${r.id}`}>{n}</Link> },
+              { title: 'Название', dataIndex: 'name', ellipsis: true },
+              { title: 'Статус', dataIndex: 'status_display', width: 130, render: (t: string) => {
+                const colors: Record<string, string> = { 'Черновик': 'default', 'Отправлено': 'blue', 'Согласовано': 'green', 'Отклонено': 'red', 'В работе': 'orange', 'Завершено': 'green' };
+                return <Tag color={colors[t] || 'default'}>{t}</Tag>;
+              }},
+              { title: 'Сумма', dataIndex: 'total', width: 130, align: 'right' as const, render: (v: string) => v ? `${Number(v).toLocaleString('ru-RU')} ₽` : '—' },
+              { title: 'Дата', dataIndex: 'created_at', width: 120, render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
+            ]} locale={{ emptyText: 'Смет нет' }} />
         },
 
         // ═══ Контакты ═══
@@ -360,6 +413,57 @@ const CompanyDetailPage: React.FC = () => {
           <Form.Item name="amount_paid" label="Оплачено (₽)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
           <Button type="primary" htmlType="submit">Добавить</Button>
+        </Form>
+      </Modal>
+
+      {/* Модалка: создать заявку от имени УК */}
+      <Modal
+        title={`Новая заявка от ${company.short_name || company.name}`}
+        open={createOrderOpen}
+        onCancel={() => setCreateOrderOpen(false)}
+        footer={null}
+        width={500}
+      >
+        <Form form={orderForm} layout="vertical" onFinish={handleCreateOrder}>
+          <Form.Item name="order_type" label="Тип заявки" initialValue="repair">
+            <Select options={[
+              { label: '🔧 Ремонт', value: 'repair' },
+              { label: '🔌 Подключение', value: 'connection' },
+              { label: '🛠️ Монтаж', value: 'installation' },
+              { label: '📋 Обследование', value: 'inspection' },
+              { label: '🔍 Сервисное ТО', value: 'maintenance' },
+              { label: '📄 Договор на монтаж', value: 'contract_install' },
+              { label: '📄 Договор на обслуживание', value: 'contract_service' },
+              { label: '💰 Продажа', value: 'sale' },
+            ]} />
+          </Form.Item>
+          <Form.Item name="building_id" label="Дом (опционально)">
+            <Select
+              showSearch allowClear placeholder="Без привязки к дому"
+              filterOption={(input, option) => (option?.label as string || '').toLowerCase().includes(input.toLowerCase())}
+              options={buildings.map((b: any) => ({
+                label: `${b.street_name}, д. ${b.house_number}${b.building_number ? ' корп. ' + b.building_number : ''}`,
+                value: b.id,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="address" label="Адрес / описание места">
+            <Input placeholder={`${company.short_name || company.name}`} />
+          </Form.Item>
+          <Form.Item name="description" label="Описание" rules={[{ required: true, message: 'Опишите проблему' }]}>
+            <Input.TextArea rows={4} placeholder="Опишите, что нужно сделать..." />
+          </Form.Item>
+          <Form.Item name="priority" label="Приоритет" initialValue="medium">
+            <Select options={[
+              { label: '🟢 Низкий', value: 'low' },
+              { label: '🟡 Средний', value: 'medium' },
+              { label: '🟠 Высокий', value: 'high' },
+              { label: '🔴 Срочный', value: 'urgent' },
+            ]} />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" block loading={orderCreating}>
+            Создать заявку
+          </Button>
         </Form>
       </Modal>
     </div>

@@ -424,6 +424,11 @@ class OrderSerializer(serializers.ModelSerializer):
     linked_orders = serializers.SerializerMethodField()
     # Сметы / КП
     estimates = serializers.SerializerMethodField()
+    # Управляющая компания
+    management_company_id = serializers.PrimaryKeyRelatedField(
+        queryset=ManagementCompany.objects.all(), source='management_company', write_only=True, required=False, allow_null=True
+    )
+    management_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -440,6 +445,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'helpers', 'history', 'media', 'issue_orders',
             'entrance_ip', 'entrance_access_code', 'entrance_programming_code',
             'parent_order', 'parent_order_id', 'linked_orders', 'estimates',
+            'management_company_id', 'management_company_name',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -560,6 +566,11 @@ class OrderSerializer(serializers.ModelSerializer):
             'total': str(e.total), 'created_at': e.created_at.isoformat(),
         } for e in obj.estimates.all()]
 
+    def get_management_company_name(self, obj):
+        if obj.management_company:
+            return obj.management_company.short_name or obj.management_company.name
+        return None
+
 
 class ReportSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
@@ -594,12 +605,15 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     helper_ids = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all(), many=True, required=False, write_only=True
     )
+    management_company_id = serializers.PrimaryKeyRelatedField(
+        queryset=ManagementCompany.objects.all(), source='management_company', required=False, allow_null=True
+    )
 
     class Meta:
         model = Order
         fields = [
             'order_type', 'client_id', 'master_id', 'equipment_id',
-            'building_id', 'region_id',
+            'building_id', 'region_id', 'management_company_id',
             'city', 'street_name', 'house_number', 'building_number', 'apartment', 'entrance', 'address',
             'description', 'priority',
             'cost', 'payment_type', 'photo_report_required', 'deadline', 'scheduled_at',
@@ -1044,11 +1058,13 @@ class CommercialEstimateSerializer(serializers.ModelSerializer):
     legal_entity_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    management_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = CommercialEstimate
         fields = ['id', 'number', 'name', 'client', 'client_name', 'legal_entity',
-                  'legal_entity_name', 'order', 'status', 'status_display', 'discount',
+                  'legal_entity_name', 'order', 'management_company', 'management_company_name',
+                  'status', 'status_display', 'discount',
                   'commission', 'dealer_fee', 'unexpected_costs', 'delivery_type',
                   'delivery_cost', 'tax_type', 'tax_rate', 'employee', 'employee_phone',
                   'total_materials', 'total_services', 'subtotal', 'total', 'total_cost',
@@ -1069,6 +1085,11 @@ class CommercialEstimateSerializer(serializers.ModelSerializer):
     def get_created_by_name(self, obj):
         if obj.created_by:
             return obj.created_by.get_full_name() or obj.created_by.username
+        return None
+
+    def get_management_company_name(self, obj):
+        if obj.management_company:
+            return obj.management_company.short_name or obj.management_company.name
         return None
 
 

@@ -615,6 +615,10 @@ class Order(models.Model):
     parent_order = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='linked_orders', verbose_name=_('Главная заявка (объединение)'))
 
+    # Привязка к УК (если заявка создана от имени УК, а не жителя)
+    management_company = models.ForeignKey('ManagementCompany', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='orders', verbose_name=_('Управляющая компания'))
+
     class Meta:
         verbose_name = _('Заявка')
         verbose_name_plural = _('Заявки')
@@ -1591,6 +1595,7 @@ class CommercialEstimate(models.Model):
     client = models.ForeignKey('Client', on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates', verbose_name=_('Клиент (контрагент)'))
     legal_entity = models.ForeignKey(LegalEntity, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Юрлицо (наша компания)'))
     order = models.ForeignKey('Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates', verbose_name=_('Связанная заявка'))
+    management_company = models.ForeignKey('ManagementCompany', on_delete=models.SET_NULL, null=True, blank=True, related_name='estimates', verbose_name=_('Управляющая компания'))
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name=_('Статус'))
 
     # Скидки и наценки

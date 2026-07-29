@@ -4069,17 +4069,40 @@ class ManagementCompanyViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def orders(self, request, pk=None):
-        """История заявок по всем домам этой УК"""
+        """История заявок: прямые (management_company) + по домам этой УК"""
         company = self.get_object()
+        # Заявки напрямую от УК
+        direct_orders = Order.objects.filter(management_company=company)
+        # Заявки по домам УК
         building_ids = company.buildings_list.values_list('id', flat=True)
-        orders = Order.objects.filter(building_id__in=building_ids).select_related('master__user').order_by('-created_at')
+        building_orders = Order.objects.filter(building_id__in=building_ids)
+        # Объединяем
+        all_orders = (direct_orders | building_orders).select_related('master__user', 'client', 'management_company').distinct().order_by('-created_at')
         return Response([{
             'id': o.id, 'number': o.number, 'order_type': o.order_type,
             'order_type_display': o.get_order_type_display(), 'status': o.status,
             'status_display': o.get_status_display(),
             'master_name': o.master.user.get_full_name() or o.master.user.username if o.master else '—',
+            'address': o.address,
+            'client_name': o.client.name if o.client else (o.management_company.short_name if o.management_company else ''),
             'created_at': o.created_at.isoformat(),
-        } for o in orders])
+        } for o in all_orders])
+
+    @action(detail=True, methods=['get'])
+    def estimates_list(self, request, pk=None):
+        """Сметы / КП, выставленные этой УК"""
+        company = self.get_object()
+        # Прямые сметы на УК
+        direct = CommercialEstimate.objects.filter(management_company=company)
+        # Сметы через заявки УК
+        order_ids = Order.objects.filter(management_company=company).values_list('id', flat=True)
+        via_orders = CommercialEstimate.objects.filter(order_id__in=order_ids)
+        all_estimates = (direct | via_orders).distinct().order_by('-created_at')
+        return Response([{
+            'id': e.id, 'number': e.number, 'name': e.name,
+            'status': e.status, 'status_display': e.get_status_display(),
+            'total': str(e.total), 'created_at': e.created_at.isoformat(),
+        } for e in all_estimates])
 
     @action(detail=True, methods=['get', 'post'])
     def contacts(self, request, pk=None):

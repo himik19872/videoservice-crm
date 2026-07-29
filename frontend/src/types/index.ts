@@ -185,6 +185,8 @@ export interface Order {
   parent_order_id?: number | null;
   linked_orders?: { id: number; number: string; status: string; address: string }[];
   estimates?: EstimateInfo[];
+  management_company_id?: number | null;
+  management_company_name?: string | null;
 }
 
 export interface EstimateInfo {
