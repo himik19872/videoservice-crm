@@ -572,6 +572,15 @@ class OrderViewSet(viewsets.ModelViewSet):
             except Exception:
                 pass
 
+        # Если клиент — УК, пишем в историю управляющей компании
+        if order.client and order.client.management_company:
+            MCComment.objects.create(
+                management_company=order.client.management_company,
+                author=request.user,
+                comment_type='request',
+                text=f'📋 Создана заявка №{order.number} ({order.get_order_type_display()}) — {order.address or order.full_address}'
+            )
+
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
@@ -1239,6 +1248,15 @@ class OrderViewSet(viewsets.ModelViewSet):
             notes=f'📎 Привязана смета №{estimate.number} ({estimate.total} ₽)'
         )
 
+        # Если клиент — УК, пишем в историю управляющей компании
+        if order.client and order.client.management_company:
+            MCComment.objects.create(
+                management_company=order.client.management_company,
+                author=request.user,
+                comment_type='note',
+                text=f'📎 Привязана смета №{estimate.number} на {estimate.total} ₽ (заявка №{order.number})'
+            )
+
         return Response({'ok': True, 'estimate_id': estimate.id, 'estimate_number': estimate.number})
 
     @action(detail=True, methods=['post'])
@@ -1299,6 +1317,15 @@ class OrderViewSet(viewsets.ModelViewSet):
             old_status=order.status, new_status=order.status,
             notes=f'📎 Создана смета №{estimate.number}'
         )
+
+        # Если клиент — УК, пишем в историю управляющей компании
+        if order.client and order.client.management_company:
+            MCComment.objects.create(
+                management_company=order.client.management_company,
+                author=request.user,
+                comment_type='note',
+                text=f'📄 Создано КП №{estimate.number} на {estimate.total} ₽ (заявка №{order.number}) — {estimate.name}'
+            )
 
         return Response(CommercialEstimateSerializer(estimate).data, status=status.HTTP_201_CREATED)
 
