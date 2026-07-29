@@ -263,6 +263,49 @@ class MasterViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': f'Ошибка связи с Traccar: {e}'}, status=500)
 
+    @action(detail=False, methods=['post'])
+    def update_all_gps(self, request):
+        """Запросить координаты ВСЕХ мастеров из Traccar (массовый refresh)."""
+        import requests
+
+        settings = TraccarSettings.objects.first()
+        if not settings or not settings.is_active:
+            return Response({'error': 'Интеграция Traccar не активна'}, status=400)
+
+        devices = TraccarDevice.objects.filter(master__isnull=False)
+        if not devices:
+            return Response({'error': 'Нет привязанных устройств'}, status=404)
+
+        try:
+            resp = requests.get(
+                f"{settings.server_url.rstrip('/')}/api/positions",
+                auth=(settings.username, settings.password),
+                timeout=15
+            )
+        except Exception as e:
+            return Response({'error': f'Ошибка связи с Traccar: {e}'}, status=500)
+
+        updated = 0
+        errors = 0
+        if resp.status_code == 200:
+            positions = {p['deviceId']: p for p in resp.json()}
+            for device in devices:
+                pos = positions.get(device.internal_device_id)
+                if pos:
+                    device.last_latitude = pos.get('latitude')
+                    device.last_longitude = pos.get('longitude')
+                    device.last_speed = round(pos.get('speed', 0) * 1.852, 1) if pos.get('speed') else None
+                    device.last_update = timezone.now()
+                    device.is_online = True
+                    device.save()
+                    updated += 1
+                else:
+                    device.is_online = False
+                    device.save()
+                    errors += 1
+
+        return Response({'ok': True, 'updated': updated, 'errors': errors})
+
 
 class ClientViewSet(viewsets.ModelViewSet):
     queryset = Client.objects.all()
@@ -1080,10 +1123,6 @@ class OrderViewSet(viewsets.ModelViewSet):
         order = self.get_object()
         if not order.master:
             return Response({'error': 'У заявки нет назначенного мастера'}, status=400)
-        try:
-            device = order.master.traccar_device
-        except Exception:
-            return Response({'error': 'У мастера не привязан GPS-трекер'}, status=400)
 
         # Собираем точки: координаты мастера на каждый момент истории
         history = OrderHistory.objects.filter(order=order).order_by('changed_at')
@@ -1096,16 +1135,36 @@ class OrderViewSet(viewsets.ModelViewSet):
                 'lon': h.master_lon,
             })
 
-        # Текущая позиция мастера
-        current = {
-            'lat': device.last_latitude,
-            'lon': device.last_longitude,
-            'speed': device.last_speed,
-            'is_online': device.is_online,
-            'last_update': device.last_update.isoformat() if device.last_update else None,
-        }
+        # Текущая позиция: Traccar (если есть), иначе последняя точка из истории
+        current = None
+        source = None
+        try:
+            device = order.master.traccar_device
+            if device and device.last_latitude is not None:
+                current = {
+                    'lat': device.last_latitude,
+                    'lon': device.last_longitude,
+                    'speed': device.last_speed,
+                    'is_online': device.is_online,
+                    'last_update': device.last_update.isoformat() if device.last_update else None,
+                }
+                source = 'traccar'
+        except Exception:
+            pass
 
-        return Response({'history': result, 'current': current})
+        if current is None:
+            last_hist = history.filter(master_lat__isnull=False, master_lon__isnull=False).last()
+            if last_hist:
+                current = {
+                    'lat': last_hist.master_lat,
+                    'lon': last_hist.master_lon,
+                    'speed': None,
+                    'is_online': (timezone.now() - last_hist.changed_at).total_seconds() < 3600,
+                    'last_update': last_hist.changed_at.isoformat() if last_hist.changed_at else None,
+                }
+                source = 'phone'
+
+        return Response({'history': result, 'current': current, 'source': source})
 
     @action(detail=True, methods=['get', 'post'])
     def comments(self, request, pk=None):
@@ -3986,6 +4045,96 @@ class BewardDeviceViewSet(viewsets.ModelViewSet):
     search_fields = ['ip_address', 'address', 'region', 'notes']
     pagination_class = None  # все записи сразу (9555 шт.), фильтрация на фронте
 
+    def get_queryset(self):
+        return BewardDevice.objects.select_related('building', 'entrance').all()
+
+    def check_permissions(self, request):
+        # проверяем IsAuthenticated
+        super().check_permissions(request)
+        # чтение — всем авторизованным
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return
+        # изменение — только уполномоченным ролям
+        from rest_framework.exceptions import PermissionDenied
+        allowed = ('admin', 'dispatcher', 'engineer', 'chief_engineer',
+                   'tech_director', 'executive_director', 'general_director', 'supervisor')
+        role = getattr(request.user.profile, 'role', None)
+        if role not in allowed:
+            raise PermissionDenied('Нет прав на изменение справочника Beward')
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        """Экспорт объединённого справочника Beward + подъезды с IP в Excel."""
+        import openpyxl, io
+        from django.http import HttpResponse
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Beward + подъезды'
+
+        # Заголовки
+        headers = ['Источник', 'IP-адрес', 'Район', 'Адрес', 'Подъезд',
+                   'Квартиры (с)', 'Квартиры (по)', 'Код доступа', 'Код программирования',
+                   'Код открытия (доп.)', 'Дом (ID)', 'Подъезд (ID)', 'Примечания']
+        ws.append(headers)
+
+        # Стираем старые стили — жирный заголовок
+        for col in range(1, len(headers) + 1):
+            ws.cell(1, col).font = openpyxl.styles.Font(bold=True)
+
+        # 1. Данные из BewardDevice
+        for d in BewardDevice.objects.select_related('building', 'entrance').all():
+            ws.append([
+                'Beward',
+                d.ip_address,
+                d.region,
+                d.address,
+                d.entrance_number,
+                '',  # apartment_range — текст, разберём ниже
+                '',  # 
+                d.access_code,
+                d.programming_code,
+                d.door_opening_code,
+                str(d.building_id or ''),
+                str(d.entrance_id or ''),
+                d.apartment_range,  # пусть будет в примечаниях для Beward
+            ])
+
+        # 2. Подъезды с IP (из BuildingEntrance)
+        from .models import BuildingEntrance as BldEntrance
+        for e in BldEntrance.objects.select_related('building').exclude(ip_address=''):
+            ws.append([
+                'Подъезд дома',
+                e.ip_address,
+                e.building.district if e.building else '',
+                str(e.building) if e.building else '',
+                str(e.number),
+                str(e.apartment_from) if e.apartment_from else '',
+                str(e.apartment_to) if e.apartment_to else '',
+                e.access_code or '',
+                e.programming_code or '',
+                '',
+                str(e.building_id or ''),
+                str(e.id),
+                e.notes or '',
+            ])
+
+        # Автоширина колонок
+        for col_cells in ws.columns:
+            max_len = 0
+            for cell in col_cells:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 2, 40)
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        response = HttpResponse(output.read(),
+                                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename=beward_full_export.xlsx'
+        return response
 
 # ══════════════════════════════════════════════════════════════════
 # Эндпоинты импорта из Excel
