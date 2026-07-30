@@ -24,7 +24,7 @@ const LegalEntitiesManager: React.FC = () => {
     name: '', short_name: '', inn: '', kpp: '', ogrn: '',
     legal_address: '', actual_address: '', phone: '', email: '',
     bank_name: '', bik: '', corr_account: '', settlement_account: '',
-    director: '', tax_system: 'usn', is_default: false,
+    director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
   });
 
   useEffect(() => { fetchData(); }, []);
@@ -45,7 +45,7 @@ const LegalEntitiesManager: React.FC = () => {
       name: '', short_name: '', inn: '', kpp: '', ogrn: '',
       legal_address: '', actual_address: '', phone: '', email: '',
       bank_name: '', bik: '', corr_account: '', settlement_account: '',
-      director: '', tax_system: 'usn', is_default: false,
+      director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
     });
     setModalOpen(true);
   };
@@ -60,7 +60,7 @@ const LegalEntitiesManager: React.FC = () => {
       bank_name: rec.bank_name || '', bik: rec.bik || '',
       corr_account: rec.corr_account || '', settlement_account: rec.settlement_account || '',
       director: rec.director || '', tax_system: rec.tax_system || 'usn',
-      is_default: rec.is_default || false,
+      is_default: rec.is_default || false, vat_rate: rec.vat_rate || 0,
     });
     setModalOpen(true);
   };
@@ -153,6 +153,10 @@ const LegalEntitiesManager: React.FC = () => {
           <div>
             <label>Система налогообложения</label>
             <Select value={formData.tax_system} onChange={v => setFormData({ ...formData, tax_system: v })} options={TAX_SYSTEMS} style={{ width: '100%' }} />
+          </div>
+          <div>
+            <label>Ставка НДС (%) — 0 если без НДС</label>
+            <Input type="number" value={formData.vat_rate} onChange={e => setFormData({ ...formData, vat_rate: parseFloat(e.target.value) || 0 })} placeholder="20" />
           </div>
           <div>
             <label>Юридический адрес</label>
