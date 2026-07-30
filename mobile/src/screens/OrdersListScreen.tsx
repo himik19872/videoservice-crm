@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   RefreshControl, ActivityIndicator, TextInput,
@@ -62,12 +62,27 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
     }
   };
 
-  const filtered = orders
-    .filter(o => statusFilter === 'all' || !['completed', 'confirmed', 'cancelled'].includes(o.status))
-    .filter(o =>
-      o.number?.toLowerCase().includes(search.toLowerCase()) ||
-      o.client_info?.full_name?.toLowerCase().includes(search.toLowerCase())
-    );
+  const filtered = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+
+    return orders
+      .filter(o => {
+        // Скрываем завершённые/отменённые/подтверждённые
+        if (['completed', 'confirmed', 'cancelled'].includes(o.status)) return false;
+
+        // Если не staff (мастер) — показываем только заявки на сегодня и просроченные
+        if (!isStaff && o.scheduled_at) {
+          const scheduledDate = new Date(o.scheduled_at).toISOString().slice(0, 10);
+          return scheduledDate <= today.slice(0, 10);
+        }
+        return true;
+      })
+      .filter(o =>
+        o.number?.toLowerCase().includes(search.toLowerCase()) ||
+        o.client_info?.full_name?.toLowerCase().includes(search.toLowerCase())
+      );
+  }, [orders, search, isStaff]);
 
   const renderOrder = ({ item }: { item: Order }) => (
     <TouchableOpacity
@@ -90,7 +105,11 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
           {item.priority === 'urgent' ? '🔴 Срочно' : item.priority === 'high' ? '🟠 Высокий' : item.priority === 'medium' ? '🟡 Средний' : '🟢 Низкий'}
         </Text>
       </View>
-    </TouchableOpacity>
+      {item.scheduled_at && (
+        <Text style={[styles.scheduled, { color: theme.primary }]}>
+          📅 {new Date(item.scheduled_at).toLocaleDateString('ru-RU')}
+        </Text>
+      )}
   );
 
   return (
@@ -178,6 +197,7 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between' },
   type: { fontSize: 12 },
   priority: { fontSize: 12 },
+  scheduled: { fontSize: 12, marginTop: 4 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 16 },
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },

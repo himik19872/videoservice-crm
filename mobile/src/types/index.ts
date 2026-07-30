@@ -65,6 +65,8 @@ export interface Order {
   entrance_programming_code?: string | null;
   created_at: string;
   updated_at: string;
+  scheduled_at?: string | null;
+  deadline?: string | null;
   completed_at?: string;
   confirmed_at?: string;
   history?: OrderHistory[];

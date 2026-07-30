@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox, Popconfirm } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined, FileTextOutlined } from '@ant-design/icons';
+import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox, Popconfirm, DatePicker } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined, FileTextOutlined, CalendarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import type { Order, Master } from '../../types';
 import MasterMap from '../../components/MasterMap';
+import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 
@@ -22,6 +23,7 @@ const OrdersDetailPage: React.FC = () => {
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [selectedMasterId, setSelectedMasterId] = useState<number | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [scheduledAt, setScheduledAt] = useState<string | null>(null);
   const [gpsHistory, setGpsHistory] = useState<any>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
@@ -155,11 +157,15 @@ const OrdersDetailPage: React.FC = () => {
     }
     setUpdating(true);
     try {
-      const response = await api.post(`/orders/${order.id}/assign/`, payload);
+      const response = await api.post(`/orders/${order.id}/assign/`, {
+        ...payload,
+        scheduled_at: scheduledAt || undefined,
+      });
       setOrder(response.data);
       setAssignModalOpen(false);
       setSelectedMasterId(null);
       setSelectedUserId(null);
+      setScheduledAt(null);
       message.success('Сотрудник назначен');
     } catch (error) {
       message.error('Ошибка назначения');
@@ -231,6 +237,7 @@ const OrdersDetailPage: React.FC = () => {
   const openAssignModal = () => {
     setSelectedMasterId(null);
     setSelectedUserId(null);
+    setScheduledAt(order?.scheduled_at || null);
     setAssignModalOpen(true);
   };
 
@@ -1181,8 +1188,23 @@ const OrdersDetailPage: React.FC = () => {
         okButtonProps={{ disabled: !selectedMasterId && !selectedUserId }}
         width={450}
       >
-        <Tabs
-          items={[
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+              <CalendarOutlined /> Запланировать на дату (опционально)
+            </Text>
+            <DatePicker
+              showTime={{ format: 'HH:mm' }}
+              format="DD.MM.YYYY HH:mm"
+              placeholder="Оставить текущую дату"
+              style={{ width: '100%' }}
+              value={scheduledAt ? dayjs(scheduledAt) : null}
+              onChange={(d) => setScheduledAt(d ? d.toISOString() : null)}
+            />
+          </div>
+          <Divider style={{ margin: '8px 0' }} />
+          <Tabs
+            items={[
             {
               key: 'masters',
               label: '👨‍🔧 Мастера',
@@ -1224,7 +1246,8 @@ const OrdersDetailPage: React.FC = () => {
               ),
             },
           ]}
-        />
+          />
+        </Space>
       </Modal>
 
       {/* Модалка объединения заявок */}
