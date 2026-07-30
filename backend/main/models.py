@@ -817,6 +817,8 @@ class SystemSettings(models.Model):
     cp_validity_days = models.PositiveIntegerField(default=7, verbose_name=_('Срок действия КП (дней)'))
     cp_color = models.CharField(max_length=20, default='#1a3e60', verbose_name=_('Цвет шапки КП (hex)'))
     cp_show_logo = models.BooleanField(default=True, verbose_name=_('Показывать логотип'))
+    cp_logo_file = models.ImageField(upload_to='settings/', null=True, blank=True, verbose_name=_('Логотип (файл)'))
+    cp_signature_file = models.ImageField(upload_to='settings/', null=True, blank=True, verbose_name=_('Подпись (файл)'))
 
     # Обновление с GitHub
     git_repo_url = models.CharField(max_length=500, default='https://github.com/himik19872/videoservice-crm.git', blank=True, verbose_name=_('GitHub репозиторий'))

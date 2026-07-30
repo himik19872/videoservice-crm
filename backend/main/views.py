@@ -3382,8 +3382,8 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
     queryset = CommercialEstimate.objects.all()
     serializer_class = CommercialEstimateSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'client', 'legal_entity', 'order']
-    search_fields = ['number', 'name', 'client__name']
+    filterset_fields = ['status', 'client', 'legal_entity', 'order', 'created_by', 'management_company']
+    search_fields = ['number', 'name', 'client__name', 'created_by__first_name', 'created_by__last_name', 'created_by__username']
     ordering_fields = ['created_at', 'total', 'status', 'number']
 
     def perform_create(self, serializer):
@@ -3509,8 +3509,33 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
 
         color = settings_data.get('cp_color', '#1a3e60')
         logo_tag = ''
-        if settings_data.get('cp_show_logo') and settings_data.get('cp_logo_url'):
-            logo_tag = f'<img src="{settings_data["cp_logo_url"]}" style="max-height:60px;" />'
+        # Логотип: сначала из загруженного файла, потом из URL
+        if settings_data.get('cp_show_logo'):
+            logo_url = None
+            if settings_qs and settings_qs.cp_logo_file:
+                logo_url = request.build_absolute_uri(settings_qs.cp_logo_file.url)
+            elif settings_data.get('cp_logo_url'):
+                logo_url = settings_data['cp_logo_url']
+            if logo_url:
+                logo_tag = f'<img src="{logo_url}" style="max-height:60px;" />'
+
+        # Подпись: из файла или текстовая
+        signature_html = ''
+        if settings_qs and settings_qs.cp_signature_file:
+            sig_url = request.build_absolute_uri(settings_qs.cp_signature_file.url)
+            signature_html = f'<img src="{sig_url}" style="max-height:50px; margin-top:8px;" />'
+
+        # Автор сметы (тот, кто создал)
+        author_name = ''
+        author_phone = ''
+        if estimate.created_by:
+            author_name = estimate.created_by.get_full_name() or estimate.created_by.username
+            try:
+                author_phone = estimate.created_by.profile.phone or ''
+            except Exception:
+                pass
+
+        # Реквизиты автора для подписи
 
         items_html = ''
         for idx, item in enumerate(items, 1):
@@ -3611,7 +3636,13 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 
 <div class="footer">
     <p>{settings_data.get('cp_footer_text', 'С уважением, команда Видео Сервис')}</p>
-    {f'<p>_________________ {settings_data.get("cp_signature_name", "")}<br><em>{settings_data.get("cp_signature_title", "")}</em></p>' if settings_data.get('cp_signature_name') else ''}
+    <div class="signature-block">
+        {signature_html}
+        <p style="margin:8px 0 2px;">_________________</p>
+        <p style="margin:0; font-weight:600;">{author_name or settings_data.get('cp_signature_name', '')}</p>
+        <p style="margin:0; color:#888;">{settings_data.get('cp_signature_title', '')}</p>
+        {f'<p style="margin:0; color:#1677ff;">📞 {author_phone}</p>' if author_phone else ''}
+    </div>
 </div>
 </body></html>'''
 

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Table, Button, Modal, Input, Select, InputNumber, Space, Popconfirm, Tag, message, Row, Col, Statistic, Divider } from 'antd';
+import { Card, Table, Button, Modal, Input, Select, InputNumber, Space, Popconfirm, Tag, message, Row, Col, Statistic, Divider, Tabs } from 'antd';
 import { PlusOutlined, DeleteOutlined, CalculatorOutlined, FilePdfOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import EstimateServicesPage from './EstimateServicesPage';
+import EstimateSettingsPage from '../settings/EstimateSettingsPage';
 
 const ITEM_TYPES = [
   { value: 'material', label: '📦 Со склада' },
@@ -142,12 +144,29 @@ const EstimatesPage: React.FC = () => {
 
   return (
     <>
-      <Card title="📊 Сметы и коммерческие предложения"
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Создать смету</Button>}>
-        <Table dataSource={estimates} columns={columns} rowKey="id" loading={loading} size="middle"
-          pagination={{ pageSize: 20 }}
-          onRow={(record) => ({ style: { cursor: 'pointer' }, onDoubleClick: () => navigate(`/estimates/${record.id}`) })} />
-      </Card>
+      <Tabs defaultActiveKey="estimates" items={[
+        {
+          key: 'estimates',
+          label: '📊 Сметы и КП',
+          children: (
+            <Card extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Создать смету</Button>}>
+              <Table dataSource={estimates} columns={columns} rowKey="id" loading={loading} size="middle"
+                pagination={{ pageSize: 20 }}
+                onRow={(record) => ({ style: { cursor: 'pointer' }, onDoubleClick: () => navigate(`/estimates/${record.id}`) })} />
+            </Card>
+          ),
+        },
+        {
+          key: 'services',
+          label: '🔧 Справочник услуг',
+          children: <EstimateServicesPage />,
+        },
+        {
+          key: 'settings',
+          label: '⚙️ Настройки шаблона',
+          children: <EstimateSettingsPage />,
+        },
+      ]} />
 
       <Modal title={editing ? 'Редактировать смету' : 'Новая смета'} open={modalOpen}
         onOk={handleSave} onCancel={() => setModalOpen(false)} width={600} okText="Сохранить" cancelText="Отмена">

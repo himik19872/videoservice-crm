@@ -771,9 +771,9 @@ class SystemSettingsPublicSerializer(serializers.ModelSerializer):
     """Публичные настройки (без секретов) для шаблона КП"""
     class Meta:
         model = SystemSettings
-        fields = ['cp_logo_url', 'cp_header_text', 'cp_footer_text',
+        fields = ['cp_logo_url', 'cp_logo_file', 'cp_header_text', 'cp_footer_text',
                   'cp_signature_name', 'cp_signature_title', 'cp_validity_days',
-                  'cp_color', 'cp_show_logo']
+                  'cp_color', 'cp_show_logo', 'cp_signature_file']
 
 
 class AppVersionSerializer(serializers.ModelSerializer):
