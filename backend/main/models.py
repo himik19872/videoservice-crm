@@ -1680,7 +1680,7 @@ class CommercialEstimate(models.Model):
     def recalculate(self):
         """Пересчёт итогов по позициям"""
         items = self.items.all()
-        total_materials = sum(i.total_price for i in items if i.item_type == 'material')
+        total_materials = sum(i.total_price for i in items if i.item_type in ('material', 'custom_material'))
         total_services = sum(i.total_price for i in items if i.item_type in ('service', 'custom_service'))
         subtotal = total_materials + total_services
 
