@@ -1836,10 +1836,20 @@ class EstimateItem(models.Model):
         return f'{self.name} x{self.quantity} = {self.total_price} ₽'
 
     def save(self, *args, **kwargs):
-        # Авторасчёт суммы с учётом скидки
-        amount = self.sale_price * self.quantity
+        from decimal import Decimal
+        update_fields = kwargs.get('update_fields', None)
+        # Если обновляется только total_price — значит его уже посчитал recalculate()
+        if update_fields and set(update_fields) == {'total_price'}:
+            super().save(*args, **kwargs)
+            return
+
+        # Авторасчёт суммы: все операции через Decimal
+        sp = Decimal(str(self.sale_price))
+        qty = Decimal(str(self.quantity))
+        amount = sp * qty
         if self.discount:
-            amount = amount * (1 - self.discount / 100)
+            disc = Decimal(str(self.discount))
+            amount = (amount * (Decimal('1') - disc / Decimal('100'))).quantize(Decimal('0.01'))
         self.total_price = amount
         super().save(*args, **kwargs)
 
