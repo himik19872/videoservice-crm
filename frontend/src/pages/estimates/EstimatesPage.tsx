@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import EstimateServicesPage from './EstimateServicesPage';
 import EstimateSettingsPage from '../settings/EstimateSettingsPage';
+import LegalEntitiesManager from './LegalEntitiesManager';
 
 const ITEM_TYPES = [
   { value: 'material', label: '📦 Со склада' },
@@ -165,6 +166,11 @@ const EstimatesPage: React.FC = () => {
           key: 'settings',
           label: '⚙️ Настройки шаблона',
           children: <EstimateSettingsPage />,
+        },
+        {
+          key: 'legal',
+          label: '🏢 Юрлица',
+          children: <LegalEntitiesManager />,
         },
       ]} />
 
