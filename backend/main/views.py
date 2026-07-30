@@ -3626,7 +3626,7 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
                 <td>{item.name}</td>
                 <td style="text-align:center;">{item.unit}</td>
                 <td style="text-align:center;">{item.quantity:.1f}</td>
-                <td style="text-align:right;">{item.sale_price:,.2f} ₽</td>
+                <td style="text-align:right;">{item.total_price / item.quantity if item.quantity else item.total_price:,.2f} ₽</td>
                 <td style="text-align:right;">{item.total_price:,.2f} ₽</td>
             </tr>'''
 

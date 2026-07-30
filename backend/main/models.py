@@ -1681,6 +1681,12 @@ class CommercialEstimate(models.Model):
     ugol_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Процент угля (%)'))
     ugol_apply_to = models.CharField(max_length=10, choices=[('all', _('На все позиции')), ('selected', _('Только выбранные'))], default='all', verbose_name=_('Применять уголь'))
 
+    # Внутренний расчёт (вычисляемые, для своей аналитики)
+    cost_materials = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Себест. материалов'))
+    cost_services = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Себест. работ'))
+    dealer_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Дилерская наценка (₽)'))
+    commission_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Комиссионные (₽)'))
+
     note = models.TextField(blank=True, verbose_name=_('Примечание'))
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_estimates', verbose_name=_('Создал'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
@@ -1695,64 +1701,90 @@ class CommercialEstimate(models.Model):
         return f'Смета №{self.number}: {self.total} ₽ ({self.get_status_display()})'
 
     def recalculate(self):
-        """Пересчёт итогов по позициям"""
+        """Пересчёт итогов по позициям с учётом угля (наценка на каждую позицию) и внутренней аналитики"""
+        from decimal import Decimal
         items = self.items.all()
-        total_materials = sum(i.total_price for i in items if i.item_type in ('material', 'custom_material'))
-        total_services = sum(i.total_price for i in items if i.item_type in ('service', 'custom_service'))
+
+        ugol_rate = self.ugol_percent if self.ugol_enabled else Decimal('0')
+
+        # Пересчитываем цену позиций с учётом угля
+        ugol_total = Decimal('0')
+        total_materials = Decimal('0')
+        total_services = Decimal('0')
+        cost_materials = Decimal('0')
+        cost_services = Decimal('0')
+
+        for i in items:
+            base_price = i.sale_price
+            # Наценка угля на цену позиции
+            ugol_applies = (
+                self.ugol_enabled and ugol_rate > 0 and
+                (self.ugol_apply_to == 'all' or i.ugol_applied)
+            )
+            if ugol_applies:
+                price_with_ugol = (base_price * (Decimal('1') + ugol_rate / Decimal('100'))).quantize(Decimal('0.01'))
+                item_ugol = ((price_with_ugol - base_price) * i.quantity).quantize(Decimal('0.01'))
+            else:
+                price_with_ugol = base_price
+                item_ugol = Decimal('0')
+
+            # Сумма с учётом скидки на позицию
+            amount = price_with_ugol * i.quantity
+            if i.discount:
+                amount = (amount * (Decimal('1') - i.discount / Decimal('100'))).quantize(Decimal('0.01'))
+
+            # Обновляем total_price в позиции (чтобы в PDF и таблице отображалось корректно)
+            if i.total_price != amount:
+                i.total_price = amount
+                i.save(update_fields=['total_price'])
+
+            ugol_total += item_ugol
+
+            if i.item_type in ('material', 'custom_material'):
+                total_materials += amount
+                cost_materials += (i.cost_price or Decimal('0')) * i.quantity
+            else:
+                total_services += amount
+                cost_services += (i.cost_price or Decimal('0')) * i.quantity
+
         subtotal = total_materials + total_services
 
-        # Скидка
-        discount_amount = subtotal * self.discount / 100
+        # Скидка общая
+        discount_amount = (subtotal * self.discount / Decimal('100')).quantize(Decimal('0.01'))
         after_discount = subtotal - discount_amount
 
         # Комиссионные и дилерская наценка
-        commission_amount = after_discount * self.commission / 100
-        dealer_amount = after_discount * self.dealer_fee / 100
+        comm_amount = (after_discount * self.commission / Decimal('100')).quantize(Decimal('0.01'))
+        deal_amount = (after_discount * self.dealer_fee / Decimal('100')).quantize(Decimal('0.01'))
 
-        total = after_discount + commission_amount + dealer_amount + self.unexpected_costs + self.delivery_cost
+        total = after_discount + comm_amount + deal_amount + self.unexpected_costs + self.delivery_cost
 
-        # Себестоимость
-        total_cost = sum(
-            (i.cost_price or 0) * i.quantity
-            for i in items
-        )
+        # Себестоимость общая (материалы + работы + уголь)
+        total_cost = cost_materials + cost_services + ugol_total
 
-        # «Уголь» (откат клиенту): наценка на цену и добавление в себестоимость
-        from decimal import Decimal
-        ugol_amount = Decimal('0')
-        if self.ugol_enabled and self.ugol_percent > 0:
-            ugol_rate = self.ugol_percent
-            if self.ugol_apply_to == 'all':
-                ugol_amount = (subtotal * ugol_rate / Decimal('100')).quantize(Decimal('0.01'))
-            else:
-                ugol_amount = sum(
-                    (i.total_price * ugol_rate / Decimal('100')).quantize(Decimal('0.01'))
-                    for i in items if i.ugol_applied
-                )
-            total += ugol_amount
-            total_cost += ugol_amount
-        self.total_ugol = ugol_amount
-
-        # НДС: если юрлицо на ОСНО — включаем в итог
-        from decimal import Decimal
+        # НДС
         vat_amount = Decimal('0')
         if self.legal_entity and self.legal_entity.vat_rate and float(self.legal_entity.vat_rate) > 0:
             vat_rate = Decimal(str(self.legal_entity.vat_rate))
             vat_amount = (total * vat_rate / (Decimal('100') + vat_rate)).quantize(Decimal('0.01'))
-            total_with_vat = total
-        else:
-            total_with_vat = total
 
         self.total_materials = total_materials
         self.total_services = total_services
         self.subtotal = subtotal
-        self.total = total_with_vat
+        self.total = total
         self.total_cost = total_cost
         self.total_vat = vat_amount
-        self.profit = total_with_vat - total_cost - self.unexpected_costs - self.delivery_cost
+        self.total_ugol = ugol_total
+        self.profit = total - total_cost - self.unexpected_costs - self.delivery_cost
+        self.cost_materials = cost_materials
+        self.cost_services = cost_services
+        self.dealer_amount = deal_amount
+        self.commission_amount = comm_amount
         self.save(update_fields=[
             'total_materials', 'total_services', 'subtotal',
-            'total', 'total_cost', 'total_vat', 'total_ugol', 'profit', 'updated_at'
+            'total', 'total_cost', 'total_ugol', 'total_vat', 'profit',
+            'cost_materials', 'cost_services', 'dealer_amount', 'commission_amount',
+            'updated_at'
         ])
 
     def save(self, *args, **kwargs):

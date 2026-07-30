@@ -261,8 +261,8 @@ const EstimateDetailPage: React.FC = () => {
 
       {/* Итоги */}
       <Row gutter={16}>
-        <Col span={12}>
-          <Card size="small" title="💰 Итоги">
+        <Col span={8}>
+          <Card size="small" title="💰 Итоги для клиента">
             <Descriptions column={1} size="small">
               <Descriptions.Item label="Материалы">{Number(estimate.total_materials).toLocaleString()} ₽</Descriptions.Item>
               <Descriptions.Item label="Услуги">{Number(estimate.total_services).toLocaleString()} ₽</Descriptions.Item>
@@ -272,15 +272,16 @@ const EstimateDetailPage: React.FC = () => {
               {estimate.dealer_fee > 0 && <Descriptions.Item label="Дилерская наценка">+{estimate.dealer_fee}%</Descriptions.Item>}
               {estimate.unexpected_costs > 0 && <Descriptions.Item label="Непредв. расходы">{Number(estimate.unexpected_costs).toLocaleString()} ₽</Descriptions.Item>}
               {estimate.delivery_cost > 0 && <Descriptions.Item label="Доставка">{Number(estimate.delivery_cost).toLocaleString()} ₽</Descriptions.Item>}
+              {estimate.total_ugol > 0 && <Descriptions.Item label="🔥 Уголь (откат)">{Number(estimate.total_ugol).toLocaleString()} ₽</Descriptions.Item>}
               <Descriptions.Item label={<strong>ИТОГО</strong>}><strong style={{ fontSize: 18, color: '#1677ff' }}>{Number(estimate.total).toLocaleString()} ₽</strong></Descriptions.Item>
             </Descriptions>
           </Card>
         </Col>
-        <Col span={12}>
+        <Col span={8}>
           <Card size="small" title="📈 Маржинальность">
             <Descriptions column={1} size="small">
-              <Descriptions.Item label="Себестоимость">{Number(estimate.total_cost).toLocaleString()} ₽</Descriptions.Item>
               <Descriptions.Item label="Выручка">{Number(estimate.total).toLocaleString()} ₽</Descriptions.Item>
+              <Descriptions.Item label="Себестоимость общая">{Number(estimate.total_cost).toLocaleString()} ₽</Descriptions.Item>
               <Descriptions.Item label={<strong>Прибыль</strong>}>
                 <strong style={{ fontSize: 18, color: Number(estimate.profit) > 0 ? '#52c41a' : '#ff4d4f' }}>
                   {Number(estimate.profit).toLocaleString()} ₽
@@ -289,9 +290,22 @@ const EstimateDetailPage: React.FC = () => {
               <Descriptions.Item label="Рентабельность">
                 {estimate.total > 0 ? ((Number(estimate.profit) / Number(estimate.total)) * 100).toFixed(1) : 0}%
               </Descriptions.Item>
-              {estimate.total_ugol > 0 && (
-                <Descriptions.Item label="🔥 Уголь (откат)">{Number(estimate.total_ugol).toLocaleString()} ₽</Descriptions.Item>
-              )}
+            </Descriptions>
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small" title="🔍 Внутренний расчёт">
+            <Descriptions column={1} size="small">
+              <Descriptions.Item label="Себест. материалов">{Number(estimate.cost_materials || 0).toLocaleString()} ₽</Descriptions.Item>
+              <Descriptions.Item label="Себест. работ/услуг">{Number(estimate.cost_services || 0).toLocaleString()} ₽</Descriptions.Item>
+              <Descriptions.Item label="Себест. общая">{Number(estimate.total_cost || 0).toLocaleString()} ₽</Descriptions.Item>
+              {estimate.dealer_amount > 0 && <Descriptions.Item label="Дилерская наценка (₽)">{Number(estimate.dealer_amount).toLocaleString()} ₽</Descriptions.Item>}
+              {estimate.commission_amount > 0 && <Descriptions.Item label="Комиссионные (₽)">{Number(estimate.commission_amount).toLocaleString()} ₽</Descriptions.Item>}
+              {estimate.total_ugol > 0 && <Descriptions.Item label="Уголь (себест.)">{Number(estimate.total_ugol).toLocaleString()} ₽</Descriptions.Item>}
+              {estimate.total_vat > 0 && <Descriptions.Item label="НДС">{Number(estimate.total_vat).toLocaleString()} ₽</Descriptions.Item>}
+              <Descriptions.Item label="Прибыль чистая">
+                <strong style={{ color: Number(estimate.profit) > 0 ? '#52c41a' : '#ff4d4f' }}>{Number(estimate.profit).toLocaleString()} ₽</strong>
+              </Descriptions.Item>
             </Descriptions>
           </Card>
         </Col>
