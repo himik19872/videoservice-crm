@@ -1070,7 +1070,7 @@ class EstimateItemSerializer(serializers.ModelSerializer):
         model = EstimateItem
         fields = ['id', 'estimate', 'item_type', 'item_type_display', 'inventory_item',
                   'service', 'name', 'unit', 'quantity', 'cost_price', 'sale_price',
-                  'discount', 'total_price', 'installer_salary', 'order_num']
+                  'discount', 'total_price', 'installer_salary', 'ugol_applied', 'order_num']
 
 
 class CommercialEstimateSerializer(serializers.ModelSerializer):
@@ -1089,7 +1089,8 @@ class CommercialEstimateSerializer(serializers.ModelSerializer):
                   'commission', 'dealer_fee', 'unexpected_costs', 'delivery_type',
                   'delivery_cost', 'tax_type', 'tax_rate', 'employee', 'employee_phone',
                   'total_materials', 'total_services', 'subtotal', 'total', 'total_cost',
-                  'total_vat', 'profit', 'note', 'items', 'created_by', 'created_by_name',
+                  'total_vat', 'total_ugol', 'profit', 'ugol_enabled', 'ugol_percent', 'ugol_apply_to',
+                  'note', 'items', 'created_by', 'created_by_name',
                   'created_at', 'updated_at']
         read_only_fields = ['id', 'number', 'created_by', 'created_at', 'updated_at']
 

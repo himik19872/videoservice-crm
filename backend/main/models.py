@@ -1552,6 +1552,17 @@ class LegalEntity(models.Model):
     ], default='usn', verbose_name=_('Система налогообложения'))
     vat_rate = models.DecimalField(max_digits=4, decimal_places=1, default=0, verbose_name=_('Ставка НДС (%)'),
                                     help_text='0 — без НДС, 20 — 20%, 10 — 10%')
+
+    # Шаблон КП (индивидуальный для юрлица, переопределяет системный)
+    cp_header_text = models.CharField(max_length=300, blank=True, verbose_name=_('Заголовок КП'))
+    cp_footer_text = models.CharField(max_length=500, blank=True, verbose_name=_('Текст в подвале КП'))
+    cp_color = models.CharField(max_length=20, default='#1a3e60', blank=True, verbose_name=_('Цвет шапки КП (hex)'))
+    cp_show_logo = models.BooleanField(default=True, verbose_name=_('Показывать логотип'))
+    cp_logo_file = models.ImageField(upload_to='legal_entity_logos/', null=True, blank=True, verbose_name=_('Логотип (файл)'))
+    cp_signature_file = models.ImageField(upload_to='legal_entity_signatures/', null=True, blank=True, verbose_name=_('Подпись (файл)'))
+    cp_signature_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО подписанта'))
+    cp_signature_title = models.CharField(max_length=200, blank=True, verbose_name=_('Должность подписанта'))
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
 
     class Meta:
@@ -1663,6 +1674,12 @@ class CommercialEstimate(models.Model):
     total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Итого себестоимость'))
     profit = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Прибыль'))
     total_vat = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('В т.ч. НДС'))
+    total_ugol = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Сумма угля (откат)'))
+
+    # «Уголь» — откат клиенту
+    ugol_enabled = models.BooleanField(default=False, verbose_name=_('Включить уголь (откат)'))
+    ugol_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Процент угля (%)'))
+    ugol_apply_to = models.CharField(max_length=10, choices=[('all', _('На все позиции')), ('selected', _('Только выбранные'))], default='all', verbose_name=_('Применять уголь'))
 
     note = models.TextField(blank=True, verbose_name=_('Примечание'))
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_estimates', verbose_name=_('Создал'))
@@ -1700,6 +1717,22 @@ class CommercialEstimate(models.Model):
             for i in items
         )
 
+        # «Уголь» (откат клиенту): наценка на цену и добавление в себестоимость
+        from decimal import Decimal
+        ugol_amount = Decimal('0')
+        if self.ugol_enabled and self.ugol_percent > 0:
+            ugol_rate = self.ugol_percent
+            if self.ugol_apply_to == 'all':
+                ugol_amount = (subtotal * ugol_rate / Decimal('100')).quantize(Decimal('0.01'))
+            else:
+                ugol_amount = sum(
+                    (i.total_price * ugol_rate / Decimal('100')).quantize(Decimal('0.01'))
+                    for i in items if i.ugol_applied
+                )
+            total += ugol_amount
+            total_cost += ugol_amount
+        self.total_ugol = ugol_amount
+
         # НДС: если юрлицо на ОСНО — включаем в итог
         from decimal import Decimal
         vat_amount = Decimal('0')
@@ -1719,7 +1752,7 @@ class CommercialEstimate(models.Model):
         self.profit = total_with_vat - total_cost - self.unexpected_costs - self.delivery_cost
         self.save(update_fields=[
             'total_materials', 'total_services', 'subtotal',
-            'total', 'total_cost', 'total_vat', 'profit', 'updated_at'
+            'total', 'total_cost', 'total_vat', 'total_ugol', 'profit', 'updated_at'
         ])
 
     def save(self, *args, **kwargs):
@@ -1757,6 +1790,7 @@ class EstimateItem(models.Model):
     discount = models.DecimalField(max_digits=5, decimal_places=2, default=0, verbose_name=_('Скидка на позицию (%)'))
     total_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Сумма'))
     installer_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('ЗП монтажникам'))
+    ugol_applied = models.BooleanField(default=False, verbose_name=_('Уголь применён к позиции'))
 
     # Сортировка
     order_num = models.PositiveIntegerField(default=0, verbose_name=_('Порядок'))

@@ -2536,6 +2536,26 @@ class SystemSettingsViewSet(viewsets.ViewSet):
             'message': f'Создано: {stats["created"]}, обновлено: {stats["updated"]}, ошибок: {len(stats["errors"])}',
         })
 
+    @action(detail=False, methods=['post'])
+    def delete_logo(self, request):
+        """Удалить логотип из системных настроек КП"""
+        settings = SystemSettings.objects.first()
+        if settings and settings.cp_logo_file:
+            settings.cp_logo_file.delete(save=False)
+            settings.cp_logo_file = None
+            settings.save(update_fields=['cp_logo_file'])
+        return Response({'success': True})
+
+    @action(detail=False, methods=['post'])
+    def delete_signature(self, request):
+        """Удалить подпись из системных настроек КП"""
+        settings = SystemSettings.objects.first()
+        if settings and settings.cp_signature_file:
+            settings.cp_signature_file.delete(save=False)
+            settings.cp_signature_file = None
+            settings.save(update_fields=['cp_signature_file'])
+        return Response({'success': True})
+
 
 class UserProfileViewSet(viewsets.ModelViewSet):
     """Управление пользователями (админы/диспетчеры/мастера)"""
@@ -3386,6 +3406,24 @@ class LegalEntityViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'short_name', 'inn']
 
+    @action(detail=True, methods=['post'])
+    def delete_logo(self, request, pk=None):
+        le = self.get_object()
+        if le.cp_logo_file:
+            le.cp_logo_file.delete(save=False)
+            le.cp_logo_file = None
+            le.save(update_fields=['cp_logo_file'])
+        return Response({'success': True})
+
+    @action(detail=True, methods=['post'])
+    def delete_signature(self, request, pk=None):
+        le = self.get_object()
+        if le.cp_signature_file:
+            le.cp_signature_file.delete(save=False)
+            le.cp_signature_file = None
+            le.save(update_fields=['cp_signature_file'])
+        return Response({'success': True})
+
 
 class EstimateServiceViewSet(viewsets.ModelViewSet):
     """Справочник услуг и работ для смет"""
@@ -3469,12 +3507,13 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
     def update_item(self, request, pk=None):
         """Обновить позицию сметы"""
         estimate = self.get_object()
-        item_id = request.data.pop('item_id', None)
+        data = request.data.copy()
+        item_id = data.pop('item_id', None)
         if not item_id:
             return Response({'error': 'item_id обязателен'}, status=400)
         try:
             item = estimate.items.get(id=item_id)
-            for key, value in request.data.items():
+            for key, value in data.items():
                 setattr(item, key, value)
             item.save()
             estimate.recalculate()
@@ -3527,22 +3566,44 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
         from datetime import date, timedelta
         validity_date = (date.today() + timedelta(days=settings_data.get('cp_validity_days', 7))).strftime('%d.%m.%Y')
 
-        color = settings_data.get('cp_color', '#1a3e60')
+        # Шаблон КП: приоритет — настройки юрлица, затем системные
+        def _le_or_sys(le_field, sys_key, default=''):
+            """Взять значение из юрлица, иначе из системных настроек, иначе default"""
+            val = getattr(le, le_field, None) if le else None
+            if val:
+                return val
+            return settings_data.get(sys_key, default)
+
+        color = _le_or_sys('cp_color', 'cp_color', '#1a3e60')
+        show_logo = _le_or_sys('cp_show_logo', 'cp_show_logo', True)
+        header_text = _le_or_sys('cp_header_text', 'cp_header_text', 'Коммерческое предложение')
+        footer_text = _le_or_sys('cp_footer_text', 'cp_footer_text', 'С уважением, команда Видео Сервис')
+        sig_name = _le_or_sys('cp_signature_name', 'cp_signature_name', '')
+        sig_title = _le_or_sys('cp_signature_title', 'cp_signature_title', '')
+
+        # Логотип: сначала из юрлица, потом из системных
         logo_tag = ''
-        # Логотип: сначала из загруженного файла, потом из URL
-        if settings_data.get('cp_show_logo'):
+        if show_logo:
             logo_url = None
-            if settings_qs and settings_qs.cp_logo_file:
+            # Лого юрлица
+            if le and le.cp_logo_file:
+                logo_url = request.build_absolute_uri(le.cp_logo_file.url)
+            # Системный лого
+            elif settings_qs and settings_qs.cp_logo_file:
                 logo_url = request.build_absolute_uri(settings_qs.cp_logo_file.url)
             elif settings_data.get('cp_logo_url'):
                 logo_url = settings_data['cp_logo_url']
             if logo_url:
                 logo_tag = f'<img src="{logo_url}" style="max-height:60px;" />'
 
-        # Подпись: из файла или текстовая
+        # Подпись: из юрлица или из системных
         signature_html = ''
-        if settings_qs and settings_qs.cp_signature_file:
+        sig_url = None
+        if le and le.cp_signature_file:
+            sig_url = request.build_absolute_uri(le.cp_signature_file.url)
+        elif settings_qs and settings_qs.cp_signature_file:
             sig_url = request.build_absolute_uri(settings_qs.cp_signature_file.url)
+        if sig_url:
             signature_html = f'<img src="{sig_url}" style="max-height:50px; margin-top:8px;" />'
 
         # Автор сметы (тот, кто создал)
@@ -3607,7 +3668,7 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 
 <div class="header">
     {logo_tag}
-    <h1>{settings_data.get('cp_header_text', 'Коммерческое предложение')} №{estimate.number}</h1>
+    <h1>{header_text} №{estimate.number}</h1>
     <div class="sub">от {estimate.created_at.strftime('%d.%m.%Y')}</div>
 </div>
 
@@ -3656,12 +3717,12 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 </div>
 
 <div class="footer">
-    <p>{settings_data.get('cp_footer_text', 'С уважением, команда Видео Сервис')}</p>
+    <p>{footer_text}</p>
     <div class="signature-block">
         {signature_html}
         <p style="margin:8px 0 2px;">_________________</p>
-        <p style="margin:0; font-weight:600;">{author_name or settings_data.get('cp_signature_name', '')}</p>
-        <p style="margin:0; color:#888;">{settings_data.get('cp_signature_title', '')}</p>
+        <p style="margin:0; font-weight:600;">{author_name or sig_name}</p>
+        <p style="margin:0; color:#888;">{sig_title}</p>
         {f'<p style="margin:0; color:#1677ff;">📞 {author_phone}</p>' if author_phone else ''}
     </div>
 </div>

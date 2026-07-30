@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Modal, Input, Select, Space, Tag, message, Popconfirm, Divider } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Modal, Input, Select, Space, Tag, message, Popconfirm, Divider, Switch, Upload } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 
 const TAX_SYSTEMS = [
@@ -25,6 +25,8 @@ const LegalEntitiesManager: React.FC = () => {
     legal_address: '', actual_address: '', phone: '', email: '',
     bank_name: '', bik: '', corr_account: '', settlement_account: '',
     director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
+    cp_header_text: '', cp_footer_text: '', cp_color: '#1a3e60',
+    cp_show_logo: true, cp_signature_name: '', cp_signature_title: '',
   });
 
   useEffect(() => { fetchData(); }, []);
@@ -46,6 +48,8 @@ const LegalEntitiesManager: React.FC = () => {
       legal_address: '', actual_address: '', phone: '', email: '',
       bank_name: '', bik: '', corr_account: '', settlement_account: '',
       director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
+      cp_header_text: '', cp_footer_text: '', cp_color: '#1a3e60',
+      cp_show_logo: true, cp_signature_name: '', cp_signature_title: '',
     });
     setModalOpen(true);
   };
@@ -61,6 +65,9 @@ const LegalEntitiesManager: React.FC = () => {
       corr_account: rec.corr_account || '', settlement_account: rec.settlement_account || '',
       director: rec.director || '', tax_system: rec.tax_system || 'usn',
       is_default: rec.is_default || false, vat_rate: rec.vat_rate || 0,
+      cp_header_text: rec.cp_header_text || '', cp_footer_text: rec.cp_footer_text || '',
+      cp_color: rec.cp_color || '#1a3e60', cp_show_logo: rec.cp_show_logo !== false,
+      cp_signature_name: rec.cp_signature_name || '', cp_signature_title: rec.cp_signature_title || '',
     });
     setModalOpen(true);
   };
@@ -68,16 +75,34 @@ const LegalEntitiesManager: React.FC = () => {
   const handleSave = async () => {
     if (!formData.name.trim()) { message.warning('Название обязательно'); return; }
     try {
+      const fd = new FormData();
+      Object.entries(formData).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) fd.append(k, String(v));
+      });
       if (editing) {
-        await api.patch(`/legal-entities/${editing.id}/`, formData);
+        await api.patch(`/legal-entities/${editing.id}/`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
         message.success('Обновлено');
       } else {
-        await api.post('/legal-entities/', formData);
+        await api.post('/legal-entities/', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
         message.success('Создано');
       }
       setModalOpen(false);
       fetchData();
     } catch { message.error('Ошибка сохранения'); }
+  };
+
+  const handleDeleteLogo = async (id: number) => {
+    try { await api.post(`/legal-entities/${id}/delete_logo/`); message.success('Логотип удалён'); fetchData(); }
+    catch { message.error('Ошибка'); }
+  };
+
+  const handleDeleteSign = async (id: number) => {
+    try { await api.post(`/legal-entities/${id}/delete_signature/`); message.success('Подпись удалена'); fetchData(); }
+    catch { message.error('Ошибка'); }
   };
 
   const handleDelete = async (id: number) => {
@@ -182,6 +207,27 @@ const LegalEntitiesManager: React.FC = () => {
           <div>
             <label>Директор</label>
             <Input value={formData.director} onChange={e => setFormData({ ...formData, director: e.target.value })} />
+          </div>
+          <Divider orientation="left" style={{ fontSize: 12, margin: '4px 0' }}>🎨 Шаблон КП (индивидуальный для этого юрлица)</Divider>
+          <div>
+            <label>Заголовок КП</label>
+            <Input value={formData.cp_header_text} onChange={e => setFormData({ ...formData, cp_header_text: e.target.value })} placeholder="Коммерческое предложение" />
+          </div>
+          <div>
+            <label>Текст в подвале</label>
+            <Input value={formData.cp_footer_text} onChange={e => setFormData({ ...formData, cp_footer_text: e.target.value })} placeholder="С уважением, команда Видео Сервис" />
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div><label>Цвет шапки</label><Input type="color" value={formData.cp_color} onChange={e => setFormData({ ...formData, cp_color: e.target.value })} style={{ width: 60 }} /></div>
+            <div style={{ marginTop: 18 }}><Switch checked={formData.cp_show_logo} onChange={v => setFormData({ ...formData, cp_show_logo: v })} /> Показывать логотип</div>
+          </div>
+          <div>
+            <label>ФИО подписанта</label>
+            <Input value={formData.cp_signature_name} onChange={e => setFormData({ ...formData, cp_signature_name: e.target.value })} />
+          </div>
+          <div>
+            <label>Должность подписанта</label>
+            <Input value={formData.cp_signature_title} onChange={e => setFormData({ ...formData, cp_signature_title: e.target.value })} />
           </div>
         </Space>
       </Modal>

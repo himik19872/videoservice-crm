@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, Table, Button, Modal, Input, Select, InputNumber, Space, Popconfirm, Tag, message, Row, Col, Statistic, Divider, Spin, Descriptions } from 'antd';
-import { PlusOutlined, DeleteOutlined, CalculatorOutlined, EditOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Modal, Input, Select, InputNumber, Space, Popconfirm, Tag, message, Row, Col, Statistic, Divider, Spin, Descriptions, Switch } from 'antd';
+import { PlusOutlined, DeleteOutlined, CalculatorOutlined, EditOutlined, ArrowLeftOutlined, FireOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 
 const ITEM_TYPES = [
@@ -39,6 +39,7 @@ const EstimateDetailPage: React.FC = () => {
     item_type: 'material', inventory_item_id: undefined as number | undefined,
     service_id: undefined as number | undefined,
     name: '', unit: 'шт', quantity: 1, cost_price: 0, sale_price: 0, discount: 0,
+    ugol_applied: false,
   });
 
   const fetchEstimate = async () => {
@@ -52,6 +53,8 @@ const EstimateDetailPage: React.FC = () => {
         delivery_type: res.data.delivery_type, delivery_cost: res.data.delivery_cost,
         tax_type: res.data.tax_type, tax_rate: res.data.tax_rate,
         status: res.data.status,
+        ugol_enabled: res.data.ugol_enabled, ugol_percent: res.data.ugol_percent,
+        ugol_apply_to: res.data.ugol_apply_to || 'all',
       });
     } catch (e) { message.error('Смета не найдена'); navigate('/estimates'); }
     finally { setLoading(false); }
@@ -76,6 +79,7 @@ const EstimateDetailPage: React.FC = () => {
     setItemForm({
       item_type: 'material', inventory_item_id: undefined, service_id: undefined,
       name: '', unit: 'шт', quantity: 1, cost_price: 0, sale_price: 0, discount: 0,
+      ugol_applied: false,
     });
     setItemModalOpen(true);
   };
@@ -89,6 +93,7 @@ const EstimateDetailPage: React.FC = () => {
       name: record.name, unit: record.unit,
       quantity: record.quantity, cost_price: record.cost_price,
       sale_price: record.sale_price, discount: record.discount,
+      ugol_applied: record.ugol_applied || false,
     });
     setItemModalOpen(true);
   };
@@ -131,6 +136,7 @@ const EstimateDetailPage: React.FC = () => {
           name: itemForm.name, unit: itemForm.unit,
           quantity: itemForm.quantity, cost_price: itemForm.cost_price,
           sale_price: itemForm.sale_price, discount: itemForm.discount,
+          ugol_applied: itemForm.ugol_applied,
         });
         message.success('Позиция обновлена');
       } else {
@@ -141,6 +147,7 @@ const EstimateDetailPage: React.FC = () => {
           name: itemForm.name, unit: itemForm.unit,
           quantity: itemForm.quantity, cost_price: itemForm.cost_price,
           sale_price: itemForm.sale_price, discount: itemForm.discount,
+          ugol_applied: itemForm.ugol_applied,
         });
         message.success('Позиция добавлена');
       }
@@ -282,13 +289,16 @@ const EstimateDetailPage: React.FC = () => {
               <Descriptions.Item label="Рентабельность">
                 {estimate.total > 0 ? ((Number(estimate.profit) / Number(estimate.total)) * 100).toFixed(1) : 0}%
               </Descriptions.Item>
+              {estimate.total_ugol > 0 && (
+                <Descriptions.Item label="🔥 Уголь (откат)">{Number(estimate.total_ugol).toLocaleString()} ₽</Descriptions.Item>
+              )}
             </Descriptions>
           </Card>
         </Col>
       </Row>
 
       {/* Модалка: параметры сметы */}
-      <Modal title="⚙️ Параметры сметы" open={settingsOpen} onOk={updateSettings} onCancel={() => setSettingsOpen(false)} width={450}>
+      <Modal title="⚙️ Параметры сметы" open={settingsOpen} onOk={updateSettings} onCancel={() => setSettingsOpen(false)} width={480}>
         <Space direction="vertical" style={{ width: '100%' }} size="small">
           <Row gutter={12}>
             <Col span={12}><label>Скидка (%)</label><InputNumber value={settingsForm.discount} onChange={v => setSettingsForm({ ...settingsForm, discount: v || 0 })} min={0} style={{ width: '100%' }} /></Col>
@@ -303,6 +313,20 @@ const EstimateDetailPage: React.FC = () => {
             <Col span={12}><label>Статус</label><Select value={settingsForm.status} onChange={v => setSettingsForm({ ...settingsForm, status: v })} style={{ width: '100%' }}
               options={Object.entries(STATUS_MAP).map(([k, v]) => ({ value: k, label: v.label }))} /></Col>
           </Row>
+          <Divider orientation="left" style={{ fontSize: 12, margin: '4px 0' }}>🔥 «Уголь» (откат клиенту)</Divider>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+            <Switch checked={settingsForm.ugol_enabled} onChange={v => setSettingsForm({ ...settingsForm, ugol_enabled: v })} />
+            <span>Включить уголь</span>
+          </div>
+          {settingsForm.ugol_enabled && (
+            <>
+              <Row gutter={12}>
+                <Col span={12}><label>Процент (%)</label><InputNumber value={settingsForm.ugol_percent} onChange={v => setSettingsForm({ ...settingsForm, ugol_percent: v || 0 })} min={0} max={100} style={{ width: '100%' }} /></Col>
+                <Col span={12}><label>Применять</label><Select value={settingsForm.ugol_apply_to} onChange={v => setSettingsForm({ ...settingsForm, ugol_apply_to: v })} style={{ width: '100%' }}
+                  options={[{ value: 'all', label: 'На все позиции' }, { value: 'selected', label: 'Только выбранные' }]} /></Col>
+              </Row>
+            </>
+          )}
         </Space>
       </Modal>
 
@@ -350,6 +374,10 @@ const EstimateDetailPage: React.FC = () => {
           <div>
             <label>Скидка на позицию (%)</label>
             <InputNumber value={itemForm.discount} onChange={v => setItemForm({ ...itemForm, discount: v || 0 })} min={0} max={100} style={{ width: 120 }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Switch size="small" checked={itemForm.ugol_applied} onChange={v => setItemForm({ ...itemForm, ugol_applied: v })} />
+            <span style={{ fontSize: 12 }}>🔥 Применить уголь к этой позиции</span>
           </div>
         </Space>
       </Modal>
