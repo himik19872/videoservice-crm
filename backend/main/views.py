@@ -897,13 +897,16 @@ class OrderViewSet(viewsets.ModelViewSet):
         for idx, o in enumerate(orders, 1):
             master_label = o.master.user.get_full_name() or o.master.user.username if o.master else '—'
             client_label = o.client.name if o.client else '—'
+            client_phone = o.client.phone if o.client else (o.client_info if hasattr(o, 'client_info') else '')
+            desc = (o.description or '')[:150]
             rows += f'''
             <tr>
                 <td style="text-align:center;">{idx}</td>
                 <td>{o.number}</td>
-                <td>{client_label}</td>
+                <td>{client_label}<br><span style="color:#1677ff;">{client_phone}</span></td>
                 <td>{o.address or o.full_address}</td>
                 <td style="text-align:center;">{o.get_order_type_display()}</td>
+                <td>{desc}</td>
                 <td style="text-align:center;">{o.get_status_display()}</td>
                 <td>{master_label}</td>
                 <td style="text-align:right;">{o.cost or 0:.0f} ₽</td>
@@ -917,29 +920,29 @@ class OrderViewSet(viewsets.ModelViewSet):
 <html lang="ru">
 <head><meta charset="utf-8"><title>{title}</title>
 <style>
-@page {{ size: A4 landscape; margin: 10mm; }}
+@page {{ size: A4 landscape; margin: 8mm; }}
 @media print {{
   body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
   .no-print {{ display: none !important; }}
 }}
-body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 9pt; color: #333; }}
-h1 {{ font-size: 14pt; margin: 0 0 10px; color: #1a3e60; }}
+body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 8pt; color: #333; }}
+h1 {{ font-size: 13pt; margin: 0 0 8px; color: #1a3e60; }}
 table {{ width: 100%; border-collapse: collapse; }}
-th {{ background: #1a3e60; color: #fff; padding: 6px 4px; font-size: 8pt; }}
-td {{ padding: 4px; border-bottom: 1px solid #eee; font-size: 8pt; }}
+th {{ background: #1a3e60; color: #fff; padding: 4px 3px; font-size: 7pt; }}
+td {{ padding: 3px; border-bottom: 1px solid #ddd; font-size: 7pt; vertical-align: top; }}
 tr:nth-child(even) {{ background: #f9f9f9; }}
-.footer {{ margin-top: 15px; font-size: 7pt; color: #999; }}
-.signature-row {{ margin-top: 30px; display: flex; justify-content: space-between; }}
+.footer {{ margin-top: 12px; font-size: 7pt; color: #999; }}
+.signature-row {{ margin-top: 24px; display: flex; justify-content: space-between; }}
 .signature-row div {{ width: 45%; border-top: 1px solid #000; padding-top: 4px; font-size: 8pt; }}
-.print-btn {{ position: fixed; top: 10px; right: 10px; padding: 10px 16px; background: #1a3e60; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; z-index: 999; }}
+.print-btn {{ position: fixed; top: 10px; right: 10px; padding: 8px 14px; background: #1a3e60; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; z-index: 999; }}
 .print-btn:hover {{ opacity: .9; }}
 </style></head>
 <body>
 <button class="print-btn no-print" onclick="window.print()">🖨️ Печать</button>
 <h1>{title}</h1>
-<p style="color:#888;font-size:8pt;">Всего заявок: {len(orders)}</p>
+<p style="color:#888;font-size:7pt;">Всего заявок: {len(orders)}</p>
 <table>
-    <tr><th>№</th><th>Номер</th><th>Клиент</th><th>Адрес</th><th>Тип</th><th>Статус</th><th>Мастер</th><th>Сумма</th></tr>
+    <tr><th>№</th><th>Номер</th><th>Клиент / Тел.</th><th>Адрес</th><th>Тип</th><th>Описание</th><th>Статус</th><th>Мастер</th><th>Сумма</th></tr>
     {rows}
 </table>
 <div class="signature-row">
