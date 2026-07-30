@@ -1701,10 +1701,11 @@ class CommercialEstimate(models.Model):
         )
 
         # НДС: если юрлицо на ОСНО — включаем в итог
-        vat_amount = 0
+        from decimal import Decimal
+        vat_amount = Decimal('0')
         if self.legal_entity and self.legal_entity.vat_rate and float(self.legal_entity.vat_rate) > 0:
-            vat_rate = float(self.legal_entity.vat_rate)
-            vat_amount = round(total * vat_rate / (100 + vat_rate), 2)
+            vat_rate = Decimal(str(self.legal_entity.vat_rate))
+            vat_amount = (total * vat_rate / (Decimal('100') + vat_rate)).quantize(Decimal('0.01'))
             total_with_vat = total
         else:
             total_with_vat = total
