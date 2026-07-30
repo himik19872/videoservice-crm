@@ -33,7 +33,8 @@ const LegalEntitiesManager: React.FC = () => {
     setLoading(true);
     try {
       const res = await api.get('/legal-entities/');
-      setItems(res.data || []);
+      // API возвращает {count, results} — берём results
+      setItems(res.data.results || res.data || []);
     } catch { message.error('Ошибка загрузки'); }
     finally { setLoading(false); }
   };
