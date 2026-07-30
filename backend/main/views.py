@@ -3506,6 +3506,7 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def update_item(self, request, pk=None):
         """Обновить позицию сметы"""
+        from decimal import Decimal, InvalidOperation
         estimate = self.get_object()
         data = request.data.copy()
         item_id = data.pop('item_id', None)
@@ -3513,7 +3514,14 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
             return Response({'error': 'item_id обязателен'}, status=400)
         try:
             item = estimate.items.get(id=item_id)
+            # Конвертируем числовые поля из float/str в Decimal
+            decimal_fields = {'quantity', 'cost_price', 'sale_price', 'discount', 'total_price', 'installer_salary'}
             for key, value in data.items():
+                if key in decimal_fields and value is not None:
+                    try:
+                        value = Decimal(str(value))
+                    except (InvalidOperation, ValueError, TypeError):
+                        value = Decimal('0')
                 setattr(item, key, value)
             item.save()
             estimate.recalculate()

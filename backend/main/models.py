@@ -1836,7 +1836,17 @@ class EstimateItem(models.Model):
         return f'{self.name} x{self.quantity} = {self.total_price} ₽'
 
     def save(self, *args, **kwargs):
-        from decimal import Decimal
+        from decimal import Decimal, InvalidOperation
+
+        def _to_decimal(val, default='0'):
+            """Безопасная конвертация в Decimal"""
+            if isinstance(val, Decimal):
+                return val
+            try:
+                return Decimal(str(val))
+            except (InvalidOperation, ValueError, TypeError):
+                return Decimal(default)
+
         update_fields = kwargs.get('update_fields', None)
         # Если обновляется только total_price — значит его уже посчитал recalculate()
         if update_fields and set(update_fields) == {'total_price'}:
@@ -1844,11 +1854,11 @@ class EstimateItem(models.Model):
             return
 
         # Авторасчёт суммы: все операции через Decimal
-        sp = Decimal(str(self.sale_price))
-        qty = Decimal(str(self.quantity))
+        sp = _to_decimal(self.sale_price)
+        qty = _to_decimal(self.quantity)
         amount = sp * qty
         if self.discount:
-            disc = Decimal(str(self.discount))
+            disc = _to_decimal(self.discount)
             amount = (amount * (Decimal('1') - disc / Decimal('100'))).quantize(Decimal('0.01'))
         self.total_price = amount
         super().save(*args, **kwargs)
