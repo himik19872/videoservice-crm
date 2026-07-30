@@ -2079,11 +2079,31 @@ class SystemSettingsViewSet(viewsets.ViewSet):
         settings, _ = SystemSettings.objects.get_or_create()
         return Response(SystemSettingsSerializer(settings).data)
 
+    def create(self, request):
+        """Создать/обновить настройки (поддерживает multipart для логотипа/подписи)."""
+        return self._save_settings(request)
+
     def update(self, request, pk=None):
+        """Обновить настройки (поддерживает multipart для логотипа/подписи)."""
+        return self._save_settings(request)
+
+    def partial_update(self, request, pk=None):
+        return self._save_settings(request)
+
+    def _save_settings(self, request):
         settings = SystemSettings.objects.first()
         if not settings:
             settings = SystemSettings.objects.create()
-        serializer = SystemSettingsSerializer(settings, data=request.data, partial=True)
+
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+
+        # Обрабатываем загрузку файлов
+        if 'cp_logo_file' in request.FILES:
+            settings.cp_logo_file = request.FILES['cp_logo_file']
+        if 'cp_signature_file' in request.FILES:
+            settings.cp_signature_file = request.FILES['cp_signature_file']
+
+        serializer = SystemSettingsSerializer(settings, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
