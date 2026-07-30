@@ -146,10 +146,22 @@ class MasterViewSet(viewsets.ModelViewSet):
         masters = Master.objects.select_related('traccar_device', 'user').all()
         user = request.user
         if not user.is_staff:
+            # Админы, диспетчеры и управленцы видят всех
             try:
-                masters = masters.filter(id=user.master_profile.id)
-            except Master.DoesNotExist:
-                masters = Master.objects.none()
+                profile = user.profile
+                if profile.role in ('admin', 'dispatcher', 'supervisor', 'chief_engineer', 'tech_director', 'executive_director', 'general_director'):
+                    pass  # видят всех
+                else:
+                    # Мастер видит только себя
+                    try:
+                        masters = masters.filter(id=user.master_profile.id)
+                    except Master.DoesNotExist:
+                        masters = Master.objects.none()
+            except UserProfile.DoesNotExist:
+                try:
+                    masters = masters.filter(id=user.master_profile.id)
+                except Master.DoesNotExist:
+                    masters = Master.objects.none()
 
         result = []
         for master in masters:
