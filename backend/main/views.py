@@ -860,7 +860,96 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(OrderSerializer(order).data)
 
     @action(detail=False, methods=['get'])
-    def calendar(self, request):
+    def print_view(self, request):
+        """HTML-страница для печати заявок с фильтрами.
+        Параметры: ?master_id=N&status=new,assigned&date_from=...&date_to=...
+        """
+        qs = Order.objects.select_related('master__user', 'client', 'region').all()
+
+        master_id = request.query_params.get('master_id', '').strip()
+        statuses = request.query_params.get('status', '').strip()
+        date_from = request.query_params.get('date_from', '').strip()
+        date_to = request.query_params.get('date_to', '').strip()
+
+        if master_id:
+            qs = qs.filter(master_id=int(master_id))
+        if statuses:
+            qs = qs.filter(status__in=statuses.split(','))
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+
+        orders = qs.exclude(status__in=['cancelled', 'confirmed']).order_by('master__user__last_name', '-priority', '-created_at')
+
+        master_name = ''
+        if master_id:
+            try:
+                m = Master.objects.get(id=int(master_id))
+                master_name = m.user.get_full_name() or m.user.username
+            except Master.DoesNotExist:
+                pass
+
+        from datetime import date
+        today = date.today().strftime('%d.%m.%Y')
+
+        rows = ''
+        for idx, o in enumerate(orders, 1):
+            master_label = o.master.user.get_full_name() or o.master.user.username if o.master else '—'
+            client_label = o.client.name if o.client else '—'
+            rows += f'''
+            <tr>
+                <td style="text-align:center;">{idx}</td>
+                <td>{o.number}</td>
+                <td>{client_label}</td>
+                <td>{o.address or o.full_address}</td>
+                <td style="text-align:center;">{o.get_order_type_display()}</td>
+                <td style="text-align:center;">{o.get_status_display()}</td>
+                <td>{master_label}</td>
+                <td style="text-align:right;">{o.cost or 0:.0f} ₽</td>
+            </tr>'''
+
+        title = f'Заявки на {today}'
+        if master_name:
+            title += f' — мастер: {master_name}'
+
+        html = f'''<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="utf-8"><title>{title}</title>
+<style>
+@page {{ size: A4 landscape; margin: 10mm; }}
+@media print {{
+  body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  .no-print {{ display: none !important; }}
+}}
+body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 9pt; color: #333; }}
+h1 {{ font-size: 14pt; margin: 0 0 10px; color: #1a3e60; }}
+table {{ width: 100%; border-collapse: collapse; }}
+th {{ background: #1a3e60; color: #fff; padding: 6px 4px; font-size: 8pt; }}
+td {{ padding: 4px; border-bottom: 1px solid #eee; font-size: 8pt; }}
+tr:nth-child(even) {{ background: #f9f9f9; }}
+.footer {{ margin-top: 15px; font-size: 7pt; color: #999; }}
+.signature-row {{ margin-top: 30px; display: flex; justify-content: space-between; }}
+.signature-row div {{ width: 45%; border-top: 1px solid #000; padding-top: 4px; font-size: 8pt; }}
+.print-btn {{ position: fixed; top: 10px; right: 10px; padding: 10px 16px; background: #1a3e60; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; z-index: 999; }}
+.print-btn:hover {{ opacity: .9; }}
+</style></head>
+<body>
+<button class="print-btn no-print" onclick="window.print()">🖨️ Печать</button>
+<h1>{title}</h1>
+<p style="color:#888;font-size:8pt;">Всего заявок: {len(orders)}</p>
+<table>
+    <tr><th>№</th><th>Номер</th><th>Клиент</th><th>Адрес</th><th>Тип</th><th>Статус</th><th>Мастер</th><th>Сумма</th></tr>
+    {rows}
+</table>
+<div class="signature-row">
+    <div>Мастер: _____________________</div>
+    <div>Диспетчер: _____________________</div>
+</div>
+<div class="footer">Дата печати: {today} · Видео Сервис CRM</div>
+</body></html>'''
+
+        return Response({'html': html, 'count': len(orders)})
         """Календарь: заявки с датой scheduled_at"""
         user = request.user
         qs = Order.objects.filter(scheduled_at__isnull=False).exclude(status__in=['cancelled', 'confirmed'])

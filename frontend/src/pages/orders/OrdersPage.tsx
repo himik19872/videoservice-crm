@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Table, Tag, Button, Space, Typography, Modal, Form, Input, Select, message, Card, Tabs } from 'antd';
+import { Table, Tag, Button, Space, Typography, Modal, Form, Input, Select, message, Card, Tabs, DatePicker } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
   EyeOutlined,
   FilterOutlined,
   SortAscendingOutlined,
+  PrinterOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -311,6 +312,27 @@ const OrdersPage: React.FC = () => {
           </>
         )}
         <Tag style={{ marginLeft: 8 }}>Найдено: {activeTab === 'active' ? filteredActive.length : filteredClosed.length}</Tag>
+        <Button
+          icon={<PrinterOutlined />}
+          onClick={async () => {
+            try {
+              const params: any = {};
+              if (masterFilter) params.master_id = masterFilter;
+              if (statusFilter) params.status = statusFilter;
+              if (dateFrom) params.date_from = dateFrom;
+              if (dateTo) params.date_to = dateTo;
+              const res = await api.get('/orders/print_view/', { params });
+              if (res.data.html) {
+                const w = window.open('', '_blank')!;
+                w.document.write(res.data.html);
+                w.document.close();
+                setTimeout(() => w.print(), 500);
+              }
+            } catch (e) { message.error('Ошибка печати'); }
+          }}
+        >
+          🖨️ Печать
+        </Button>
       </Space>
 
       <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginTop: 8 }}>
