@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Modal, Input, Select, Space, Tag, message, Popconfirm, Divider, Switch, Upload } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Modal, Input, Select, Space, Tag, message, Popconfirm, Divider, Switch, Upload, Image } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DeleteFilled } from '@ant-design/icons';
 import api from '../../services/api';
 
 const TAX_SYSTEMS = [
@@ -26,8 +26,11 @@ const LegalEntitiesManager: React.FC = () => {
     bank_name: '', bik: '', corr_account: '', settlement_account: '',
     director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
     cp_header_text: '', cp_footer_text: '', cp_color: '#1a3e60',
-    cp_show_logo: true, cp_signature_name: '', cp_signature_title: '',
+    cp_show_logo: true, cp_show_signature: true,
+    cp_signature_name: '', cp_signature_title: '',
   });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [signFile, setSignFile] = useState<File | null>(null);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -43,19 +46,22 @@ const LegalEntitiesManager: React.FC = () => {
 
   const openCreate = () => {
     setEditing(null);
+    setLogoFile(null); setSignFile(null);
     setFormData({
       name: '', short_name: '', inn: '', kpp: '', ogrn: '',
       legal_address: '', actual_address: '', phone: '', email: '',
       bank_name: '', bik: '', corr_account: '', settlement_account: '',
       director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
       cp_header_text: '', cp_footer_text: '', cp_color: '#1a3e60',
-      cp_show_logo: true, cp_signature_name: '', cp_signature_title: '',
+      cp_show_logo: true, cp_show_signature: true,
+      cp_signature_name: '', cp_signature_title: '',
     });
     setModalOpen(true);
   };
 
   const openEdit = (rec: any) => {
     setEditing(rec);
+    setLogoFile(null); setSignFile(null);
     setFormData({
       name: rec.name || '', short_name: rec.short_name || '',
       inn: rec.inn || '', kpp: rec.kpp || '', ogrn: rec.ogrn || '',
@@ -66,7 +72,9 @@ const LegalEntitiesManager: React.FC = () => {
       director: rec.director || '', tax_system: rec.tax_system || 'usn',
       is_default: rec.is_default || false, vat_rate: rec.vat_rate || 0,
       cp_header_text: rec.cp_header_text || '', cp_footer_text: rec.cp_footer_text || '',
-      cp_color: rec.cp_color || '#1a3e60', cp_show_logo: rec.cp_show_logo !== false,
+      cp_color: rec.cp_color || '#1a3e60',
+      cp_show_logo: rec.cp_show_logo !== false,
+      cp_show_signature: rec.cp_show_signature !== false,
       cp_signature_name: rec.cp_signature_name || '', cp_signature_title: rec.cp_signature_title || '',
     });
     setModalOpen(true);
@@ -79,15 +87,18 @@ const LegalEntitiesManager: React.FC = () => {
       Object.entries(formData).forEach(([k, v]) => {
         if (v !== undefined && v !== null) fd.append(k, String(v));
       });
+      if (logoFile) fd.append('cp_logo_file', logoFile);
+      if (signFile) fd.append('cp_signature_file', signFile);
+
+      const token = localStorage.getItem('token');
+      const headers: any = { 'Content-Type': 'multipart/form-data' };
+      if (token) headers['Authorization'] = `Token ${token}`;
+
       if (editing) {
-        await api.patch(`/legal-entities/${editing.id}/`, fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        await api.patch(`/legal-entities/${editing.id}/`, fd, { headers });
         message.success('Обновлено');
       } else {
-        await api.post('/legal-entities/', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        await api.post('/legal-entities/', fd, { headers });
         message.success('Создано');
       }
       setModalOpen(false);
@@ -95,13 +106,15 @@ const LegalEntitiesManager: React.FC = () => {
     } catch { message.error('Ошибка сохранения'); }
   };
 
-  const handleDeleteLogo = async (id: number) => {
-    try { await api.post(`/legal-entities/${id}/delete_logo/`); message.success('Логотип удалён'); fetchData(); }
+  const handleDeleteLogo = async () => {
+    if (!editing?.id) return;
+    try { await api.post(`/legal-entities/${editing.id}/delete_logo/`); message.success('Логотип удалён'); fetchData(); setModalOpen(false); }
     catch { message.error('Ошибка'); }
   };
 
-  const handleDeleteSign = async (id: number) => {
-    try { await api.post(`/legal-entities/${id}/delete_signature/`); message.success('Подпись удалена'); fetchData(); }
+  const handleDeleteSign = async () => {
+    if (!editing?.id) return;
+    try { await api.post(`/legal-entities/${editing.id}/delete_signature/`); message.success('Подпись удалена'); fetchData(); setModalOpen(false); }
     catch { message.error('Ошибка'); }
   };
 
@@ -208,7 +221,59 @@ const LegalEntitiesManager: React.FC = () => {
             <label>Директор</label>
             <Input value={formData.director} onChange={e => setFormData({ ...formData, director: e.target.value })} />
           </div>
-          <Divider orientation="left" style={{ fontSize: 12, margin: '4px 0' }}>🎨 Шаблон КП (индивидуальный для этого юрлица)</Divider>
+          <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0' }}>🎨 Шаблон КП (для этого юрлица)</Divider>
+
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Switch checked={formData.cp_show_logo} onChange={v => setFormData({ ...formData, cp_show_logo: v })} />
+              <span>Логотип</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Switch checked={formData.cp_show_signature} onChange={v => setFormData({ ...formData, cp_show_signature: v })} />
+              <span>Подпись</span>
+            </div>
+            <div style={{ flex: 1 }} />
+            <div><label>Цвет шапки</label><Input type="color" value={formData.cp_color} onChange={e => setFormData({ ...formData, cp_color: e.target.value })} style={{ width: 50 }} /></div>
+          </div>
+
+          {formData.cp_show_logo && (
+            <div style={{ marginBottom: 6 }}>
+              <label>Логотип (файл)</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Upload beforeUpload={f => { setLogoFile(f); return false; }} showUploadList={false} accept="image/*">
+                  <Button icon={<UploadOutlined />} size="small">{logoFile ? logoFile.name : 'Выбрать файл'}</Button>
+                </Upload>
+                {editing?.cp_logo_file && (
+                  <Popconfirm title="Удалить логотип?" onConfirm={handleDeleteLogo}>
+                    <Button size="small" danger icon={<DeleteFilled />}>Удалить</Button>
+                  </Popconfirm>
+                )}
+              </div>
+              {editing?.cp_logo_file && !logoFile && (
+                <Image src={editing.cp_logo_file} style={{ maxHeight: 40, marginTop: 4 }} />
+              )}
+            </div>
+          )}
+
+          {formData.cp_show_signature && (
+            <div style={{ marginBottom: 6 }}>
+              <label>Подпись (файл)</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Upload beforeUpload={f => { setSignFile(f); return false; }} showUploadList={false} accept="image/*">
+                  <Button icon={<UploadOutlined />} size="small">{signFile ? signFile.name : 'Выбрать файл'}</Button>
+                </Upload>
+                {editing?.cp_signature_file && (
+                  <Popconfirm title="Удалить подпись?" onConfirm={handleDeleteSign}>
+                    <Button size="small" danger icon={<DeleteFilled />}>Удалить</Button>
+                  </Popconfirm>
+                )}
+              </div>
+              {editing?.cp_signature_file && !signFile && (
+                <Image src={editing.cp_signature_file} style={{ maxHeight: 40, marginTop: 4 }} />
+              )}
+            </div>
+          )}
+
           <div>
             <label>Заголовок КП</label>
             <Input value={formData.cp_header_text} onChange={e => setFormData({ ...formData, cp_header_text: e.target.value })} placeholder="Коммерческое предложение" />
@@ -216,10 +281,6 @@ const LegalEntitiesManager: React.FC = () => {
           <div>
             <label>Текст в подвале</label>
             <Input value={formData.cp_footer_text} onChange={e => setFormData({ ...formData, cp_footer_text: e.target.value })} placeholder="С уважением, команда Видео Сервис" />
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div><label>Цвет шапки</label><Input type="color" value={formData.cp_color} onChange={e => setFormData({ ...formData, cp_color: e.target.value })} style={{ width: 60 }} /></div>
-            <div style={{ marginTop: 18 }}><Switch checked={formData.cp_show_logo} onChange={v => setFormData({ ...formData, cp_show_logo: v })} /> Показывать логотип</div>
           </div>
           <div>
             <label>ФИО подписанта</label>

@@ -3577,13 +3577,16 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
         # Шаблон КП: приоритет — настройки юрлица, затем системные
         def _le_or_sys(le_field, sys_key, default=''):
             """Взять значение из юрлица, иначе из системных настроек, иначе default"""
-            val = getattr(le, le_field, None) if le else None
-            if val:
-                return val
+            if le and hasattr(le, le_field):
+                val = getattr(le, le_field)
+                # Для булевых полей: None — fallback, иначе берём значение юрлица
+                if val is not None and val != '':
+                    return val
             return settings_data.get(sys_key, default)
 
         color = _le_or_sys('cp_color', 'cp_color', '#1a3e60')
         show_logo = _le_or_sys('cp_show_logo', 'cp_show_logo', True)
+        show_signature = _le_or_sys('cp_show_signature', 'cp_show_signature', True)
         header_text = _le_or_sys('cp_header_text', 'cp_header_text', 'Коммерческое предложение')
         footer_text = _le_or_sys('cp_footer_text', 'cp_footer_text', 'С уважением, команда Видео Сервис')
         sig_name = _le_or_sys('cp_signature_name', 'cp_signature_name', '')
@@ -3623,6 +3626,19 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
                 author_phone = estimate.created_by.profile.phone or ''
             except Exception:
                 pass
+
+        # Блок подписи (с учётом show_signature)
+        phone_line = f'<p style="margin:0; color:#1677ff;">📞 {author_phone}</p>' if author_phone else ''
+        if show_signature:
+            signature_block = f'''<div class="signature-block">
+        {signature_html}
+        <p style="margin:8px 0 2px;">_________________</p>
+        <p style="margin:0; font-weight:600;">{author_name or sig_name}</p>
+        <p style="margin:0; color:#888;">{sig_title}</p>
+        {phone_line}
+    </div>'''
+        else:
+            signature_block = ''
 
         # Реквизиты автора для подписи
 
@@ -3726,13 +3742,7 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 
 <div class="footer">
     <p>{footer_text}</p>
-    <div class="signature-block">
-        {signature_html}
-        <p style="margin:8px 0 2px;">_________________</p>
-        <p style="margin:0; font-weight:600;">{author_name or sig_name}</p>
-        <p style="margin:0; color:#888;">{sig_title}</p>
-        {f'<p style="margin:0; color:#1677ff;">📞 {author_phone}</p>' if author_phone else ''}
-    </div>
+    {signature_block}
 </div>
 </body></html>'''
 

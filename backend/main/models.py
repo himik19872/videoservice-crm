@@ -817,6 +817,7 @@ class SystemSettings(models.Model):
     cp_validity_days = models.PositiveIntegerField(default=7, verbose_name=_('Срок действия КП (дней)'))
     cp_color = models.CharField(max_length=20, default='#1a3e60', verbose_name=_('Цвет шапки КП (hex)'))
     cp_show_logo = models.BooleanField(default=True, verbose_name=_('Показывать логотип'))
+    cp_show_signature = models.BooleanField(default=True, verbose_name=_('Показывать подпись'))
     cp_logo_file = models.ImageField(upload_to='settings/', null=True, blank=True, verbose_name=_('Логотип (файл)'))
     cp_signature_file = models.ImageField(upload_to='settings/', null=True, blank=True, verbose_name=_('Подпись (файл)'))
 
@@ -1558,6 +1559,7 @@ class LegalEntity(models.Model):
     cp_footer_text = models.CharField(max_length=500, blank=True, verbose_name=_('Текст в подвале КП'))
     cp_color = models.CharField(max_length=20, default='#1a3e60', blank=True, verbose_name=_('Цвет шапки КП (hex)'))
     cp_show_logo = models.BooleanField(default=True, verbose_name=_('Показывать логотип'))
+    cp_show_signature = models.BooleanField(default=True, verbose_name=_('Показывать подпись'))
     cp_logo_file = models.ImageField(upload_to='legal_entity_logos/', null=True, blank=True, verbose_name=_('Логотип (файл)'))
     cp_signature_file = models.ImageField(upload_to='legal_entity_signatures/', null=True, blank=True, verbose_name=_('Подпись (файл)'))
     cp_signature_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО подписанта'))
