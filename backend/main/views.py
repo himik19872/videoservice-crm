@@ -3644,6 +3644,7 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
         <tr><td>Подытог:</td><td style="text-align:right;">{estimate.subtotal:,.2f} ₽</td></tr>
         {f'<tr><td>Скидка:</td><td style="text-align:right;">-{estimate.discount}%</td></tr>' if estimate.discount and estimate.discount > 0 else ''}
         {f'<tr><td>Доставка:</td><td style="text-align:right;">{estimate.delivery_cost:,.2f} ₽</td></tr>' if estimate.delivery_cost and estimate.delivery_cost > 0 else ''}
+        {f'<tr><td>НДС {estimate.legal_entity.vat_rate if estimate.legal_entity else 0}%:</td><td style="text-align:right;">{estimate.total_vat:,.2f} ₽</td></tr>' if estimate.total_vat and estimate.total_vat > 0 else ''}
         <tr class="total"><td>ИТОГО:</td><td style="text-align:right;">{estimate.total:,.2f} ₽</td></tr>
     </table>
 </div>

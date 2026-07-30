@@ -1089,7 +1089,7 @@ class CommercialEstimateSerializer(serializers.ModelSerializer):
                   'commission', 'dealer_fee', 'unexpected_costs', 'delivery_type',
                   'delivery_cost', 'tax_type', 'tax_rate', 'employee', 'employee_phone',
                   'total_materials', 'total_services', 'subtotal', 'total', 'total_cost',
-                  'profit', 'note', 'items', 'created_by', 'created_by_name',
+                  'total_vat', 'profit', 'note', 'items', 'created_by', 'created_by_name',
                   'created_at', 'updated_at']
         read_only_fields = ['id', 'number', 'created_by', 'created_at', 'updated_at']
 

@@ -1550,6 +1550,8 @@ class LegalEntity(models.Model):
         ('patent', _('Патент')),
         ('none', _('Без налога')),
     ], default='usn', verbose_name=_('Система налогообложения'))
+    vat_rate = models.DecimalField(max_digits=4, decimal_places=1, default=0, verbose_name=_('Ставка НДС (%)'),
+                                    help_text='0 — без НДС, 20 — 20%, 10 — 10%')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
 
     class Meta:
@@ -1660,6 +1662,7 @@ class CommercialEstimate(models.Model):
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Итого'))
     total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Итого себестоимость'))
     profit = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Прибыль'))
+    total_vat = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('В т.ч. НДС'))
 
     note = models.TextField(blank=True, verbose_name=_('Примечание'))
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_estimates', verbose_name=_('Создал'))
@@ -1697,15 +1700,25 @@ class CommercialEstimate(models.Model):
             for i in items
         )
 
+        # НДС: если юрлицо на ОСНО — включаем в итог
+        vat_amount = 0
+        if self.legal_entity and self.legal_entity.vat_rate and float(self.legal_entity.vat_rate) > 0:
+            vat_rate = float(self.legal_entity.vat_rate)
+            vat_amount = round(total * vat_rate / (100 + vat_rate), 2)
+            total_with_vat = total
+        else:
+            total_with_vat = total
+
         self.total_materials = total_materials
         self.total_services = total_services
         self.subtotal = subtotal
-        self.total = total
+        self.total = total_with_vat
         self.total_cost = total_cost
-        self.profit = total - total_cost - self.unexpected_costs - self.delivery_cost
+        self.total_vat = vat_amount
+        self.profit = total_with_vat - total_cost - self.unexpected_costs - self.delivery_cost
         self.save(update_fields=[
             'total_materials', 'total_services', 'subtotal',
-            'total', 'total_cost', 'profit', 'updated_at'
+            'total', 'total_cost', 'total_vat', 'profit', 'updated_at'
         ])
 
     def save(self, *args, **kwargs):
