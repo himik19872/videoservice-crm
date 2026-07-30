@@ -146,9 +146,9 @@ function AppContent() {
   }
 
   // Admin + управленческие роли (расширенный доступ)
-  const isManagement = user?.role === 'admin' || user?.role === 'general_director' || user?.role === 'executive_director' || user?.role === 'tech_director' || user?.role === 'chief_engineer';
+  const isManagement = user?.role === 'admin' || user?.role === 'general_director' || user?.role === 'executive_director' || user?.role === 'tech_director' || user?.role === 'chief_engineer' || user?.role === 'supervisor';
   const isFinance = user?.role === 'accountant' || user?.role === 'cashier';
-  const isOffice = user?.role === 'clerk' || user?.role === 'secretary' || user?.role === 'supervisor';
+  const isOffice = user?.role === 'clerk' || user?.role === 'secretary';
 
   // Инженер (отдельная роль с ограниченным доступом к заявкам и оборудованию)
   if (user?.role === 'engineer') {

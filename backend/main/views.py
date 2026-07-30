@@ -77,15 +77,23 @@ class MasterViewSet(viewsets.ModelViewSet):
         queryset = Master.objects.all()
         user = self.request.user
 
-        # Мастер видит только свои данные
-        if user.is_authenticated and not user.is_staff:
-            try:
-                master = user.master_profile
-                return queryset.filter(id=master.id)
-            except Master.DoesNotExist:
-                return Master.objects.none()
+        if not user.is_authenticated:
+            return Master.objects.none()
 
-        return queryset
+        # Администраторы и управленцы видят всех
+        try:
+            profile = user.profile
+            if profile.role in ('admin', 'dispatcher', 'supervisor', 'chief_engineer', 'tech_director', 'executive_director', 'general_director'):
+                return queryset
+        except UserProfile.DoesNotExist:
+            pass
+
+        # Мастер/монтажник видит только свои данные
+        try:
+            master = user.master_profile
+            return queryset.filter(id=master.id)
+        except Master.DoesNotExist:
+            return Master.objects.none()
 
     def create(self, request, *args, **kwargs):
         from django.contrib.auth.models import User
@@ -358,8 +366,14 @@ class ClientViewSet(viewsets.ModelViewSet):
         if apartment:
             queryset = queryset.filter(apartment=apartment)
 
-        # Если не администратор, показываем только клиентов своего региона
+        # Если не администратор и не начальник, показываем только клиентов своего региона
         if user.is_authenticated and not user.is_staff:
+            try:
+                profile = user.profile
+                if profile.role in ('admin', 'dispatcher', 'supervisor', 'chief_engineer', 'tech_director', 'executive_director', 'general_director'):
+                    return queryset
+            except UserProfile.DoesNotExist:
+                pass
             try:
                 master = user.master_profile
                 if master.region:
@@ -628,8 +642,8 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         role = profile.role
 
-        # Админ, диспетчер, главный инженер, техдиректор, исполнительный, гендиректор — видят все заявки
-        if role in ('admin', 'dispatcher', 'chief_engineer', 'tech_director', 'executive_director', 'general_director'):
+        # Админ, диспетчер, главный инженер, начальник сервисной службы, техдиректор, исполнительный, гендиректор — видят все заявки
+        if role in ('admin', 'dispatcher', 'chief_engineer', 'supervisor', 'tech_director', 'executive_director', 'general_director'):
             return queryset
 
         # Мастер, монтажник — только свои
@@ -640,8 +654,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             except Master.DoesNotExist:
                 return Order.objects.none()
 
-        # Инженер, начальник сервисной службы — заявки где нужна помощь или они помощники
-        if role in ('engineer', 'supervisor'):
+        # Инженер — заявки где нужна помощь или он помощник/мастер
+        if role == 'engineer':
             return queryset.filter(
                 Q(status='need_help') | Q(master__user=user) | Q(helpers=user)
             )
