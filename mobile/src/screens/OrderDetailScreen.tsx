@@ -261,32 +261,27 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         const encoded = encodeURIComponent(addr);
 
-        // Открываем Яндекс.Навигатор (основной способ)
+        // Яндекс.Навигатор
         const yandexNavi = `yandexnavi://build_route_on_map?lat_to=0&lon_to=0&text_to=${encoded}`;
-        // Яндекс.Карты (запасной)
-        const yandexMaps = `yandexmaps://maps.yandex.ru/?rtext=~${encoded}&rtt=auto`;
-        // Яндекс.Карты в браузере (запасной #2)
+        // 2GIS
+        const dgis = `dgis://2gis.ru/routeSearch/to/${encoded}/go`;
+        // Яндекс.Карты (браузер — запасной)
         const yandexWeb = `https://yandex.ru/maps/?rtext=~${encoded}&rtt=auto`;
 
-        Linking.canOpenURL(yandexNavi).then(canOpen => {
-          if (canOpen) {
+        // Пробуем Яндекс.Навигатор → 2GIS → браузер
+        Linking.canOpenURL(yandexNavi).then(canNavi => {
+          if (canNavi) {
             Linking.openURL(yandexNavi);
           } else {
-            // Пробуем Яндекс.Карты приложение
-            Linking.canOpenURL(yandexMaps).then(canMaps => {
-              if (canMaps) {
-                Linking.openURL(yandexMaps);
+            Linking.canOpenURL(dgis).then(can2gis => {
+              if (can2gis) {
+                Linking.openURL(dgis);
               } else {
-                // Запасной: браузер
                 Linking.openURL(yandexWeb);
               }
-            }).catch(() => {
-              Linking.openURL(yandexWeb);
-            });
+            }).catch(() => Linking.openURL(yandexWeb));
           }
-        }).catch(() => {
-          Linking.openURL(yandexWeb);
-        });
+        }).catch(() => Linking.openURL(yandexWeb));
       }}>
         <Text style={[styles.address, { color: theme.textSecondary }]}>📍 {order.address || [order.city, order.street_name, 'д.' + order.house_number].filter(Boolean).join(', ')}</Text>
         <Text style={[styles.navHint, { color: theme.primary }]}>🚗 Нажмите, чтобы построить маршрут</Text>
