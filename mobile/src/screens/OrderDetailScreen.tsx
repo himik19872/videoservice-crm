@@ -290,6 +290,14 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         <Text style={[styles.address, { color: theme.textSecondary }]}>📍 {order.address || [order.city, order.street_name, 'д.' + order.house_number].filter(Boolean).join(', ')}</Text>
         <Text style={[styles.navHint, { color: theme.primary }]}>🚗 Нажмите, чтобы построить маршрут</Text>
       </TouchableOpacity>
+
+      {/* Время визита клиента */}
+      {(order.client_available_from || order.client_available_to) && (
+        <Text style={[styles.desc, { backgroundColor: '#fff7e6', borderLeftWidth: 3, borderLeftColor: '#fa8c16', marginTop: 10 }]}>
+          🏠 Клиент дома: {order.client_available_from || '09:00'} – {order.client_available_to || '18:00'}
+        </Text>
+      )}
+
       {order.description ? (
         <Text style={[styles.desc, { color: theme.text, backgroundColor: theme.inputBg }]}>{order.description}</Text>
       ) : null}

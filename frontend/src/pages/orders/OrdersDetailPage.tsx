@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox, Popconfirm, DatePicker } from 'antd';
+import { Card, Typography, Spin, Tag, Space, Descriptions, Button, Divider, message, Modal, Select, Row, Col, Tabs, Input, InputNumber, List, Avatar, Table, Checkbox, Popconfirm, DatePicker, TimePicker } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, PoweroffOutlined, PauseCircleOutlined, QuestionCircleOutlined, UndoOutlined, CheckOutlined, AimOutlined, EnvironmentOutlined, DollarOutlined, ToolOutlined, SendOutlined, PlusOutlined, MinusCircleOutlined, LinkOutlined, DisconnectOutlined, FileTextOutlined, CalendarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
@@ -24,6 +24,8 @@ const OrdersDetailPage: React.FC = () => {
   const [selectedMasterId, setSelectedMasterId] = useState<number | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [scheduledAt, setScheduledAt] = useState<string | null>(null);
+  const [availableFrom, setAvailableFrom] = useState<string>('09:00');
+  const [availableTo, setAvailableTo] = useState<string>('18:00');
   const [gpsHistory, setGpsHistory] = useState<any>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
@@ -160,12 +162,16 @@ const OrdersDetailPage: React.FC = () => {
       const response = await api.post(`/orders/${order.id}/assign/`, {
         ...payload,
         scheduled_at: scheduledAt || undefined,
+        client_available_from: availableFrom,
+        client_available_to: availableTo,
       });
       setOrder(response.data);
       setAssignModalOpen(false);
       setSelectedMasterId(null);
       setSelectedUserId(null);
       setScheduledAt(null);
+      setAvailableFrom('09:00');
+      setAvailableTo('18:00');
       message.success('Сотрудник назначен');
     } catch (error) {
       message.error('Ошибка назначения');
@@ -1191,16 +1197,35 @@ const OrdersDetailPage: React.FC = () => {
         <Space direction="vertical" style={{ width: '100%' }}>
           <div>
             <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-              <CalendarOutlined /> Запланировать на дату (опционально)
+              <CalendarOutlined /> Запланировать на дату и время
             </Text>
             <DatePicker
               showTime={{ format: 'HH:mm' }}
               format="DD.MM.YYYY HH:mm"
-              placeholder="Оставить текущую дату"
+              placeholder="Выберите дату и время"
               style={{ width: '100%' }}
               value={scheduledAt ? dayjs(scheduledAt) : null}
               onChange={(d) => setScheduledAt(d ? d.toISOString() : null)}
             />
+          </div>
+          <div>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+              🏠 Клиент доступен (время визита)
+            </Text>
+            <Row gutter={12}>
+              <Col span={12}>
+                <TimePicker format="HH:mm" placeholder="С"
+                  value={availableFrom ? dayjs(availableFrom, 'HH:mm') : null}
+                  onChange={(t) => setAvailableFrom(t ? t.format('HH:mm') : '09:00')}
+                  style={{ width: '100%' }} />
+              </Col>
+              <Col span={12}>
+                <TimePicker format="HH:mm" placeholder="До"
+                  value={availableTo ? dayjs(availableTo, 'HH:mm') : null}
+                  onChange={(t) => setAvailableTo(t ? t.format('HH:mm') : '18:00')}
+                  style={{ width: '100%' }} />
+              </Col>
+            </Row>
           </div>
           <Divider style={{ margin: '8px 0' }} />
           <Tabs

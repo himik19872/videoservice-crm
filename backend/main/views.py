@@ -1125,6 +1125,11 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
 
         if scheduled_at:
             order.scheduled_at = scheduled_at
+
+        if request.data.get('client_available_from'):
+            order.client_available_from = request.data['client_available_from']
+        if request.data.get('client_available_to'):
+            order.client_available_to = request.data['client_available_to']
         order.save()
 
         OrderHistory.objects.create(

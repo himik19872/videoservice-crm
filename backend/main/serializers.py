@@ -441,6 +441,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'description', 'status', 'priority', 'cost', 'payment_type',
             'payment_type_display', 'is_paid', 'is_warranty',
             'photo_report_required', 'deadline',
+            'client_available_from', 'client_available_to',
             'assigned_at', 'scheduled_at', 'accepted_at', 'started_at', 'paused_at',
             'completed_at', 'confirmed_at', 'confirmed_by',
             'helpers', 'history', 'media', 'issue_orders',
@@ -450,7 +451,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'number', 'assigned_at', 'scheduled_at', 'accepted_at', 'started_at',
+            'id', 'number', 'assigned_at', 'accepted_at', 'started_at',
             'paused_at', 'completed_at', 'confirmed_at', 'confirmed_by',
             'created_at', 'updated_at', 'helpers', 'history', 'media', 'issue_orders'
         ]

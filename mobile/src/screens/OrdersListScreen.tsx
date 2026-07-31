@@ -70,12 +70,6 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
       .filter(o => {
         // Скрываем завершённые/отменённые/подтверждённые
         if (['completed', 'confirmed', 'cancelled'].includes(o.status)) return false;
-
-        // Если не staff (мастер) — показываем только заявки на сегодня и просроченные
-        if (!isStaff && o.scheduled_at) {
-          const scheduledDate = new Date(o.scheduled_at).toISOString().slice(0, 10);
-          return scheduledDate <= today.slice(0, 10);
-        }
         return true;
       })
       .filter(o =>

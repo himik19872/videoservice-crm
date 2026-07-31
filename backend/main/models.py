@@ -611,6 +611,10 @@ class Order(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Дата обновления'))
     deadline = models.DateTimeField(blank=True, null=True, verbose_name=_('Срок выполнения'))
 
+    # Временной интервал визита (когда клиент дома)
+    client_available_from = models.TimeField(default='09:00', verbose_name=_('Клиент доступен с'))
+    client_available_to = models.TimeField(default='18:00', verbose_name=_('Клиент доступен до'))
+
     # Группировка заявок
     parent_order = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='linked_orders', verbose_name=_('Главная заявка (объединение)'))
