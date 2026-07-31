@@ -110,6 +110,7 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
           📅 {new Date(item.scheduled_at).toLocaleDateString('ru-RU')}
         </Text>
       )}
+    </TouchableOpacity>
   );
 
   return (
