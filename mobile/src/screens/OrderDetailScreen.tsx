@@ -246,43 +246,44 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       <Text style={[styles.client, { color: theme.text }]}>{order.client_info?.full_name || '—'}</Text>
       <Text style={[styles.phone, { color: theme.primary }]}>📞 {order.client_info?.phone || order.client?.phone || '—'}</Text>
       <TouchableOpacity onPress={() => {
-        const city = order.city || '';
-        const street = order.street_name || '';
-        const house = order.house_number || '';
-        const build = order.building_number || '';
-        const apart = order.apartment || '';
+        // Собираем адрес из полей
         const parts: string[] = [];
-        if (city) parts.push(city);
-        if (street) parts.push(street);
-        if (house) parts.push('д.' + house + (build ? ' к' + build : ''));
-        if (apart) parts.push('кв.' + apart);
-        let addr = parts.join(', ');
-        if (!addr) addr = order.address || '';
+        if (order.city) parts.push(order.city);
+        if (order.street_name) parts.push(order.street_name);
+        if (order.house_number) {
+          let h = 'д.' + order.house_number;
+          if (order.building_number) h += ' к' + order.building_number;
+          parts.push(h);
+        }
+        if (order.apartment) parts.push('кв.' + order.apartment);
+        const addr = parts.join(', ') || order.address || '';
         if (!addr) return;
 
         const encoded = encodeURIComponent(addr);
 
-        // Пробуем открыть Яндекс.Навигатор (Android)
-        const yandexNavi = `yandexnavi://build_route_on_map?lat_to=&lon_to=&text_to=${encoded}`;
-        // Яндекс.Карты (приложение)
-        const yandexMapsApp = `yandexmaps://maps.yandex.ru/?rtext=~${encoded}&rtt=auto`;
-        // Google Maps
-        const googleMaps = `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
-        // Яндекс.Карты в браузере (запасной)
+        // Открываем Яндекс.Навигатор (основной способ)
+        const yandexNavi = `yandexnavi://build_route_on_map?lat_to=0&lon_to=0&text_to=${encoded}`;
+        // Яндекс.Карты (запасной)
+        const yandexMaps = `yandexmaps://maps.yandex.ru/?rtext=~${encoded}&rtt=auto`;
+        // Яндекс.Карты в браузере (запасной #2)
         const yandexWeb = `https://yandex.ru/maps/?rtext=~${encoded}&rtt=auto`;
 
-        // Пробуем по цепочке: Навигатор → Яндекс.Карты → Google Maps → браузер
-        Linking.canOpenURL(yandexNavi).then(can => {
-          if (can) return Linking.openURL(yandexNavi);
-          return Linking.canOpenURL(yandexMapsApp);
-        }).then(can => {
-          if (can === true) return Linking.openURL(yandexMapsApp);
-          if (typeof can === 'string' || can) return undefined;
-          return Linking.canOpenURL(googleMaps);
-        }).then(can => {
-          if (can === true) return Linking.openURL(googleMaps);
-          // Fallback: открываем в браузере
-          Linking.openURL(yandexWeb);
+        Linking.canOpenURL(yandexNavi).then(canOpen => {
+          if (canOpen) {
+            Linking.openURL(yandexNavi);
+          } else {
+            // Пробуем Яндекс.Карты приложение
+            Linking.canOpenURL(yandexMaps).then(canMaps => {
+              if (canMaps) {
+                Linking.openURL(yandexMaps);
+              } else {
+                // Запасной: браузер
+                Linking.openURL(yandexWeb);
+              }
+            }).catch(() => {
+              Linking.openURL(yandexWeb);
+            });
+          }
         }).catch(() => {
           Linking.openURL(yandexWeb);
         });
