@@ -261,8 +261,8 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         const encoded = encodeURIComponent(addr);
 
-        // Яндекс.Навигатор
-        const yandexNavi = `yandexnavi://build_route_on_map?lat_to=0&lon_to=0&text_to=${encoded}`;
+        // Яндекс.Навигатор — правильный формат: только text_to (без lat_to/lon_to)
+        const yandexNavi = `yandexnavi://build_route_on_map?text_to=${encoded}`;
         // 2GIS
         const dgis = `dgis://2gis.ru/routeSearch/to/${encoded}/go`;
         // Яндекс.Карты (браузер — запасной)
