@@ -251,14 +251,41 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         const house = order.house_number || '';
         const build = order.building_number || '';
         const apart = order.apartment || '';
-        const parts = [city, street].filter(Boolean);
+        const parts: string[] = [];
+        if (city) parts.push(city);
+        if (street) parts.push(street);
         if (house) parts.push('д.' + house + (build ? ' к' + build : ''));
         if (apart) parts.push('кв.' + apart);
-        const addr = parts.join(', ') || order.address || '';
-
+        let addr = parts.join(', ');
+        if (!addr) addr = order.address || '';
         if (!addr) return;
+
         const encoded = encodeURIComponent(addr);
-        Linking.openURL(`https://yandex.ru/maps/?rtext=~${encoded}&rtt=auto`);
+
+        // Пробуем открыть Яндекс.Навигатор (Android)
+        const yandexNavi = `yandexnavi://build_route_on_map?lat_to=&lon_to=&text_to=${encoded}`;
+        // Яндекс.Карты (приложение)
+        const yandexMapsApp = `yandexmaps://maps.yandex.ru/?rtext=~${encoded}&rtt=auto`;
+        // Google Maps
+        const googleMaps = `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
+        // Яндекс.Карты в браузере (запасной)
+        const yandexWeb = `https://yandex.ru/maps/?rtext=~${encoded}&rtt=auto`;
+
+        // Пробуем по цепочке: Навигатор → Яндекс.Карты → Google Maps → браузер
+        Linking.canOpenURL(yandexNavi).then(can => {
+          if (can) return Linking.openURL(yandexNavi);
+          return Linking.canOpenURL(yandexMapsApp);
+        }).then(can => {
+          if (can === true) return Linking.openURL(yandexMapsApp);
+          if (typeof can === 'string' || can) return undefined;
+          return Linking.canOpenURL(googleMaps);
+        }).then(can => {
+          if (can === true) return Linking.openURL(googleMaps);
+          // Fallback: открываем в браузере
+          Linking.openURL(yandexWeb);
+        }).catch(() => {
+          Linking.openURL(yandexWeb);
+        });
       }}>
         <Text style={[styles.address, { color: theme.textSecondary }]}>📍 {order.address || [order.city, order.street_name, 'д.' + order.house_number].filter(Boolean).join(', ')}</Text>
         <Text style={[styles.navHint, { color: theme.primary }]}>🚗 Нажмите, чтобы построить маршрут</Text>
