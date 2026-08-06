@@ -16,7 +16,7 @@ from .models import AuditLog
 from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial, Message
-from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem
+from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem, Instruction
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
@@ -38,7 +38,7 @@ from .serializers import (
     SystemSettingsSerializer, UserProfileSerializer, WorkShiftSerializer, OrderMediaSerializer, PushTokenSerializer
 )
 from .serializers import InventoryItemSerializer, InventoryMovementSerializer, PaymentSerializer, MasterSalarySerializer, MessageSerializer
-from .serializers import LegalEntitySerializer, EstimateServiceSerializer, CommercialEstimateSerializer, EstimateItemSerializer
+from .serializers import LegalEntitySerializer, EstimateServiceSerializer, CommercialEstimateSerializer, EstimateItemSerializer, InstructionSerializer
 from .serializers import SupplierSerializer, SupplyInvoiceSerializer, SupplyInvoiceCreateSerializer, SupplyInvoiceReceiveSerializer
 from .serializers import SupplyInvoiceItemSerializer
 from .serializers import IssueOrderSerializer, IssueOrderCreateSerializer, IssueOrderItemSerializer
@@ -4230,6 +4230,37 @@ class AppVersionViewSet(viewsets.ModelViewSet):
             port = settings.external_port or 3000
             return f'http://{ip}:{port}/api/app-versions/{version.id}/download/'
         return f'http://83.243.73.86:3000/api/app-versions/{version.id}/download/'
+
+
+# ══════════════════════════════════════════════════════════════════
+# Инструкции / Wiki
+# ══════════════════════════════════════════════════════════════════
+
+class InstructionViewSet(viewsets.ModelViewSet):
+    """Инструкции (PDF) для мобильного приложения Wiki"""
+    queryset = Instruction.objects.filter(is_active=True)
+    serializer_class = InstructionSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['category', 'is_active']
+    search_fields = ['title', 'description']
+
+    def get_permissions(self):
+        if self.action == 'list' or self.action == 'retrieve':
+            return [IsAuthenticated()]  # Просмотр — авторизованные
+        return [IsAdminUser()]  # Управление — только админ
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """Скачать PDF инструкции"""
+        instruction = self.get_object()
+        if not instruction.pdf_file:
+            return Response({'error': 'Файл не загружен'}, status=404)
+        from django.http import FileResponse
+        filename = instruction.pdf_file.name.split('/')[-1]
+        response = FileResponse(open(instruction.pdf_file.path, 'rb'), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Length'] = instruction.file_size
+        return response
 
 
 # ══════════════════════════════════════════════════════════════════

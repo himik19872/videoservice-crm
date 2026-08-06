@@ -62,6 +62,7 @@ import EntrancesPage from './pages/EntrancesPage';
 import EntranceDetailPage from './pages/EntranceDetailPage';
 import BewardDevicesPage from './pages/BewardDevicesPage';
 import DownloadAppPage from './pages/DownloadAppPage';
+import InstructionsPage from './pages/InstructionsPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
 import MasterOrdersPage from './pages/master/MasterOrdersPage';
 import MasterProfilePage from './pages/master/MasterProfilePage';
@@ -311,6 +312,7 @@ function AppContent() {
         <Route path="/entrances" element={<EntrancesPage />} />
         <Route path="/entrances/:id" element={<EntranceDetailPage />} />
         <Route path="/beward-devices" element={<BewardDevicesPage />} />
+        <Route path="/instructions" element={<InstructionsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>

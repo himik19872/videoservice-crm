@@ -873,6 +873,44 @@ class SystemSettings(models.Model):
         return 'Системные настройки'
 
 
+class Instruction(models.Model):
+    """Инструкция / документ в PDF для мобильного приложения (Wiki)"""
+    CATEGORIES = [
+        ('equipment', _('Оборудование')),
+        ('installation', _('Монтаж')),
+        ('setup', _('Настройка')),
+        ('repair', _('Ремонт')),
+        ('safety', _('Техника безопасности')),
+        ('other', _('Другое')),
+    ]
+
+    title = models.CharField(max_length=300, verbose_name=_('Название'))
+    category = models.CharField(max_length=20, choices=CATEGORIES, default='other', verbose_name=_('Категория'))
+    description = models.TextField(blank=True, verbose_name=_('Описание'))
+    pdf_file = models.FileField(upload_to='instructions/', verbose_name=_('PDF-файл'))
+    file_size = models.PositiveIntegerField(default=0, verbose_name=_('Размер (байт)'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активна'))
+    order_num = models.PositiveIntegerField(default=0, verbose_name=_('Порядок'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создана'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлена'))
+
+    class Meta:
+        verbose_name = _('Инструкция')
+        verbose_name_plural = _('Инструкции')
+        ordering = ['category', 'order_num', 'title']
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if self.pdf_file and not self.file_size:
+            try:
+                self.file_size = self.pdf_file.size
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
+
+
 class AppVersion(models.Model):
     """Версия мобильного приложения для OTA-обновлений."""
     PLATFORM_CHOICES = [

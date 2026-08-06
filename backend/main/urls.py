@@ -7,7 +7,7 @@ from .views import (
     UserProfileViewSet, WorkShiftViewSet, OrderMediaViewSet, PushTokenViewSet,
     InventoryItemViewSet, InventoryMovementViewSet, PaymentViewSet, MasterSalaryViewSet,
     MessageViewSet,
-    LegalEntityViewSet, EstimateServiceViewSet, CommercialEstimateViewSet, EstimateItemViewSet,
+    LegalEntityViewSet, EstimateServiceViewSet, CommercialEstimateViewSet, EstimateItemViewSet, InstructionViewSet,
     SupplierViewSet, SupplyInvoiceViewSet,
     IssueOrderViewSet, PurchaseRequestViewSet,
     ErcAccountViewSet, ErcBillingRecordViewSet,
@@ -78,6 +78,7 @@ router.register(r'erc-accounts', ErcAccountViewSet, basename='erc-accounts')
 router.register(r'erc-billing', ErcBillingRecordViewSet, basename='erc-billing')
 router.register(r'apartments', ApartmentViewSet, basename='apartments')
 router.register(r'entrances', BuildingEntranceViewSet, basename='entrances')
+router.register(r'instructions', InstructionViewSet, basename='instructions')
 router.register(r'management-companies', ManagementCompanyViewSet, basename='management-companies')
 router.register(r'tariffs', TariffViewSet, basename='tariffs')
 router.register(r'payment-records', PaymentRecordViewSet, basename='payment-records')

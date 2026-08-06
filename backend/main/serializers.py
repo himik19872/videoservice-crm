@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, OrderMedia, UserProfile, WorkShift, PushToken
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary, Message
-from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem
+from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem, Instruction
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
@@ -775,6 +775,25 @@ class SystemSettingsPublicSerializer(serializers.ModelSerializer):
         fields = ['cp_logo_url', 'cp_logo_file', 'cp_header_text', 'cp_footer_text',
                   'cp_signature_name', 'cp_signature_title', 'cp_validity_days',
                   'cp_color', 'cp_show_logo', 'cp_signature_file']
+
+
+class InstructionSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    pdf_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Instruction
+        fields = ['id', 'title', 'category', 'category_display', 'description',
+                  'pdf_file', 'pdf_url', 'file_size', 'is_active', 'order_num',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'file_size', 'created_at', 'updated_at']
+
+    def get_pdf_url(self, obj):
+        if obj.pdf_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.pdf_file.url)
+        return None
 
 
 class AppVersionSerializer(serializers.ModelSerializer):

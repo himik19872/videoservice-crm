@@ -21,6 +21,7 @@ import PaymentsScreen from './src/screens/PaymentsScreen';
 import AddPaymentScreen from './src/screens/AddPaymentScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
 import ServerSetupScreen from './src/screens/ServerSetupScreen';
+import WikiScreen from './src/screens/WikiScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -187,6 +188,17 @@ function AppStack() {
         component={MessagesScreen}
         options={{
           title: '💬 Сообщения',
+          headerStyle,
+          headerTintColor,
+        }}
+      />
+
+      {/* Инструкции (Wiki) */}
+      <Stack.Screen
+        name="Wiki"
+        component={WikiScreen}
+        options={{
+          title: '📚 Wiki',
           headerStyle,
           headerTintColor,
         }}
