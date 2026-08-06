@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Modal, Platform,
+  ActivityIndicator, RefreshControl, Modal, Platform, Linking, Alert,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -86,7 +86,24 @@ const WikiScreen: React.FC = () => {
   const openPdf = (item: Instruction) => {
     if (!item.pdf_url) return;
     const url = getExternalUrl(item.pdf_url);
-    setViewingPdf({ url, title: item.title });
+    // Android WebView не умеет рендерить PDF напрямую — используем Google Docs Viewer
+    const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`;
+    setViewingPdf({ url: viewerUrl, title: item.title });
+  };
+
+  const openExternal = async (item: Instruction) => {
+    if (!item.pdf_url) return;
+    const url = getExternalUrl(item.pdf_url);
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Нет приложения', 'Не удалось открыть PDF');
+      }
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось открыть файл');
+    }
   };
 
   if (loading) {
@@ -133,6 +150,7 @@ const WikiScreen: React.FC = () => {
           <TouchableOpacity
             style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
             onPress={() => openPdf(item)}
+            onLongPress={() => openExternal(item)}
           >
             <View style={styles.cardHeader}>
               <Text style={[styles.title, { color: theme.text }]} numberOfLines={2}>{item.title}</Text>
