@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Button, Space, Spin, Divider } from 'antd';
+import { Card, Typography, Button, Spin, Divider } from 'antd';
 import { DownloadOutlined, AndroidOutlined, PrinterOutlined, WifiOutlined, CameraOutlined, EnvironmentOutlined, ToolOutlined, CommentOutlined } from '@ant-design/icons';
+import { QRCodeSVG } from 'qrcode.react';
 import api from '../services/api';
 
 const { Title, Text, Paragraph } = Typography;
@@ -8,6 +9,7 @@ const { Title, Text, Paragraph } = Typography;
 const DownloadAppPage: React.FC = () => {
   const [latestVersion, setLatestVersion] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchLatestVersion();
@@ -31,6 +33,8 @@ const DownloadAppPage: React.FC = () => {
   const downloadUrl = latestVersion?.id
     ? `/api/app-versions/${latestVersion.id}/download/`
     : '/api/app-versions/1/download/';
+
+  const fullDownloadUrl = `${window.location.origin}${downloadUrl}`;
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return '—';
@@ -78,6 +82,21 @@ const DownloadAppPage: React.FC = () => {
             </Button>
             <div style={{ marginTop: 6 }}>
               <Text type="secondary" style={{ fontSize: 11 }}>Android 5.0+ • {formatBytes(latestVersion?.file_size || 0)}</Text>
+            </div>
+          </div>
+
+          {/* QR-код — виден и на экране, и при печати */}
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <div style={{ background: '#fff', padding: 16, borderRadius: 12, display: 'inline-block', border: '1px solid #eee' }}>
+              <QRCodeSVG
+                value={fullDownloadUrl}
+                size={180}
+                level="M"
+                includeMargin
+              />
+              <div style={{ marginTop: 6, fontSize: 11, color: '#888' }}>
+                📱 Наведите камеру или сканер QR-кода для скачивания
+              </div>
             </div>
           </div>
         </div>
