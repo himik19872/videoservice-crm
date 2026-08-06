@@ -7,7 +7,7 @@ import {
   HomeOutlined, CalendarOutlined, MessageOutlined, CalculatorOutlined, ToolOutlined, BankOutlined, FileTextOutlined,
   UserOutlined, CheckCircleOutlined, FileExcelOutlined, HddOutlined,
   PhoneOutlined, ApartmentOutlined, SwapOutlined, SafetyCertificateOutlined,
-  AuditOutlined,
+  AuditOutlined, BookOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -115,6 +115,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       key: '/beward-devices',
       icon: <SafetyCertificateOutlined />,
       label: 'Beward IP',
+    },
+    {
+      key: '/instructions',
+      icon: <BookOutlined />,
+      label: 'Инструкции',
     },
     {
       key: '/finance',

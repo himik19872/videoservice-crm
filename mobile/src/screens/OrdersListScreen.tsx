@@ -142,22 +142,12 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
 
       {/* Быстрая навигация */}
       <View style={styles.navRow}>
-        {isStaff && (
-          <>
-            <TouchableOpacity
-              style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
-              onPress={() => navigation.navigate('Inventory')}
-            >
-              <Text style={[styles.navChipText, { color: theme.textSecondary }]}>📦 Склад</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
-              onPress={() => navigation.navigate('Payments')}
-            >
-              <Text style={[styles.navChipText, { color: theme.textSecondary }]}>💰 Оплаты</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        <TouchableOpacity
+          style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
+          onPress={() => navigation.navigate('Wiki')}
+        >
+          <Text style={[styles.navChipText, { color: theme.textSecondary }]}>📚 Wiki</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
           onPress={() => navigation.navigate('Messages')}
