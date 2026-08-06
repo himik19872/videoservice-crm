@@ -82,7 +82,7 @@ const DownloadAppPage: React.FC = () => {
               href={downloadUrl}
               style={{ height: 48, fontSize: 16, padding: '0 40px' }}
             >
-              📥 Скачать v{latestVersion?.version || '1.0.3'} ({formatBytes(latestVersion?.file_size || 0)})
+              📥 Скачать v{latestVersion?.version || '1.0.4'} ({formatBytes(latestVersion?.file_size || 0)})
             </Button>
             <div style={{ marginTop: 6 }}>
               <Text type="secondary" style={{ fontSize: 11 }}>Android 5.0+ • {formatBytes(latestVersion?.file_size || 0)}</Text>
@@ -224,7 +224,7 @@ const DownloadAppPage: React.FC = () => {
             block
             style={{ height: 48, fontSize: 16 }}
           >
-            📥 Скачать Android-приложение v{latestVersion?.version || '1.0.3'}
+            📥 Скачать Android-приложение v{latestVersion?.version || '1.0.4'}
           </Button>
         </div>
       </Card>
