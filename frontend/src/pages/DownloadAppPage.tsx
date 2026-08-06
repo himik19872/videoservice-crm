@@ -24,7 +24,8 @@ const DownloadAppPage: React.FC = () => {
         setLatestVersion(items[0]);
       }
     } catch (e) {
-      setLatestVersion({ id: 1, version: '1.0.3', version_code: 9, file_size: 96467828, created_at: '2026-08-06', platform_display: 'Android' });
+      // Не авторизован — запасная версия (должна совпадать с активной в БД)
+      setLatestVersion({ id: 10, version: '1.0.4', version_code: 10, file_size: 96472544, created_at: '2026-08-06', platform_display: 'Android' });
     } finally {
       setLoading(false);
     }
