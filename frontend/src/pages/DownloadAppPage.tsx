@@ -34,7 +34,10 @@ const DownloadAppPage: React.FC = () => {
     ? `/api/app-versions/${latestVersion.id}/download/`
     : '/api/app-versions/1/download/';
 
-  const fullDownloadUrl = `${window.location.origin}${downloadUrl}`;
+  // QR-код должен использовать внешний IP (телефон не в локальной сети)
+  const externalIp = '83.243.73.86';
+  const externalPort = '3000';
+  const fullDownloadUrl = `http://${externalIp}:${externalPort}${downloadUrl}`;
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return '—';
