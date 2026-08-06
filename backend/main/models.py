@@ -874,7 +874,7 @@ class SystemSettings(models.Model):
 
 
 class Instruction(models.Model):
-    """Инструкция / документ (PDF, JPG, PNG) для мобильного приложения (Wiki)"""
+    """Инструкция / документ в PDF для мобильного приложения (Wiki)"""
     CATEGORIES = [
         ('equipment', _('Оборудование')),
         ('installation', _('Монтаж')),
