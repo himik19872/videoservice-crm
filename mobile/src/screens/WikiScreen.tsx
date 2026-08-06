@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Linking,
+  ActivityIndicator, RefreshControl, Modal, Platform,
 } from 'react-native';
+import { WebView } from 'react-native-webview';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
+import { getBaseUrl, DEFAULT_IP, DEFAULT_PORT } from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
 
 const CATEGORIES: Record<string, string> = {
@@ -40,6 +43,7 @@ const WikiScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
+  const [viewingPdf, setViewingPdf] = useState<{ url: string; title: string } | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -66,13 +70,23 @@ const WikiScreen: React.FC = () => {
   const formatBytes = (b: number) =>
     b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} МБ` : `${(b / 1024).toFixed(0)} КБ`;
 
-  const openPdf = async (item: Instruction) => {
-    if (!item.pdf_url) return;
+  const getExternalUrl = (internalUrl: string): string => {
+    // Сервер отдаёт pdf_url с внутренним IP (build_absolute_uri).
+    // Заменяем на внешний IP, чтобы PDF открывался с телефона.
+    // Формат: http://localhost:8000/media/... → http://83.243.73.86:3000/media/...
     try {
-      await Linking.openURL(item.pdf_url);
-    } catch (e) {
-      console.error('Open PDF error:', e);
+      const url = new URL(internalUrl);
+      // Меняем хост и порт на внешние
+      return `http://${DEFAULT_IP}:${DEFAULT_PORT}${url.pathname}`;
+    } catch {
+      return internalUrl;
     }
+  };
+
+  const openPdf = (item: Instruction) => {
+    if (!item.pdf_url) return;
+    const url = getExternalUrl(item.pdf_url);
+    setViewingPdf({ url, title: item.title });
   };
 
   if (loading) {
@@ -134,6 +148,39 @@ const WikiScreen: React.FC = () => {
           </TouchableOpacity>
         )}
       />
+
+      {/* Просмотр PDF во встроенном WebView */}
+      <Modal
+        visible={!!viewingPdf}
+        animationType="slide"
+        onRequestClose={() => setViewingPdf(null)}
+      >
+        <View style={{ flex: 1 }}>
+          <View style={[styles.modalHeader, { backgroundColor: theme.headerBg }]}>
+            <TouchableOpacity onPress={() => setViewingPdf(null)} style={styles.closeBtn}>
+              <Text style={{ color: theme.headerTint, fontSize: 16 }}>✕ Закрыть</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: theme.headerTint }]} numberOfLines={1}>
+              {viewingPdf?.title}
+            </Text>
+            <View style={{ width: 70 }} />
+          </View>
+          {viewingPdf && (
+            <WebView
+              source={{ uri: viewingPdf.url }}
+              style={{ flex: 1 }}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              startInLoadingState={true}
+              renderLoading={() => (
+                <View style={styles.center}>
+                  <ActivityIndicator size="large" color="#1677ff" />
+                </View>
+              )}
+            />
+          )}
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -155,6 +202,9 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   meta: { fontSize: 11 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 14 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 12, paddingTop: Platform.OS === 'ios' ? 50 : 12 },
+  closeBtn: { padding: 4 },
+  modalTitle: { fontSize: 16, fontWeight: '600', flex: 1, textAlign: 'center' },
 });
 
 export default WikiScreen;
