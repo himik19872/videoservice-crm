@@ -874,7 +874,7 @@ class SystemSettings(models.Model):
 
 
 class Instruction(models.Model):
-    """Инструкция / документ в PDF для мобильного приложения (Wiki)"""
+    """Инструкция / документ (PDF, JPG, PNG) для мобильного приложения (Wiki)"""
     CATEGORIES = [
         ('equipment', _('Оборудование')),
         ('installation', _('Монтаж')),
@@ -887,7 +887,7 @@ class Instruction(models.Model):
     title = models.CharField(max_length=300, verbose_name=_('Название'))
     category = models.CharField(max_length=20, choices=CATEGORIES, default='other', verbose_name=_('Категория'))
     description = models.TextField(blank=True, verbose_name=_('Описание'))
-    pdf_file = models.FileField(upload_to='instructions/', verbose_name=_('PDF-файл'))
+    pdf_file = models.FileField(upload_to='instructions/', verbose_name=_('Файл (PDF, JPG, PNG)'))
     file_size = models.PositiveIntegerField(default=0, verbose_name=_('Размер (байт)'))
     is_active = models.BooleanField(default=True, verbose_name=_('Активна'))
     order_num = models.PositiveIntegerField(default=0, verbose_name=_('Порядок'))

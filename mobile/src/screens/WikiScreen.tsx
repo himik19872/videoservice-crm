@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Modal, Platform, Linking, Alert,
+  ActivityIndicator, RefreshControl, Modal, Platform, Linking, Alert, Image,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
 import api from '../services/api';
 import { getBaseUrl, DEFAULT_IP, DEFAULT_PORT } from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
@@ -37,13 +37,16 @@ interface Instruction {
   file_size: number;
 }
 
+const CACHE_DIR = `${FileSystem.cacheDirectory}wiki/`;
+
 const WikiScreen: React.FC = () => {
   const { theme } = useTheme();
   const [items, setItems] = useState<Instruction[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
-  const [viewingPdf, setViewingPdf] = useState<{ url: string; title: string } | null>(null);
+  const [viewingPdf, setViewingPdf] = useState<{ url: string; title: string; isImage: boolean } | null>(null);
+  const [cachedFiles, setCachedFiles] = useState<Record<number, string>>({});
 
   const fetchData = useCallback(async () => {
     try {
@@ -71,24 +74,54 @@ const WikiScreen: React.FC = () => {
     b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} МБ` : `${(b / 1024).toFixed(0)} КБ`;
 
   const getExternalUrl = (internalUrl: string): string => {
-    // Сервер отдаёт pdf_url с внутренним IP (build_absolute_uri).
-    // Заменяем на внешний IP, чтобы PDF открывался с телефона.
-    // Формат: http://localhost:8000/media/... → http://83.243.73.86:3000/media/...
     try {
       const url = new URL(internalUrl);
-      // Меняем хост и порт на внешние
       return `http://${DEFAULT_IP}:${DEFAULT_PORT}${url.pathname}`;
     } catch {
       return internalUrl;
     }
   };
 
-  const openPdf = (item: Instruction) => {
+  const isImageFile = (url: string): boolean => {
+    const ext = url.split('.').pop()?.toLowerCase() || '';
+    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext);
+  };
+
+  const downloadAndCache = async (item: Instruction): Promise<string> => {
+    const url = getExternalUrl(item.pdf_url!);
+    await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true });
+    const cachePath = `${CACHE_DIR}${item.id}_${url.split('/').pop()}`;
+
+    // Проверяем кеш
+    const info = await FileSystem.getInfoAsync(cachePath);
+    if (info.exists) {
+      setCachedFiles(prev => ({ ...prev, [item.id]: cachePath }));
+      return cachePath;
+    }
+
+    // Скачиваем
+    try {
+      await FileSystem.downloadAsync(url, cachePath);
+      setCachedFiles(prev => ({ ...prev, [item.id]: cachePath }));
+      return cachePath;
+    } catch {
+      return url; // fallback — открыть по URL
+    }
+  };
+
+  const openPdf = async (item: Instruction) => {
     if (!item.pdf_url) return;
     const url = getExternalUrl(item.pdf_url);
-    // Android WebView не умеет рендерить PDF напрямую — используем Google Docs Viewer
-    const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`;
-    setViewingPdf({ url: viewerUrl, title: item.title });
+
+    if (isImageFile(url)) {
+      // Для изображений — скачиваем и показываем локально
+      const cached = cachedFiles[item.id] || await downloadAndCache(item);
+      setViewingPdf({ url: cached, title: item.title, isImage: true });
+    } else {
+      // Для PDF — сначала кешируем локально, потом показываем
+      const cached = cachedFiles[item.id] || await downloadAndCache(item);
+      setViewingPdf({ url: cached, title: item.title, isImage: false });
+    }
   };
 
   const openExternal = async (item: Instruction) => {
@@ -154,7 +187,9 @@ const WikiScreen: React.FC = () => {
           >
             <View style={styles.cardHeader}>
               <Text style={[styles.title, { color: theme.text }]} numberOfLines={2}>{item.title}</Text>
-              <Text style={styles.icon}>{CATEGORY_ICONS[item.category] || '📄'}</Text>
+              <Text style={styles.icon}>
+                {cachedFiles[item.id] ? '💾' : CATEGORY_ICONS[item.category] || '📄'}
+              </Text>
             </View>
             {item.description ? (
               <Text style={[styles.desc, { color: theme.textSecondary }]} numberOfLines={2}>{item.description}</Text>
@@ -184,18 +219,27 @@ const WikiScreen: React.FC = () => {
             <View style={{ width: 70 }} />
           </View>
           {viewingPdf && (
-            <WebView
-              source={{ uri: viewingPdf.url }}
-              style={{ flex: 1 }}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              startInLoadingState={true}
-              renderLoading={() => (
-                <View style={styles.center}>
-                  <ActivityIndicator size="large" color="#1677ff" />
-                </View>
-              )}
-            />
+            viewingPdf.isImage ? (
+              <Image
+                source={{ uri: viewingPdf.url }}
+                style={{ flex: 1 }}
+                resizeMode="contain"
+              />
+            ) : (
+              <WebView
+                source={{ uri: viewingPdf.url }}
+                style={{ flex: 1 }}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                startInLoadingState={true}
+                allowFileAccess={true}
+                renderLoading={() => (
+                  <View style={styles.center}>
+                    <ActivityIndicator size="large" color="#1677ff" />
+                  </View>
+                )}
+              />
+            )
           )}
         </View>
       </Modal>
