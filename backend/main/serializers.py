@@ -1230,6 +1230,7 @@ class IssueOrderItemSerializer(serializers.ModelSerializer):
     item_name = serializers.SerializerMethodField()
     item_barcode = serializers.SerializerMethodField()
     remaining = serializers.SerializerMethodField()
+    source_display = serializers.SerializerMethodField()
 
     class Meta:
         model = IssueOrderItem
@@ -1244,6 +1245,9 @@ class IssueOrderItemSerializer(serializers.ModelSerializer):
 
     def get_remaining(self, obj):
         return obj.remaining
+
+    def get_source_display(self, obj):
+        return obj.get_source_display()
 
 
 class IssueOrderSerializer(serializers.ModelSerializer):

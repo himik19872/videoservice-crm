@@ -73,6 +73,30 @@ class MasterViewSet(viewsets.ModelViewSet):
     filterset_fields = ['region', 'is_available']
     search_fields = ['user__username', 'user__first_name', 'user__last_name', 'phone']
 
+    @action(detail=True, methods=['get'])
+    def zip_items(self, request, pk=None):
+        """Список материалов в ЗИПе мастера (получено но не использовано)"""
+        from django.db.models import F
+        master = self.get_object()
+        items = IssueOrderItem.objects.filter(
+            issue_order__master=master,
+            quantity_used__lt=F('quantity_issued'),
+        ).exclude(issue_order__status='returned').select_related('inventory_item', 'issue_order__order')
+        return Response([{
+            'id': item.id,
+            'inventory_item_id': item.inventory_item_id,
+            'item_name': item.inventory_item.name,
+            'item_barcode': item.inventory_item.barcode,
+            'quantity_received': item.quantity_issued,
+            'quantity_used': item.quantity_used,
+            'quantity_remaining': item.remaining,
+            'source': item.source,
+            'source_display': item.get_source_display(),
+            'order_id': item.issue_order.order_id,
+            'order_number': item.issue_order.order.number,
+            'issued_at': item.issue_order.issued_at.isoformat(),
+        } for item in items])
+
     def get_queryset(self):
         queryset = Master.objects.all()
         user = self.request.user
@@ -3137,14 +3161,17 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
         for item_data in data.get('items', []):
             inv_item = get_object_or_404(InventoryItem, id=item_data['inventory_item_id'])
             qty = item_data.get('quantity_issued', 1)
+            source = item_data.get('source', 'warehouse')
             IssueOrderItem.objects.create(
                 issue_order=issue_order, inventory_item=inv_item,
-                quantity_issued=qty,
+                source=source, quantity_issued=qty,
                 need_return_old=item_data.get('need_return_old', False),
                 old_item_description=item_data.get('old_item_description', ''),
                 notes=item_data.get('notes', ''),
             )
-            InventoryMovement.objects.create(item=inv_item, movement_type='out_to_master', quantity=qty, master=master, order=order, performed_by=request.user, notes=f'Ордер №{issue_order.id}')
+            if source == 'warehouse':
+                InventoryMovement.objects.create(item=inv_item, movement_type='out_to_master', quantity=qty, master=master, order=order, performed_by=request.user, notes=f'Ордер №{issue_order.id}')
+            # Для master_zip — движение не создаётся, т.к. материал уже у мастера
         return Response(IssueOrderSerializer(issue_order).data, status=201)
 
     @action(detail=True, methods=['post'])

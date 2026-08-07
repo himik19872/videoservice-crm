@@ -1942,8 +1942,14 @@ class IssueOrder(models.Model):
 
 class IssueOrderItem(models.Model):
     """Позиция в расходном ордере: что выдано, что использовано, что возвращено"""
+    SOURCE_CHOICES = [
+        ('warehouse', _('Со склада')),
+        ('master_zip', _('Из ЗИПа мастера')),
+    ]
+
     issue_order = models.ForeignKey(IssueOrder, on_delete=models.CASCADE, related_name='items', verbose_name=_('Ордер'))
     inventory_item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name='issue_items', verbose_name=_('Номенклатура'))
+    source = models.CharField(max_length=15, choices=SOURCE_CHOICES, default='warehouse', verbose_name=_('Источник выдачи'))
     quantity_issued = models.PositiveIntegerField(default=0, verbose_name=_('Выдано'))
     quantity_used = models.PositiveIntegerField(default=0, verbose_name=_('Использовано (установлено)'))
     quantity_returned = models.PositiveIntegerField(default=0, verbose_name=_('Возвращено'))

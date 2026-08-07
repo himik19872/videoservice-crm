@@ -307,6 +307,7 @@ const OrdersDetailPage: React.FC = () => {
       .map(([invId, v]) => ({
         inventory_item_id: parseInt(invId),
         quantity_issued: v.qty,
+        source: v.source || 'warehouse',
         need_return_old: v.needReturn,
         old_item_description: v.oldDesc,
       }));
@@ -740,14 +741,14 @@ const OrdersDetailPage: React.FC = () => {
 
       {/* Модалка: выдать материалы со склада */}
       <Modal
-        title="Выдать материалы со склада"
+        title="Выдать материалы"
         open={materialModalOpen}
         onCancel={() => setMaterialModalOpen(false)}
         onOk={handleIssueMaterials}
         confirmLoading={materialSaving}
         okText="Выдать"
         cancelText="Отмена"
-        width={700}
+        width={750}
       >
         <div style={{ marginBottom: 12 }}>
           <Input
@@ -774,6 +775,21 @@ const OrdersDetailPage: React.FC = () => {
                 { title: 'Материал', dataIndex: 'name', key: 'name' },
                 { title: 'Штрихкод', dataIndex: 'barcode', key: 'barcode', render: (v: string) => v || '—' },
                 { title: 'На складе', dataIndex: 'quantity', key: 'quantity', render: (v: number) => <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag> },
+                {
+                  title: 'Источник', key: 'source', width: 110,
+                  render: (_: any, r: any) => (
+                    <Select
+                      size="small"
+                      value={materialForm[r.id]?.source || 'warehouse'}
+                      onChange={(v) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], source: v } }))}
+                      style={{ width: 105 }}
+                      options={[
+                        { value: 'warehouse', label: '🏭 Склад' },
+                        { value: 'master_zip', label: '🎒 ЗИП' },
+                      ]}
+                    />
+                  ),
+                },
                 {
                   title: 'Кол-во', key: 'qty', width: 80,
                   render: (_: any, r: any) => (
