@@ -33,6 +33,8 @@ const OrdersDetailPage: React.FC = () => {
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [inventoryLoading, setInventoryLoading] = useState(false);
   const [materialForm, setMaterialForm] = useState<Record<number, { qty: number; needReturn: boolean; oldDesc: string }>>({});
   const [materialSaving, setMaterialSaving] = useState(false);
   // Объединение заявок
@@ -280,11 +282,21 @@ const OrdersDetailPage: React.FC = () => {
   const openMaterialModal = async () => {
     setMaterialModalOpen(true);
     setMaterialForm({});
+    setInventorySearch('');
+    fetchInventory('');
+  };
+
+  const fetchInventory = async (search: string) => {
+    setInventoryLoading(true);
     try {
-      const res = await api.get('/inventory/?page_size=500&status=in_stock');
+      const params = new URLSearchParams({ page_size: '500', status: 'in_stock' });
+      if (search.trim()) params.append('search', search.trim());
+      const res = await api.get(`/inventory/?${params.toString()}`);
       setInventoryItems(res.data.results || res.data || []);
     } catch (e) {
       setInventoryItems([]);
+    } finally {
+      setInventoryLoading(false);
     }
   };
 
@@ -737,8 +749,20 @@ const OrdersDetailPage: React.FC = () => {
         cancelText="Отмена"
         width={700}
       >
+        <div style={{ marginBottom: 12 }}>
+          <Input
+            placeholder="🔍 Поиск по названию, артикулу, штрихкоду..."
+            value={inventorySearch}
+            onChange={(e) => {
+              setInventorySearch(e.target.value);
+              fetchInventory(e.target.value);
+            }}
+            allowClear
+            style={{ marginBottom: 8 }}
+          />
+        </div>
         <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-          {inventoryItems.length === 0 ? (
+          {inventoryLoading || inventoryItems.length === 0 ? (
             <Spin />
           ) : (
             <Table
