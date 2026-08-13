@@ -112,6 +112,7 @@ class MasterViewSet(viewsets.ModelViewSet):
             key = item.inventory_item_id
             if key not in aggregated:
                 aggregated[key] = {
+                    'inventory_item_id': item.inventory_item_id,
                     'item_name': item.inventory_item.name,
                     'item_barcode': item.inventory_item.barcode,
                     'item_type': item.inventory_item.get_item_type_display(),
