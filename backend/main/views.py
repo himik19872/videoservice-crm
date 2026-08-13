@@ -1397,10 +1397,11 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
         if source == 'master_zip':
             master = order.master
             if master:
+                from django.db.models import F
                 issue_item = IssueOrderItem.objects.filter(
                     issue_order__master=master,
                     inventory_item=inv_item,
-                    quantity_used__lt=models.F('quantity_issued'),
+                    quantity_used__lt=F('quantity_issued'),
                 ).order_by('issue_order__issued_at').first()
                 if issue_item:
                     issue_item.quantity_used = min(
