@@ -25,7 +25,10 @@ const DownloadAppPage: React.FC = () => {
       }
     } catch (e) {
       // Не авторизован — запасная версия (должна совпадать с активной в БД)
-      setLatestVersion({ id: 10, version: '1.0.4', version_code: 10, file_size: 96472544, created_at: '2026-08-06', platform_display: 'Android' });
+      setLatestVersion({
+        id: 11, version: '1.0.5', version_code: 11, file_size: 96480900, created_at: '2026-08-13', platform_display: 'Android',
+        changelog: '- 🎒 Вкладка «Мой ЗИП»: список материалов, числящихся за мастером\n- 🏭/🎒 Источник выдачи: бейдж «Склад» или «ЗИП» в карточке заявки\n- 📚 Wiki: инструкции по категориям, встроенный просмотр PDF и изображений\n- 💾 Кеширование: файлы скачиваются один раз, потом из памяти телефона\n- 🗺 Яндекс.Навигатор: маршрут строится по адресу заявки\n- 🏠 Время визита клиента (по умолчанию 09:00–18:00)\n- Заявки на будущее видны мастеру',
+      });
     } finally {
       setLoading(false);
     }
@@ -82,12 +85,22 @@ const DownloadAppPage: React.FC = () => {
               href={downloadUrl}
               style={{ height: 48, fontSize: 16, padding: '0 40px' }}
             >
-              📥 Скачать v{latestVersion?.version || '1.0.4'} ({formatBytes(latestVersion?.file_size || 0)})
+              📥 Скачать v{latestVersion?.version || '1.0.5'} ({formatBytes(latestVersion?.file_size || 0)})
             </Button>
             <div style={{ marginTop: 6 }}>
               <Text type="secondary" style={{ fontSize: 11 }}>Android 5.0+ • {formatBytes(latestVersion?.file_size || 0)}</Text>
             </div>
           </div>
+
+          {/* Что нового */}
+          {latestVersion?.changelog && (
+            <div style={{ marginTop: 16, textAlign: 'left', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 12 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>🆕 Что нового в v{latestVersion.version}:</Text>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 13, lineHeight: '1.6' }}>
+                {latestVersion.changelog}
+              </pre>
+            </div>
+          )}
 
           {/* QR-код — виден и на экране, и при печати */}
           <div style={{ marginTop: 16, textAlign: 'center' }}>
@@ -224,7 +237,7 @@ const DownloadAppPage: React.FC = () => {
             block
             style={{ height: 48, fontSize: 16 }}
           >
-            📥 Скачать Android-приложение v{latestVersion?.version || '1.0.4'}
+            📥 Скачать Android-приложение v{latestVersion?.version || '1.0.5'}
           </Button>
         </div>
       </Card>
