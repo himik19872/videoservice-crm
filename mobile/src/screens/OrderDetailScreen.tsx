@@ -379,7 +379,18 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               </Text>
               {io.items.map((item: any) => (
                 <View key={item.id} style={[styles.materialItem, { borderBottomColor: theme.border }]}>
-                  <Text style={[styles.materialItemName, { color: theme.text }]}>{item.item_name}</Text>
+                  <View style={styles.materialItemHeader}>
+                    <Text style={[styles.materialItemName, { color: theme.text }]}>{item.item_name}</Text>
+                    {item.source === 'master_zip' ? (
+                      <View style={[styles.sourceBadge, { backgroundColor: '#f9f0ff', borderColor: '#d3adf7' }]}>
+                        <Text style={[styles.sourceBadgeText, { color: '#722ed1' }]}>🎒 ЗИП</Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.sourceBadge, { backgroundColor: '#e6f7ff', borderColor: '#91d5ff' }]}>
+                        <Text style={[styles.sourceBadgeText, { color: '#1677ff' }]}>🏭 Склад</Text>
+                      </View>
+                    )}
+                  </View>
                   <View style={styles.materialItemRow}>
                     <Text style={[styles.materialQty, { color: theme.textSecondary }]}>Выдано: {item.quantity_issued}</Text>
                     <Text style={[styles.materialQty, { color: theme.textSecondary }]}>Остаток: {item.remaining}</Text>
@@ -635,7 +646,10 @@ const styles = StyleSheet.create({
   miniBadgeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   materialMaster: { fontSize: 12, marginBottom: 8 },
   materialItem: { paddingVertical: 6, borderBottomWidth: 1 },
-  materialItemName: { fontSize: 13, fontWeight: '600' },
+  materialItemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  materialItemName: { fontSize: 13, fontWeight: '600', flex: 1 },
+  sourceBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, borderWidth: 1 },
+  sourceBadgeText: { fontSize: 11, fontWeight: '700' },
   materialItemRow: { flexDirection: 'row', gap: 16, marginTop: 2 },
   materialQty: { fontSize: 12 },
   materialBarcode: { fontSize: 11 },
