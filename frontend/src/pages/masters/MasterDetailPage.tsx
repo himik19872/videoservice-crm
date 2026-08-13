@@ -304,7 +304,7 @@ const MasterDetailPage: React.FC = () => {
               </Descriptions>
             </Card>
           )}          <Divider />
-          <Title level={5}><ToolOutlined /> Материалы у мастера</Title>
+          <Title level={5}><ToolOutlined /> Материалы у мастера (ЗИП)</Title>
           <Table
             dataSource={inventoryItems}
             loading={invLoading}
@@ -313,13 +313,15 @@ const MasterDetailPage: React.FC = () => {
             pagination={false}
             columns={[
               { title: 'Номенклатура', dataIndex: 'item_name', key: 'name' },
-              { title: 'Тип', dataIndex: 'item_type', key: 'type' },
+              { title: 'Штрихкод', dataIndex: 'item_barcode', key: 'barcode', render: (v: string) => v || '—' },
               { title: 'Выдано', dataIndex: 'quantity_issued', key: 'issued' },
               { title: 'Использовано', dataIndex: 'quantity_used', key: 'used' },
               { title: 'Остаток', dataIndex: 'remaining', key: 'remaining',
                 render: (v: number) => <Tag color={v > 0 ? 'orange' : 'green'}>{v}</Tag>
               },
-              { title: 'Основание', dataIndex: 'order_number', key: 'order' },
+              { title: 'Источник', dataIndex: 'source_display', key: 'source',
+                render: (v: string) => v === 'Из ЗИПа мастера' ? <Tag color="purple">🎒 {v}</Tag> : <Tag color="blue">🏭 {v}</Tag>
+              },
             ]}
             locale={{ emptyText: 'Материалов нет' }}
           />        </Col>

@@ -97,6 +97,42 @@ class MasterViewSet(viewsets.ModelViewSet):
             'issued_at': item.issue_order.issued_at.isoformat(),
         } for item in items])
 
+    @action(detail=True, methods=['get'])
+    def inventory(self, request, pk=None):
+        """Материалы, которые числятся за мастером (выдано, использовано, остаток)"""
+        from django.db.models import F
+        master = self.get_object()
+        items = IssueOrderItem.objects.filter(
+            issue_order__master=master,
+        ).exclude(issue_order__status='returned').select_related('inventory_item', 'issue_order__order')
+
+        # Группируем по номенклатуре, суммируем выданное/использованное/возвращённое
+        aggregated = {}
+        for item in items:
+            key = item.inventory_item_id
+            if key not in aggregated:
+                aggregated[key] = {
+                    'item_name': item.inventory_item.name,
+                    'item_barcode': item.inventory_item.barcode,
+                    'item_type': item.inventory_item.get_item_type_display(),
+                    'unit': item.inventory_item.unit,
+                    'quantity_issued': 0,
+                    'quantity_used': 0,
+                    'quantity_returned': 0,
+                    'source_display': item.get_source_display(),
+                }
+            aggregated[key]['quantity_issued'] += item.quantity_issued
+            aggregated[key]['quantity_used'] += item.quantity_used
+            aggregated[key]['quantity_returned'] += item.quantity_returned
+
+        result = []
+        for key, data in aggregated.items():
+            data['remaining'] = max(0, data['quantity_issued'] - data['quantity_used'] - data['quantity_returned'])
+            data['order_number'] = '—'
+            result.append(data)
+
+        return Response({'items': result})
+
     def get_queryset(self):
         queryset = Master.objects.all()
         user = self.request.user
