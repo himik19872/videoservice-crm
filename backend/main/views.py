@@ -1372,12 +1372,17 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
     def add_material(self, request, pk=None):
         """Мастер добавляет материал, использованный из своего ЗИП, в заявку"""
         order = self.get_object()
+        # Логируем входящие данные для отладки
+        import logging
+        logger = logging.getLogger('crm')
+        logger.warning(f'[add_material] order={pk} user={request.user} data={request.data} content_type={request.content_type}')
         material_id = request.data.get('inventory_item_id')
         quantity = request.data.get('quantity', 1)
         source = request.data.get('source', 'master_zip')
 
         if not material_id:
-            return Response({'error': 'Укажите inventory_item_id'}, status=400)
+            logger.warning(f'[add_material] MISSING inventory_item_id, request.data keys: {list(request.data.keys())}')
+            return Response({'error': 'Укажите inventory_item_id', 'debug_data': str(request.data)}, status=400)
 
         try:
             inv_item = InventoryItem.objects.get(id=material_id)
