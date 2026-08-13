@@ -17,6 +17,7 @@ import OrderDetailScreen from './src/screens/OrderDetailScreen';
 import SignatureScreen from './src/screens/SignatureScreen';
 import InventoryScreen from './src/screens/InventoryScreen';
 import InventoryDetailScreen from './src/screens/InventoryDetailScreen';
+import MasterZipScreen from './src/screens/MasterZipScreen';
 import PaymentsScreen from './src/screens/PaymentsScreen';
 import AddPaymentScreen from './src/screens/AddPaymentScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
@@ -199,6 +200,17 @@ function AppStack() {
         component={WikiScreen}
         options={{
           title: '📚 Wiki',
+          headerStyle,
+          headerTintColor,
+        }}
+      />
+
+      {/* Мой ЗИП */}
+      <Stack.Screen
+        name="MasterZip"
+        component={MasterZipScreen}
+        options={{
+          title: '🎒 Мой ЗИП',
           headerStyle,
           headerTintColor,
         }}

@@ -144,6 +144,12 @@ const OrdersListScreen: React.FC<Props> = ({ navigation, isMaster }) => {
       <View style={styles.navRow}>
         <TouchableOpacity
           style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
+          onPress={() => navigation.navigate('MasterZip')}
+        >
+          <Text style={[styles.navChipText, { color: theme.textSecondary }]}>🎒 ЗИП</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.navChip, { backgroundColor: theme.chipBg, borderColor: theme.border }]}
           onPress={() => navigation.navigate('Wiki')}
         >
           <Text style={[styles.navChipText, { color: theme.textSecondary }]}>📚 Wiki</Text>
