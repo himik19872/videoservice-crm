@@ -99,6 +99,7 @@ def master_inventory(request, master_id):
     result = []
     for ioi in items:
         result.append({
+            'inventory_item_id': ioi.inventory_item.id,
             'type': 'issue_order',
             'item_name': ioi.inventory_item.name,
             'item_type': ioi.inventory_item.get_item_type_display(),

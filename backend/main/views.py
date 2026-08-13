@@ -1372,48 +1372,50 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
     def add_material(self, request, pk=None):
         """Мастер добавляет материал, использованный из своего ЗИП, в заявку"""
         order = self.get_object()
-        # Логируем входящие данные для отладки
-        import logging
-        logger = logging.getLogger('crm')
-        logger.warning(f'[add_material] order={pk} user={request.user} data={request.data} content_type={request.content_type}')
         material_id = request.data.get('inventory_item_id')
-        quantity = request.data.get('quantity', 1)
+        quantity = int(request.data.get('quantity', 1))
         source = request.data.get('source', 'master_zip')
+        payment_type = request.data.get('payment_type', 'warranty')
+        price = request.data.get('price')  # может быть null
 
         if not material_id:
-            logger.warning(f'[add_material] MISSING inventory_item_id, request.data keys: {list(request.data.keys())}')
-            return Response({'error': 'Укажите inventory_item_id', 'debug_data': str(request.data)}, status=400)
+            return Response({'error': 'Укажите inventory_item_id'}, status=400)
 
         try:
             inv_item = InventoryItem.objects.get(id=material_id)
         except InventoryItem.DoesNotExist:
             return Response({'error': 'Материал не найден'}, status=404)
 
-        # Проверяем, не добавлен ли уже этот материал в заявку
         om, created = OrderMaterial.objects.get_or_create(
             order=order, item=inv_item,
-            defaults={'quantity': int(quantity)}
+            defaults={
+                'quantity': quantity,
+                'source': source,
+                'payment_type': payment_type,
+                'price': price,
+            }
         )
         if not created:
-            om.quantity += int(quantity)
+            om.quantity += quantity
+            om.source = source
+            om.payment_type = payment_type
+            if price is not None:
+                om.price = price
             om.save()
 
-        # Если материал из ЗИПа мастера — отмечаем использование в ордере
-        if source == 'master_zip':
-            master = order.master
-            if master:
-                from django.db.models import F
-                issue_item = IssueOrderItem.objects.filter(
-                    issue_order__master=master,
-                    inventory_item=inv_item,
-                    quantity_used__lt=F('quantity_issued'),
-                ).order_by('issue_order__issued_at').first()
-                if issue_item:
-                    issue_item.quantity_used = min(
-                        issue_item.quantity_issued,
-                        issue_item.quantity_used + int(quantity)
-                    )
-                    issue_item.save(update_fields=['quantity_used'])
+        if source == 'master_zip' and order.master:
+            from django.db.models import F
+            issue_item = IssueOrderItem.objects.filter(
+                issue_order__master=order.master,
+                inventory_item=inv_item,
+                quantity_used__lt=F('quantity_issued'),
+            ).order_by('issue_order__issued_at').first()
+            if issue_item:
+                issue_item.quantity_used = min(
+                    issue_item.quantity_issued,
+                    issue_item.quantity_used + quantity
+                )
+                issue_item.save(update_fields=['quantity_used'])
 
         return Response(OrderSerializer(order).data)
 

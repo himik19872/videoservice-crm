@@ -1509,9 +1509,18 @@ class MasterInventoryDebt(models.Model):
 
 class OrderMaterial(models.Model):
     """Связь: материал, использованный в заявке (снят со склада)"""
+    PAYMENT_CHOICES = [
+        ('warranty', _('По гарантии (бесплатно)')),
+        ('paid', _('За деньги')),
+    ]
+
     order = models.ForeignKey(Order, on_delete=models.CASCADE, verbose_name=_('Заявка'))
     item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, verbose_name=_('Материал'))
     quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    payment_type = models.CharField(max_length=20, choices=PAYMENT_CHOICES, default='warranty', verbose_name=_('Тип оплаты'))
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Цена (₽)'), help_text=_('Цена за материал, если платно'))
+    source = models.CharField(max_length=20, default='warehouse', verbose_name=_('Источник'),
+                              choices=[('warehouse', _('Со склада')), ('master_zip', _('Из ЗИП мастера'))])
     used_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Использован'))
 
     class Meta:

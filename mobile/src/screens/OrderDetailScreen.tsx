@@ -55,6 +55,8 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [zipItems, setZipItems] = useState<any[]>([]);
   const [zipLoading, setZipLoading] = useState(false);
   const [zipQty, setZipQty] = useState<Record<number, number>>({});
+  const [zipPaymentType, setZipPaymentType] = useState<'warranty' | 'paid'>('warranty');
+  const [zipPrice, setZipPrice] = useState('');
 
   useEffect(() => {
     fetchOrder();
@@ -183,6 +185,8 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     setZipModal(true);
     setZipLoading(true);
     setZipQty({});
+    setZipPaymentType('warranty');
+    setZipPrice('');
     try {
       const masterId = order?.master?.id;
       if (!masterId) {
@@ -203,12 +207,18 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const qty = zipQty[invItemId] || 1;
     setUpdating(true);
     try {
-      await api.post(`/orders/${id}/add_material/`, {
+      const body: any = {
         inventory_item_id: invItemId,
         quantity: qty,
         source: 'master_zip',
-      });
-      Alert.alert('Готово', `Материал «${name}» добавлен в заявку (${qty} шт)`);
+        payment_type: zipPaymentType,
+      };
+      if (zipPaymentType === 'paid' && zipPrice) {
+        body.price = zipPrice;
+      }
+      await api.post(`/orders/${id}/add_material/`, body);
+      const typeLabel = zipPaymentType === 'warranty' ? 'по гарантии' : `за ${zipPrice || '...'} ₽`;
+      Alert.alert('Готово', `Материал «${name}» добавлен в заявку (${qty} шт, ${typeLabel})`);
       setZipModal(false);
       fetchOrder();
     } catch (e: any) {
@@ -615,7 +625,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             <View style={[styles.usageModal, { backgroundColor: theme.card }]}>
               <Text style={[styles.usageTitle, { color: theme.text }]}>🎒 Материалы из ЗИП</Text>
               <Text style={[styles.usageSubtitle, { color: theme.textSecondary }]}>
-                Выберите материал, который использовали из своего ЗИП
+                Выберите материал, укажите количество и условия
               </Text>
               {zipLoading ? (
                 <Text style={[styles.emptyText, { color: theme.textTertiary, padding: 16 }]}>Загрузка...</Text>
@@ -623,19 +633,61 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 <Text style={[styles.emptyText, { color: theme.textTertiary, padding: 16 }]}>В вашем ЗИП нет материалов</Text>
               ) : (
                 <ScrollView style={{ maxHeight: 400 }}>
+                  {/* Выбор: гарантия или платно */}
+                  <View style={[styles.usageReturnRow, { paddingHorizontal: 0, marginBottom: 12 }]}>
+                    <Text style={[styles.usageLabel, { color: theme.textSecondary, marginBottom: 8 }]}>
+                      Тип использования:
+                    </Text>
+                    <View style={styles.usageReturnTypes}>
+                      <TouchableOpacity
+                        style={[styles.usageReturnType, { borderColor: theme.border }, zipPaymentType === 'warranty' && { backgroundColor: '#52c41a', borderColor: '#52c41a' }]}
+                        onPress={() => setZipPaymentType('warranty')}
+                      >
+                        <Text style={[styles.usageReturnTypeText, { color: zipPaymentType === 'warranty' ? '#fff' : theme.textSecondary }]}>
+                          ✅ По гарантии
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.usageReturnType, { borderColor: theme.border }, zipPaymentType === 'paid' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
+                        onPress={() => setZipPaymentType('paid')}
+                      >
+                        <Text style={[styles.usageReturnTypeText, { color: zipPaymentType === 'paid' ? '#fff' : theme.textSecondary }]}>
+                          💰 За деньги
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  {/* Поле цены (если платно) */}
+                  {zipPaymentType === 'paid' && (
+                    <View style={{ marginBottom: 12 }}>
+                      <Text style={[styles.usageLabel, { color: theme.textSecondary, marginBottom: 4 }]}>
+                        Цена за материал (₽):
+                      </Text>
+                      <TextInput
+                        style={[styles.modalInput, { minHeight: 40, marginBottom: 0, color: theme.text, borderColor: theme.border, backgroundColor: theme.card }]}
+                        value={zipPrice}
+                        onChangeText={setZipPrice}
+                        placeholder="Например: 1500"
+                        placeholderTextColor={theme.textTertiary}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  )}
+                  {/* Список материалов */}
                   {zipItems.map((item: any) => {
                     const invId = item.inventory_item_id != null ? item.inventory_item_id : item.id;
                     const qty = zipQty[invId] || 1;
-                    const avail = item.remaining != null ? item.remaining : (item.quantity != null ? item.quantity : 0);
+                    const avail = item.remaining != null ? item.remaining : 0;
+                    if (avail <= 0) return null;
                     return (
                       <View key={invId} style={[styles.usageItem, { borderBottomColor: theme.border }]}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Text style={[styles.usageItemName, { color: theme.text, flex: 1 }]}>{item.item_name || item.name}</Text>
                           <Text style={[styles.materialQty, { color: theme.textSecondary }]}>Остаток: {avail}</Text>
                         </View>
-                        <View style={styles.usageRow}>
+                        <View style={[styles.usageRow, { alignItems: 'center' }]}>
                           <View style={styles.usageField}>
-                            <Text style={[styles.usageLabel, { color: theme.textSecondary }]}>Количество</Text>
+                            <Text style={[styles.usageLabel, { color: theme.textSecondary }]}>Кол-во</Text>
                             <View style={styles.usageCounter}>
                               <TouchableOpacity style={styles.usageCounterBtn} onPress={() => setZipQty(prev => ({ ...prev, [invId]: Math.max(1, (prev[invId] || 1) - 1) }))}>
                                 <Text style={styles.usageCounterBtnText}>−</Text>
