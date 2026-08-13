@@ -50,6 +50,12 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [usageModal, setUsageModal] = useState<any>(null); // io
   const [usageItems, setUsageItems] = useState<Record<number, { used: number; returned: number; returnType: string; oldReturned: boolean }>>({});
 
+  // Состояние для модалки «Добавить материал из ЗИП»
+  const [zipModal, setZipModal] = useState(false);
+  const [zipItems, setZipItems] = useState<any[]>([]);
+  const [zipLoading, setZipLoading] = useState(false);
+  const [zipQty, setZipQty] = useState<Record<number, number>>({});
+
   useEffect(() => {
     fetchOrder();
     fetchMedia();
@@ -168,6 +174,45 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       fetchOrder();
     } catch (e: any) {
       Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const openZipModal = async () => {
+    setZipModal(true);
+    setZipLoading(true);
+    setZipQty({});
+    try {
+      const masterId = order?.master?.id;
+      if (!masterId) {
+        Alert.alert('Нет мастера', 'У заявки нет исполнителя');
+        setZipModal(false);
+        return;
+      }
+      const res = await api.get(`/masters/${masterId}/inventory/`);
+      setZipItems(res.data.items || []);
+    } catch (e) {
+      setZipItems([]);
+    } finally {
+      setZipLoading(false);
+    }
+  };
+
+  const addMaterialFromZip = async (invItemId: number, name: string) => {
+    const qty = zipQty[invItemId] || 1;
+    setUpdating(true);
+    try {
+      await api.post(`/orders/${id}/add_material/`, {
+        inventory_item_id: invItemId,
+        quantity: qty,
+        source: 'master_zip',
+      });
+      Alert.alert('Готово', `Материал «${name}» добавлен в заявку (${qty} шт)`);
+      setZipModal(false);
+      fetchOrder();
+    } catch (e: any) {
+      Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось добавить');
     } finally {
       setUpdating(false);
     }
@@ -402,10 +447,20 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       )}
 
       {/* Материалы со склада */}
-      {issueOrders.length > 0 && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.primary }]}>📦 Материалы со склада</Text>
-          {issueOrders.map((io: any) => (
+      <View style={styles.section}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <Text style={[styles.sectionTitle, { color: theme.primary, marginBottom: 0 }]}>📦 Материалы</Text>
+          {canAct && (
+            <TouchableOpacity
+              style={[styles.addZipBtn, { backgroundColor: theme.primary }]}
+              onPress={openZipModal}
+            >
+              <Text style={styles.addZipBtnText}>➕ Из ЗИП</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {issueOrders.length > 0 ? (
+          issueOrders.map((io: any) => (
             <View key={io.id} style={[styles.materialCard, { backgroundColor: theme.card }]}>
               <View style={styles.materialCardHeader}>
                 <Text style={[styles.materialCardTitle, { color: theme.text }]}>
@@ -456,9 +511,11 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 </TouchableOpacity>
               )}
             </View>
-          ))}
-        </View>
-      )}
+          ))
+        ) : (
+          <Text style={[styles.emptyText, { color: theme.textTertiary }]}>Материалов пока нет</Text>
+        )}
+      </View>
 
       {/* Модалка: отчёт об использовании материалов */}
       {usageModal && (
@@ -539,6 +596,71 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.usageSubmitBtn, { backgroundColor: theme.primary }]} onPress={submitUsage}>
                   <Text style={styles.usageSubmitText}>Отправить</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Модалка: добавить материал из ЗИП */}
+      {zipModal && (
+        <Modal
+          visible={zipModal}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setZipModal(false)}
+        >
+          <View style={[styles.usageOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+            <View style={[styles.usageModal, { backgroundColor: theme.card }]}>
+              <Text style={[styles.usageTitle, { color: theme.text }]}>🎒 Материалы из ЗИП</Text>
+              <Text style={[styles.usageSubtitle, { color: theme.textSecondary }]}>
+                Выберите материал, который использовали из своего ЗИП
+              </Text>
+              {zipLoading ? (
+                <Text style={[styles.emptyText, { color: theme.textTertiary, padding: 16 }]}>Загрузка...</Text>
+              ) : zipItems.length === 0 ? (
+                <Text style={[styles.emptyText, { color: theme.textTertiary, padding: 16 }]}>В вашем ЗИП нет материалов</Text>
+              ) : (
+                <ScrollView style={{ maxHeight: 400 }}>
+                  {zipItems.map((item: any) => {
+                    const invId = item.inventory_item_id != null ? item.inventory_item_id : item.id;
+                    const qty = zipQty[invId] || 1;
+                    const avail = item.remaining != null ? item.remaining : (item.quantity != null ? item.quantity : 0);
+                    return (
+                      <View key={invId} style={[styles.usageItem, { borderBottomColor: theme.border }]}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={[styles.usageItemName, { color: theme.text, flex: 1 }]}>{item.item_name || item.name}</Text>
+                          <Text style={[styles.materialQty, { color: theme.textSecondary }]}>Остаток: {avail}</Text>
+                        </View>
+                        <View style={styles.usageRow}>
+                          <View style={styles.usageField}>
+                            <Text style={[styles.usageLabel, { color: theme.textSecondary }]}>Количество</Text>
+                            <View style={styles.usageCounter}>
+                              <TouchableOpacity style={styles.usageCounterBtn} onPress={() => setZipQty(prev => ({ ...prev, [invId]: Math.max(1, (prev[invId] || 1) - 1) }))}>
+                                <Text style={styles.usageCounterBtnText}>−</Text>
+                              </TouchableOpacity>
+                              <Text style={[styles.usageCounterValue, { color: theme.text }]}>{qty}</Text>
+                              <TouchableOpacity style={styles.usageCounterBtn} onPress={() => setZipQty(prev => ({ ...prev, [invId]: Math.min(avail, (prev[invId] || 1) + 1) }))}>
+                                <Text style={styles.usageCounterBtnText}>+</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.addZipItemBtn, { backgroundColor: theme.primary }]}
+                            onPress={() => addMaterialFromZip(invId, item.item_name || item.name)}
+                          >
+                            <Text style={styles.usageSubmitText}>Добавить</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+              <View style={styles.usageModalButtons}>
+                <TouchableOpacity style={[styles.usageCancelBtn, { borderColor: theme.border }]} onPress={() => setZipModal(false)}>
+                  <Text style={{ color: theme.textSecondary }}>Закрыть</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -790,6 +912,9 @@ const styles = StyleSheet.create({
   materialBarcode: { fontSize: 11 },
   receiveBtn: { marginTop: 10, padding: 10, borderRadius: 8, alignItems: 'center' },
   receiveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  addZipBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
+  addZipBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  addZipItemBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   // Отчёт об использовании
   usageOverlay: { flex: 1, justifyContent: 'center', padding: 16 },
   usageModal: { borderRadius: 14, padding: 16, maxHeight: '80%' },

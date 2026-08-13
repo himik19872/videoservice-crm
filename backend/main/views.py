@@ -1368,6 +1368,49 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
         return Response({'ok': True})
 
     @action(detail=True, methods=['post'])
+    def add_material(self, request, pk=None):
+        """Мастер добавляет материал, использованный из своего ЗИП, в заявку"""
+        order = self.get_object()
+        material_id = request.data.get('inventory_item_id')
+        quantity = request.data.get('quantity', 1)
+        source = request.data.get('source', 'master_zip')
+
+        if not material_id:
+            return Response({'error': 'Укажите inventory_item_id'}, status=400)
+
+        try:
+            inv_item = InventoryItem.objects.get(id=material_id)
+        except InventoryItem.DoesNotExist:
+            return Response({'error': 'Материал не найден'}, status=404)
+
+        # Проверяем, не добавлен ли уже этот материал в заявку
+        om, created = OrderMaterial.objects.get_or_create(
+            order=order, item=inv_item,
+            defaults={'quantity': int(quantity)}
+        )
+        if not created:
+            om.quantity += int(quantity)
+            om.save()
+
+        # Если материал из ЗИПа мастера — отмечаем использование в ордере
+        if source == 'master_zip':
+            master = order.master
+            if master:
+                issue_item = IssueOrderItem.objects.filter(
+                    issue_order__master=master,
+                    inventory_item=inv_item,
+                    quantity_used__lt=models.F('quantity_issued'),
+                ).order_by('issue_order__issued_at').first()
+                if issue_item:
+                    issue_item.quantity_used = min(
+                        issue_item.quantity_issued,
+                        issue_item.quantity_used + int(quantity)
+                    )
+                    issue_item.save(update_fields=['quantity_used'])
+
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
     def helpers(self, request, pk=None):
         """Добавить/убрать помощников к заявке"""
         order = self.get_object()
