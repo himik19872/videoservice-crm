@@ -46,6 +46,10 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [commentText, setCommentText] = useState('');
   const [pendingStatus, setPendingStatus] = useState('');
 
+  // Состояние для модалки «Отчитаться об использовании материалов»
+  const [usageModal, setUsageModal] = useState<any>(null); // io
+  const [usageItems, setUsageItems] = useState<Record<number, { used: number; returned: number; returnType: string; oldReturned: boolean }>>({});
+
   useEffect(() => {
     fetchOrder();
     fetchMedia();
@@ -130,6 +134,43 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         },
       ],
     );
+  };
+
+  const openUsageModal = (io: any) => {
+    const init: Record<number, any> = {};
+    io.items.forEach((item: any) => {
+      init[item.inventory_item_id] = {
+        used: item.quantity_used || 0,
+        returned: item.quantity_returned || 0,
+        returnType: item.return_type || 'working',
+        oldReturned: item.old_item_returned || false,
+      };
+    });
+    setUsageItems(init);
+    setUsageModal(io);
+  };
+
+  const submitUsage = async () => {
+    if (!usageModal) return;
+    setUpdating(true);
+    try {
+      const items = Object.entries(usageItems).map(([itemId, v]) => ({
+        item_id: parseInt(itemId),
+        quantity_used: v.used,
+        quantity_returned: v.returned,
+        return_type: v.returnType,
+        old_item_returned: v.oldReturned,
+      }));
+      await api.post(`/issue-orders/${usageModal.id}/report_usage/`, { items });
+      Alert.alert('Готово', 'Отчёт об использовании отправлен');
+      setUsageModal(null);
+      fetchIssueOrders();
+      fetchOrder();
+    } catch (e: any) {
+      Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const takePhoto = async () => {
@@ -406,9 +447,103 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   <Text style={styles.receiveBtnText}>✅ Подтвердить получение</Text>
                 </TouchableOpacity>
               )}
+              {io.status === 'received' && (
+                <TouchableOpacity
+                  style={[styles.receiveBtn, { backgroundColor: '#fa8c16' }]}
+                  onPress={() => openUsageModal(io)}
+                >
+                  <Text style={styles.receiveBtnText}>📝 Отчитаться об использовании</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
         </View>
+      )}
+
+      {/* Модалка: отчёт об использовании материалов */}
+      {usageModal && (
+        <Modal
+          visible={!!usageModal}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setUsageModal(null)}
+        >
+          <View style={[styles.usageOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+            <View style={[styles.usageModal, { backgroundColor: theme.card }]}>
+              <Text style={[styles.usageTitle, { color: theme.text }]}>📝 Использование материалов</Text>
+              <Text style={[styles.usageSubtitle, { color: theme.textSecondary }]}>
+                Ордер №{usageModal.id} — укажите, сколько использовано и что вернуть
+              </Text>
+              <ScrollView style={{ maxHeight: 400 }}>
+                {usageModal.items.map((item: any) => {
+                  const u = usageItems[item.inventory_item_id];
+                  if (!u) return null;
+                  return (
+                    <View key={item.id} style={[styles.usageItem, { borderBottomColor: theme.border }]}>
+                      <Text style={[styles.usageItemName, { color: theme.text }]}>{item.item_name}</Text>
+                      <Text style={[styles.usageItemMeta, { color: theme.textTertiary }]}>
+                        Выдано: {item.quantity_issued} · Остаток: {item.remaining}
+                      </Text>
+                      <View style={styles.usageRow}>
+                        <View style={styles.usageField}>
+                          <Text style={[styles.usageLabel, { color: theme.textSecondary }]}>Использовано</Text>
+                          <View style={styles.usageCounter}>
+                            <TouchableOpacity style={styles.usageCounterBtn} onPress={() => setUsageItems(prev => ({ ...prev, [item.inventory_item_id]: { ...prev[item.inventory_item_id], used: Math.max(0, prev[item.inventory_item_id].used - 1) } }))}>
+                              <Text style={styles.usageCounterBtnText}>−</Text>
+                            </TouchableOpacity>
+                            <Text style={[styles.usageCounterValue, { color: theme.text }]}>{u.used}</Text>
+                            <TouchableOpacity style={styles.usageCounterBtn} onPress={() => setUsageItems(prev => ({ ...prev, [item.inventory_item_id]: { ...prev[item.inventory_item_id], used: Math.min(item.remaining + prev[item.inventory_item_id].returned, prev[item.inventory_item_id].used + 1) } }))}>
+                              <Text style={styles.usageCounterBtnText}>+</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        <View style={styles.usageField}>
+                          <Text style={[styles.usageLabel, { color: theme.textSecondary }]}>Возврат</Text>
+                          <View style={styles.usageCounter}>
+                            <TouchableOpacity style={styles.usageCounterBtn} onPress={() => setUsageItems(prev => ({ ...prev, [item.inventory_item_id]: { ...prev[item.inventory_item_id], returned: Math.max(0, prev[item.inventory_item_id].returned - 1) } }))}>
+                              <Text style={styles.usageCounterBtnText}>−</Text>
+                            </TouchableOpacity>
+                            <Text style={[styles.usageCounterValue, { color: theme.text }]}>{u.returned}</Text>
+                            <TouchableOpacity style={styles.usageCounterBtn} onPress={() => setUsageItems(prev => ({ ...prev, [item.inventory_item_id]: { ...prev[item.inventory_item_id], returned: Math.min(item.remaining - prev[item.inventory_item_id].used, prev[item.inventory_item_id].returned + 1) } }))}>
+                              <Text style={styles.usageCounterBtnText}>+</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                      {/* Тип возврата */}
+                      <View style={styles.usageReturnRow}>
+                        <Text style={[styles.usageLabel, { color: theme.textSecondary }]}>Куда сдать:</Text>
+                        <View style={styles.usageReturnTypes}>
+                          {[
+                            { v: 'working', l: '✅ Рабочее' },
+                            { v: 'repair', l: '🔧 В ремонт' },
+                            { v: 'defect', l: '🗑 Брак' },
+                          ].map(rt => (
+                            <TouchableOpacity
+                              key={rt.v}
+                              style={[styles.usageReturnType, { borderColor: theme.border }, u.returnType === rt.v && { backgroundColor: theme.primary, borderColor: theme.primary }]}
+                              onPress={() => setUsageItems(prev => ({ ...prev, [item.inventory_item_id]: { ...prev[item.inventory_item_id], returnType: rt.v } }))}
+                            >
+                              <Text style={[styles.usageReturnTypeText, { color: u.returnType === rt.v ? '#fff' : theme.textSecondary }]}>{rt.l}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+              <View style={styles.usageModalButtons}>
+                <TouchableOpacity style={[styles.usageCancelBtn, { borderColor: theme.border }]} onPress={() => setUsageModal(null)}>
+                  <Text style={{ color: theme.textSecondary }}>Отмена</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.usageSubmitBtn, { backgroundColor: theme.primary }]} onPress={submitUsage}>
+                  <Text style={styles.usageSubmitText}>Отправить</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       )}
 
       {/* Комментарии / диалог */}
@@ -655,6 +790,29 @@ const styles = StyleSheet.create({
   materialBarcode: { fontSize: 11 },
   receiveBtn: { marginTop: 10, padding: 10, borderRadius: 8, alignItems: 'center' },
   receiveBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  // Отчёт об использовании
+  usageOverlay: { flex: 1, justifyContent: 'center', padding: 16 },
+  usageModal: { borderRadius: 14, padding: 16, maxHeight: '80%' },
+  usageTitle: { fontSize: 17, fontWeight: '700', marginBottom: 4 },
+  usageSubtitle: { fontSize: 12, marginBottom: 12 },
+  usageItem: { paddingVertical: 10, borderBottomWidth: 1 },
+  usageItemName: { fontSize: 14, fontWeight: '600' },
+  usageItemMeta: { fontSize: 11, marginTop: 2 },
+  usageRow: { flexDirection: 'row', gap: 24, marginTop: 8 },
+  usageField: {},
+  usageLabel: { fontSize: 11 },
+  usageCounter: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  usageCounterBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
+  usageCounterBtnText: { fontSize: 18, fontWeight: '700', color: '#555' },
+  usageCounterValue: { fontSize: 16, fontWeight: '700', minWidth: 24, textAlign: 'center' },
+  usageReturnRow: { marginTop: 10 },
+  usageReturnTypes: { flexDirection: 'row', gap: 8, marginTop: 6, flexWrap: 'wrap' },
+  usageReturnType: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1 },
+  usageReturnTypeText: { fontSize: 11, fontWeight: '600' },
+  usageModalButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 14 },
+  usageCancelBtn: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 8, borderWidth: 1 },
+  usageSubmitBtn: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 8 },
+  usageSubmitText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   // Комментарии
   commentItem: { borderRadius: 8, padding: 10, marginBottom: 6 },
   commentHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },

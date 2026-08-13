@@ -21,12 +21,22 @@ interface ZipItem {
   source: string;
 }
 
+interface ZipOrder {
+  id: number;
+  order_number: string;
+  order_id: number;
+  issued_at: string;
+  items: ZipItem[];
+}
+
 const MasterZipScreen: React.FC = () => {
   const { user } = useAuth();
   const { theme } = useTheme();
   const [items, setItems] = useState<ZipItem[]>([]);
+  const [orders, setOrders] = useState<ZipOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<'balance' | 'orders'>('balance');
 
   const masterId = user?.master_profile?.id;
 
@@ -36,8 +46,12 @@ const MasterZipScreen: React.FC = () => {
       return;
     }
     try {
-      const res = await api.get(`/masters/${masterId}/inventory/`);
-      setItems(res.data.items || []);
+      const [invRes, ordersRes] = await Promise.all([
+        api.get(`/masters/${masterId}/inventory/`),
+        api.get(`/masters/${masterId}/zip_orders/`),
+      ]);
+      setItems(invRes.data.items || []);
+      setOrders(ordersRes.data || []);
     } catch (e) {
       console.error('ZIP load error:', e);
     } finally {
@@ -72,7 +86,7 @@ const MasterZipScreen: React.FC = () => {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Сводка */}
       <View style={[styles.summaryCard, { backgroundColor: theme.card }]}>
-        <Text style={[styles.summaryTitle, { color: theme.text }]}>🎒 Мой ЗИП (материалы на руках)</Text>
+        <Text style={[styles.summaryTitle, { color: theme.text }]}>🎒 Мой ЗИП</Text>
         <View style={styles.summaryRow}>
           <View style={styles.summaryItem}>
             <Text style={[styles.summaryValue, { color: theme.primary }]}>{items.length}</Text>
@@ -82,59 +96,120 @@ const MasterZipScreen: React.FC = () => {
             <Text style={[styles.summaryValue, { color: '#fa8c16' }]}>{totalRemaining}</Text>
             <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>единиц остаток</Text>
           </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryValue, { color: '#1677ff' }]}>{orders.length}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>накладных</Text>
+          </View>
         </View>
       </View>
 
-      <FlatList
-        data={items}
-        keyExtractor={(item, i) => `${item.inventory_item_id}-${i}`}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <Text style={[styles.empty, { color: theme.textTertiary }]}>У вас нет материалов в ЗИПе</Text>
-        }
-        renderItem={({ item }) => (
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <View style={styles.cardHeader}>
-              <Text style={[styles.itemName, { color: theme.text }]} numberOfLines={2}>{item.item_name}</Text>
-              <View style={[
-                styles.sourceBadge,
-                item.source === 'master_zip'
-                  ? { backgroundColor: '#f9f0ff', borderColor: '#d3adf7' }
-                  : { backgroundColor: '#e6f7ff', borderColor: '#91d5ff' }
-              ]}>
-                <Text style={[
-                  styles.sourceBadgeText,
-                  { color: item.source === 'master_zip' ? '#722ed1' : '#1677ff' }
+      {/* Табы */}
+      <View style={styles.tabRow}>
+        <TouchableOpacity
+          style={[styles.tab, tab === 'balance' && { backgroundColor: theme.primary }]}
+          onPress={() => setTab('balance')}
+        >
+          <Text style={[styles.tabText, tab === 'balance' && { color: '#fff' }]}>📦 Остатки</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, tab === 'orders' && { backgroundColor: theme.primary }]}
+          onPress={() => setTab('orders')}
+        >
+          <Text style={[styles.tabText, tab === 'orders' && { color: '#fff' }]}>📋 Накладные</Text>
+        </TouchableOpacity>
+      </View>
+
+      {tab === 'balance' ? (
+        <FlatList
+          data={items}
+          keyExtractor={(item, i) => `${item.inventory_item_id}-${i}`}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <Text style={[styles.empty, { color: theme.textTertiary }]}>У вас нет материалов в ЗИПе</Text>
+          }
+          renderItem={({ item }) => (
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={styles.cardHeader}>
+                <Text style={[styles.itemName, { color: theme.text }]} numberOfLines={2}>{item.item_name}</Text>
+                <View style={[
+                  styles.sourceBadge,
+                  item.source === 'master_zip'
+                    ? { backgroundColor: '#f9f0ff', borderColor: '#d3adf7' }
+                    : { backgroundColor: '#e6f7ff', borderColor: '#91d5ff' }
                 ]}>
-                  {item.source === 'master_zip' ? '🎒 ЗИП' : '🏭 Склад'}
-                </Text>
+                  <Text style={[
+                    styles.sourceBadgeText,
+                    { color: item.source === 'master_zip' ? '#722ed1' : '#1677ff' }
+                  ]}>
+                    {item.source === 'master_zip' ? '🎒 ЗИП' : '🏭 Склад'}
+                  </Text>
+                </View>
+              </View>
+              {item.item_barcode ? (
+                <Text style={[styles.barcode, { color: theme.textTertiary }]}>🏷️ {item.item_barcode}</Text>
+              ) : null}
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: theme.text }]}>{item.quantity_issued}</Text>
+                  <Text style={[styles.statLabel, { color: theme.textTertiary }]}>выдано</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: theme.text }]}>{item.quantity_used}</Text>
+                  <Text style={[styles.statLabel, { color: theme.textTertiary }]}>использовано</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: item.remaining > 0 ? '#fa8c16' : '#52c41a' }]}>
+                    {item.remaining}
+                  </Text>
+                  <Text style={[styles.statLabel, { color: theme.textTertiary }]}>остаток</Text>
+                </View>
               </View>
             </View>
-
-            {item.item_barcode ? (
-              <Text style={[styles.barcode, { color: theme.textTertiary }]}>🏷️ {item.item_barcode}</Text>
-            ) : null}
-
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: theme.text }]}>{item.quantity_issued}</Text>
-                <Text style={[styles.statLabel, { color: theme.textTertiary }]}>выдано</Text>
+          )}
+        />
+      ) : (
+        <FlatList
+          data={orders}
+          keyExtractor={(o) => String(o.id)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <Text style={[styles.empty, { color: theme.textTertiary }]}>Нет накладных</Text>
+          }
+          renderItem={({ item: ord }) => (
+            <View style={[styles.orderCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={styles.orderHeader}>
+                <Text style={[styles.orderTitle, { color: theme.text }]}>Накладная №{ord.id}</Text>
+                <View style={[styles.miniBadge, { backgroundColor: ord.status === 'pending' ? '#fa8c16' : ord.status === 'received' ? '#13c2c2' : '#52c41a' }]}>
+                  <Text style={styles.miniBadgeText}>{ord.status_display}</Text>
+                </View>
               </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: theme.text }]}>{item.quantity_used}</Text>
-                <Text style={[styles.statLabel, { color: theme.textTertiary }]}>использовано</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: item.remaining > 0 ? '#fa8c16' : '#52c41a' }]}>
-                  {item.remaining}
-                </Text>
-                <Text style={[styles.statLabel, { color: theme.textTertiary }]}>остаток</Text>
-              </View>
+              <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>
+                Заявка: {ord.order_number} · {new Date(ord.issued_at).toLocaleDateString('ru-RU')}
+              </Text>
+              {ord.items.map((it: any) => (
+                <View key={it.inventory_item_id} style={[styles.orderItem, { borderBottomColor: theme.border }]}>
+                  <View style={styles.orderItemHeader}>
+                    <Text style={[styles.orderItemName, { color: theme.text }]} numberOfLines={1}>{it.item_name}</Text>
+                    {it.source === 'master_zip'
+                      ? <Text style={[styles.orderItemSource, { color: '#722ed1' }]}>🎒</Text>
+                      : <Text style={[styles.orderItemSource, { color: '#1677ff' }]}>🏭</Text>}
+                  </View>
+                  <Text style={[styles.orderItemMeta, { color: theme.textTertiary }]}>
+                    Выдано {it.quantity_issued} · Исп. {it.quantity_used} · Ост. {it.remaining}
+                  </Text>
+                  {it.need_return_old && (
+                    <Text style={[styles.orderItemReturn, { color: '#fa8c16' }]}>
+                      {it.old_item_returned ? '✅' : '⚠️'} Возврат старого: {it.old_item_description || '—'}
+                    </Text>
+                  )}
+                </View>
+              ))}
             </View>
-          </View>
-        )}
-      />
+          )}
+        />
+      )}
     </View>
   );
 };
@@ -160,6 +235,21 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 16, fontWeight: '700' },
   statLabel: { fontSize: 10 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 14 },
+  tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, marginBottom: 8 },
+  tab: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#f0f0f0' },
+  tabText: { fontSize: 13, fontWeight: '600', color: '#555' },
+  orderCard: { borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1 },
+  orderHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  orderTitle: { fontSize: 14, fontWeight: '700' },
+  miniBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  miniBadgeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  orderMeta: { fontSize: 12, marginTop: 4, marginBottom: 6 },
+  orderItem: { paddingVertical: 6, borderBottomWidth: 1 },
+  orderItemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  orderItemName: { fontSize: 13, fontWeight: '600', flex: 1, marginRight: 6 },
+  orderItemSource: { fontSize: 14 },
+  orderItemMeta: { fontSize: 11, marginTop: 2 },
+  orderItemReturn: { fontSize: 11, marginTop: 2 },
 });
 
 export default MasterZipScreen;

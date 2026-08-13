@@ -1956,6 +1956,13 @@ class IssueOrderItem(models.Model):
     need_return_old = models.BooleanField(default=False, verbose_name=_('Требуется возврат старого'))
     old_item_description = models.CharField(max_length=300, blank=True, verbose_name=_('Что нужно вернуть (старое)'))
     old_item_returned = models.BooleanField(default=False, verbose_name=_('Старое возвращено'))
+    # Тип возврата/утилизации оборудования
+    return_type = models.CharField(max_length=15, choices=[
+        ('none', _('Без возврата')),
+        ('working', _('Рабочее (на склад)')),
+        ('repair', _('В ремонт')),
+        ('defect', _('Брак/списание')),
+    ], default='none', verbose_name=_('Куда сдать оборудование'))
     notes = models.CharField(max_length=300, blank=True, verbose_name=_('Примечание'))
 
     class Meta:
