@@ -1575,6 +1575,106 @@ class OrderComment(models.Model):
 
 
 # ══════════════════════════════════════════════════════════════════
+# Инструменты (выдаются мастерам/монтажникам временно)
+# ══════════════════════════════════════════════════════════════════
+
+class Tool(models.Model):
+    """Инструмент на складе (не расходник — выдаётся временно, подлежит возврату)"""
+    TOOL_TYPES = [
+        ('drill', _('Дрель/шуруповёрт')),
+        ('perforator', _('Перфоратор')),
+        ('grinder', _('Болгарка')),
+        ('multimeter', _('Мультиметр')),
+        ('crimper', _('Обжимной инструмент')),
+        ('screwdriver_set', _('Набор отвёрток')),
+        ('wrench_set', _('Набор ключей')),
+        ('ladder', _('Лестница/стремянка')),
+        ('tester', _('Тестер/кабелеискатель')),
+        ('soldering', _('Паяльник/станция')),
+        ('measure', _('Измерительный (рулетка/уровень)')),
+        ('other', _('Другое')),
+    ]
+    STATUS_CHOICES = [
+        ('in_stock', _('На складе')),
+        ('issued', _('Выдан')),
+        ('returned', _('Возвращён')),
+        ('broken', _('Сломан')),
+        ('written_off', _('Списан')),
+    ]
+
+    name = models.CharField(max_length=200, verbose_name=_('Название'))
+    tool_type = models.CharField(max_length=20, choices=TOOL_TYPES, default='other', verbose_name=_('Тип'))
+    serial_number = models.CharField(max_length=100, blank=True, verbose_name=_('Инвентарный номер'))
+    model_name = models.CharField(max_length=100, blank=True, verbose_name=_('Модель'))
+    barcode = models.CharField(max_length=100, blank=True, unique=True, null=True, verbose_name=_('Штрих-код'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_('Стоимость'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_stock', verbose_name=_('Статус'))
+    current_holder = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, blank=True, related_name='held_tools', verbose_name=_('У кого на руках'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Добавлен'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлён'))
+
+    class Meta:
+        verbose_name = _('Инструмент')
+        verbose_name_plural = _('Инструменты')
+        ordering = ['tool_type', 'name']
+
+    def save(self, *args, **kwargs):
+        if not self.barcode:
+            import uuid
+            self.barcode = f'TOOL-{uuid.uuid4().hex[:8].upper()}'
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.get_tool_type_display()} {self.name} ({self.get_status_display()})'
+
+
+class ToolMovement(models.Model):
+    """Движение инструмента: выдача мастеру / возврат на склад / поломка"""
+    MOVEMENT_TYPES = [
+        ('issued', _('Выдан')),
+        ('returned', _('Возвращён')),
+        ('broken', _('Сломан')),
+        ('written_off', _('Списан')),
+    ]
+
+    tool = models.ForeignKey(Tool, on_delete=models.CASCADE, related_name='movements', verbose_name=_('Инструмент'))
+    movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES, verbose_name=_('Тип'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_movements', verbose_name=_('Мастер/Монтажник'))
+    performed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, verbose_name=_('Выполнил'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата операции'))
+
+    class Meta:
+        verbose_name = _('Движение инструмента')
+        verbose_name_plural = _('Движения инструментов')
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        if is_new:
+            tool = self.tool
+            if self.movement_type == 'issued':
+                tool.quantity = max(0, tool.quantity - self.quantity)
+                tool.status = 'issued' if tool.quantity == 0 else tool.status
+                tool.current_holder = self.master
+            elif self.movement_type == 'returned':
+                tool.quantity += self.quantity
+                tool.status = 'in_stock'
+                tool.current_holder = None
+            elif self.movement_type in ('broken', 'written_off'):
+                tool.status = self.movement_type
+                tool.current_holder = None
+            tool.save(update_fields=['quantity', 'status', 'current_holder', 'updated_at'])
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.get_movement_type_display()}: {self.tool} → {self.master} ({self.created_at:%d.%m.%Y})'
+
+
+# ══════════════════════════════════════════════════════════════════
 # Сметы и коммерческие предложения
 # ══════════════════════════════════════════════════════════════════
 
@@ -1931,7 +2031,7 @@ class IssueOrder(models.Model):
         ('returned', _('Возвращено на склад')),
     ]
 
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='issue_orders', verbose_name=_('Заявка'))
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, null=True, blank=True, related_name='issue_orders', verbose_name=_('Заявка'))
     master = models.ForeignKey('Master', on_delete=models.SET_NULL, null=True, related_name='issue_orders', verbose_name=_('Сотрудник'))
     issued_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='issued_orders', verbose_name=_('Выдал'))
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name=_('Статус'))
@@ -1946,7 +2046,7 @@ class IssueOrder(models.Model):
         ordering = ['-issued_at']
 
     def __str__(self):
-        return f'Ордер №{self.id}: {self.master} → заявка {self.order.number}'
+        return f'Ордер №{self.id}: {self.master} → заявка {self.order.number if self.order else "без заявки"}'
 
 
 class IssueOrderItem(models.Model):

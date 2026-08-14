@@ -7,6 +7,7 @@ from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateIt
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
+from .models import Tool, ToolMovement
 from .models import ErcAccount, ErcBillingRecord
 from .models import StorageLocation
 from .models import OutgoingInvoice, OutgoingInvoiceItem
@@ -991,6 +992,56 @@ class InventoryMovementSerializer(serializers.ModelSerializer):
 
 
 # ══════════════════════════════════════════════════════════════════
+# Инструменты
+# ══════════════════════════════════════════════════════════════════
+
+class ToolSerializer(serializers.ModelSerializer):
+    tool_type_display = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    holder_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Tool
+        fields = '__all__'
+        read_only_fields = ['id', 'barcode', 'created_at', 'updated_at']
+
+    def get_tool_type_display(self, obj):
+        return obj.get_tool_type_display()
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    def get_holder_name(self, obj):
+        if obj.current_holder:
+            return str(obj.current_holder)
+        return ''
+
+
+class ToolMovementSerializer(serializers.ModelSerializer):
+    movement_type_display = serializers.SerializerMethodField()
+    tool_name = serializers.SerializerMethodField()
+    master_name = serializers.SerializerMethodField()
+    performed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ToolMovement
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+    def get_movement_type_display(self, obj):
+        return obj.get_movement_type_display()
+
+    def get_tool_name(self, obj):
+        return str(obj.tool) if obj.tool else ''
+
+    def get_master_name(self, obj):
+        return str(obj.master) if obj.master else ''
+
+    def get_performed_by_name(self, obj):
+        return obj.performed_by.get_full_name() or obj.performed_by.username if obj.performed_by else ''
+
+
+# ══════════════════════════════════════════════════════════════════
 # Финансы
 # ══════════════════════════════════════════════════════════════════
 
@@ -1281,7 +1332,7 @@ class IssueOrderSerializer(serializers.ModelSerializer):
 
 class IssueOrderCreateSerializer(serializers.Serializer):
     """Создание расходного ордера с позициями"""
-    order_id = serializers.IntegerField()
+    order_id = serializers.IntegerField(required=False, allow_null=True)
     master_id = serializers.IntegerField()
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     items = serializers.ListField(child=serializers.DictField())

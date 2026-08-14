@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic, Form, Input, Tooltip, Popconfirm, Switch } from 'antd';
-import { PlusOutlined, ReloadOutlined, ExportOutlined, BarcodeOutlined, ShopOutlined, FileTextOutlined, SendOutlined, ShoppingCartOutlined, EditOutlined, EnvironmentOutlined, DeleteOutlined, CheckCircleOutlined, PrinterOutlined, ScanOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic, Form, Input, Tooltip, Popconfirm, Switch, Divider } from 'antd';
+import { PlusOutlined, ReloadOutlined, ExportOutlined, BarcodeOutlined, ShopOutlined, FileTextOutlined, SendOutlined, ShoppingCartOutlined, EditOutlined, EnvironmentOutlined, DeleteOutlined, CheckCircleOutlined, PrinterOutlined, ScanOutlined, ToolOutlined, TeamOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import BarcodeScanner from '../../components/BarcodeScanner';
@@ -29,7 +29,7 @@ const InventoryPage: React.FC = () => {
   const [editModal, setEditModal] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [tab, setTab] = useState<'items' | 'movements' | 'upd' | 'settings'>('items');
+  const [tab, setTab] = useState<'items' | 'movements' | 'upd' | 'masters' | 'tools' | 'settings'>('items');
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
@@ -45,6 +45,26 @@ const InventoryPage: React.FC = () => {
   const [updPrintData, setUpdPrintData] = useState<any>(null);
   const [updPrintVisible, setUpdPrintVisible] = useState(false);
   const printCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Мастера (вкладка)
+  const [masters, setMasters] = useState<any[]>([]);
+  const [mastersLoading, setMastersLoading] = useState(false);
+  const [masterIssueModal, setMasterIssueModal] = useState(false);
+  const [selectedMaster, setSelectedMaster] = useState<any>(null);
+  const [masterItems, setMasterItems] = useState<any[]>([]);
+  const [warehouseItems, setWarehouseItems] = useState<InventoryItem[]>([]);
+  const [issueQty, setIssueQty] = useState<Record<number, number>>({});
+  const [issueSource, setIssueSource] = useState<'warehouse' | 'master_zip'>('warehouse');
+  const [returnItemModal, setReturnItemModal] = useState(false);
+
+  // Инструменты (вкладка)
+  const [tools, setTools] = useState<any[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
+  const [toolMovements, setToolMovements] = useState<any[]>([]);
+  const [toolModal, setToolModal] = useState(false);
+  const [toolForm] = Form.useForm();
+  const [toolIssueModal, setToolIssueModal] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<any>(null);
   const navigate = useNavigate();
 
   const statusColors: Record<string, string> = {
@@ -74,6 +94,101 @@ const InventoryPage: React.FC = () => {
       const res = await api.get('/storage-locations/', { params: { page_size: 500, is_active: true } });
       setStorageLocations(res.data.results || res.data);
     } catch {}
+  };
+
+  // ── Вкладка «Мастера» ──
+  const fetchMasters = async () => {
+    setMastersLoading(true);
+    try {
+      const res = await api.get('/masters/');
+      setMasters(res.data.results || res.data || []);
+    } catch { message.error('Ошибка загрузки мастеров'); }
+    finally { setMastersLoading(false); }
+  };
+
+  const openMasterInventory = async (master: any) => {
+    setSelectedMaster(master);
+    setMasterIssueModal(true);
+    try {
+      const [invRes, whRes] = await Promise.all([
+        api.get(`/masters/${master.id}/inventory/`),
+        api.get('/inventory/', { params: { page_size: 200, status: 'in_stock' } }),
+      ]);
+      setMasterItems(invRes.data.items || []);
+      setWarehouseItems(whRes.data.results || whRes.data);
+    } catch { message.error('Ошибка загрузки данных'); }
+  };
+
+  const issueToMaster = async () => {
+    if (!selectedMaster) return;
+    const items = Object.entries(issueQty).filter(([, q]) => q > 0);
+    if (items.length === 0) { message.warning('Выберите материалы'); return; }
+    try {
+      await api.post('/issue-orders/', {
+        order_id: null, master_id: selectedMaster.id,
+        items: items.map(([invId, qty]) => ({ inventory_item_id: parseInt(invId), quantity_issued: qty, source: issueSource })),
+        notes: 'Выдача со склада'
+      });
+      message.success('Материалы выданы');
+      setMasterIssueModal(false);
+      setIssueQty({});
+      fetchAll();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
+  };
+
+  const returnFromMaster = async (item: any) => {
+    try {
+      await api.post(`/masters/${selectedMaster.id}/return_zip/`, { inventory_item_id: item.inventory_item_id, quantity: 1 });
+      message.success('Материал возвращён на склад');
+      openMasterInventory(selectedMaster);
+      fetchAll();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
+  };
+
+  // ── Вкладка «Инструменты» ──
+  const fetchTools = async () => {
+    setToolsLoading(true);
+    try {
+      const [toolsRes, movRes] = await Promise.all([
+        api.get('/tools/'),
+        api.get('/tool-movements/', { params: { page_size: 100 } }),
+      ]);
+      setTools(toolsRes.data.results || toolsRes.data || []);
+      setToolMovements(movRes.data.results || movRes.data || []);
+    } catch { message.error('Ошибка загрузки инструментов'); }
+    finally { setToolsLoading(false); }
+  };
+
+  const createTool = async (values: any) => {
+    try {
+      await api.post('/tools/', values);
+      message.success('Инструмент добавлен');
+      setToolModal(false);
+      toolForm.resetFields();
+      fetchTools();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
+  };
+
+  const issueTool = async (toolId: number) => {
+    setSelectedTool(tools.find(t => t.id === toolId));
+    setToolIssueModal(true);
+  };
+
+  const confirmIssueTool = async (values: any) => {
+    try {
+      await api.post(`/tools/${selectedTool.id}/issue/`, values);
+      message.success('Инструмент выдан');
+      setToolIssueModal(false);
+      fetchTools();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
+  };
+
+  const returnTool = async (toolId: number) => {
+    try {
+      await api.post(`/tools/${toolId}/return_tool/`, { quantity: 1 });
+      message.success('Инструмент возвращён');
+      fetchTools();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
   };
 
   // ── Управление ячейками (Настройки склада) ──
@@ -381,7 +496,9 @@ const InventoryPage: React.FC = () => {
         <Button type={tab === 'items' ? 'primary' : 'default'} onClick={() => setTab('items')}>Оборудование</Button>
         <Button type={tab === 'movements' ? 'primary' : 'default'} onClick={() => setTab('movements')}>Движения</Button>
         <Button type={tab === 'upd' ? 'primary' : 'default'} icon={<FileTextOutlined />} onClick={() => { setTab('upd'); fetchUpdList(); }}>УПД</Button>
-        <Button type={tab === 'settings' ? 'primary' : 'default'} icon={<EnvironmentOutlined />} onClick={() => { setTab('settings'); fetchStorageLocations(); }}>Настройки склада</Button>
+        <Button type={tab === 'masters' ? 'primary' : 'default'} icon={<TeamOutlined />} onClick={() => { setTab('masters'); fetchMasters(); }}>Мастера</Button>
+        <Button type={tab === 'tools' ? 'primary' : 'default'} icon={<ToolOutlined />} onClick={() => { setTab('tools'); fetchTools(); }}>Инструменты</Button>
+        <Button type={tab === 'settings' ? 'primary' : 'default'} icon={<EnvironmentOutlined />} onClick={() => { setTab('settings'); fetchStorageLocations(); }}>Ячейки</Button>
         {tab === 'items' && (
           <>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); fetchStorageLocations(); setCreateModal(true); }}>
@@ -391,8 +508,10 @@ const InventoryPage: React.FC = () => {
             <Button icon={<BarcodeOutlined />} onClick={() => setScannerVisible(true)}>Сканер</Button>
           </>
         )}
-        <Button icon={<ReloadOutlined />} onClick={tab === 'settings' ? fetchStorageLocations : fetchAll}>Обновить</Button>
-        {tab !== 'settings' && (
+        <Button icon={<ReloadOutlined />} onClick={
+          tab === 'masters' ? fetchMasters : tab === 'tools' ? fetchTools : tab === 'settings' ? fetchStorageLocations : fetchAll
+        }>Обновить</Button>
+        {tab !== 'settings' && tab !== 'masters' && tab !== 'tools' && (
           <>
             <Button icon={<ShopOutlined />} onClick={() => navigate('/suppliers')}>Поставщики</Button>
             <Button icon={<FileTextOutlined />} onClick={() => navigate('/supply-invoices')}>Накладные</Button>
@@ -466,6 +585,156 @@ const InventoryPage: React.FC = () => {
               },
             ]}
           />
+        </div>
+      ) : tab === 'masters' ? (
+        /* ═══════════ Вкладка: Мастера ═══════════ */
+        <div>
+          <Table
+            dataSource={masters}
+            rowKey="id"
+            loading={mastersLoading}
+            pagination={false}
+            columns={[
+              { title: 'ФИО', dataIndex: 'full_name', key: 'name', render: (_: any, r: any) => r.full_name || r.user?.username || '—' },
+              { title: 'Телефон', dataIndex: 'phone', key: 'phone' },
+              { title: 'Район', dataIndex: 'region_name', key: 'region', render: (_: any, r: any) => r.region?.name || '—' },
+              {
+                title: '', key: 'actions', width: 120,
+                render: (_: any, r: any) => (
+                  <Button type="primary" size="small" icon={<ShopOutlined />} onClick={() => openMasterInventory(r)}>
+                    Выдать / ЗИП
+                  </Button>
+                ),
+              },
+            ]}
+          />
+
+          <Modal title={`Материалы: ${selectedMaster?.full_name || selectedMaster?.user?.username || ''}`} open={masterIssueModal} onCancel={() => setMasterIssueModal(false)} width={700} footer={null}>
+            <Title level={5}>🔢 Материалы у мастера (ЗИП)</Title>
+            <Table
+              dataSource={masterItems}
+              rowKey="inventory_item_id"
+              pagination={false}
+              size="small"
+              columns={[
+                { title: 'Материал', dataIndex: 'item_name', key: 'name' },
+                { title: 'Остаток', dataIndex: 'remaining', key: 'rem' },
+                {
+                  title: '', key: 'ret', width: 100,
+                  render: (_: any, item: any) => (
+                    <Button size="small" danger onClick={() => returnFromMaster(item)}>↩ Вернуть</Button>
+                  ),
+                },
+              ]}
+            />
+            <Divider />
+            <Title level={5}>📦 Выдать со склада</Title>
+            <Select
+              style={{ marginBottom: 12, width: 200 }}
+              value={issueSource}
+              onChange={setIssueSource}
+              options={[
+                { value: 'warehouse', label: '🏭 Со склада' },
+                { value: 'master_zip', label: '🎒 Из ЗИП' },
+              ]}
+            />
+            <Table
+              dataSource={warehouseItems}
+              rowKey="id"
+              pagination={false}
+              size="small"
+              columns={[
+                { title: 'Номенклатура', dataIndex: 'name', key: 'name' },
+                { title: 'На складе', dataIndex: 'quantity', key: 'qty' },
+                {
+                  title: 'Выдать', key: 'issue', width: 120,
+                  render: (_: any, item: any) => (
+                    <InputNumber min={0} max={item.quantity} value={issueQty[item.id] || 0} onChange={v => setIssueQty(prev => ({ ...prev, [item.id]: v || 0 }))} style={{ width: 70 }} />
+                  ),
+                },
+              ]}
+            />
+            <Button type="primary" block onClick={issueToMaster} style={{ marginTop: 12 }}>Выдать материалы</Button>
+          </Modal>
+        </div>
+      ) : tab === 'tools' ? (
+        /* ═══════════ Вкладка: Инструменты ═══════════ */
+        <div>
+          <Space style={{ marginBottom: 12 }}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => { toolForm.resetFields(); setToolModal(true); }}>Добавить инструмент</Button>
+          </Space>
+          <Table
+            dataSource={tools}
+            rowKey="id"
+            loading={toolsLoading}
+            pagination={false}
+            columns={[
+              { title: 'Название', dataIndex: 'name', key: 'name' },
+              { title: 'Тип', dataIndex: 'tool_type_display', key: 'type' },
+              { title: 'Инв. №', dataIndex: 'serial_number', key: 'sn', render: (v: string) => v || '—' },
+              { title: 'Кол-во', dataIndex: 'quantity', key: 'qty' },
+              { title: 'Статус', dataIndex: 'status_display', key: 'status', render: (s: string, r: any) => <Tag color={r.status === 'in_stock' ? 'green' : 'orange'}>{s}</Tag> },
+              { title: 'У кого', dataIndex: 'holder_name', key: 'holder', render: (v: string) => v || '—' },
+              {
+                title: '', key: 'actions', width: 180,
+                render: (_: any, r: any) => (
+                  <Space size={0}>
+                    {r.status === 'in_stock' && <Button size="small" type="primary" onClick={() => issueTool(r.id)}>Выдать</Button>}
+                    {r.status === 'issued' && <Button size="small" onClick={() => returnTool(r.id)}>Вернуть</Button>}
+                    {r.status === 'in_stock' && <Button size="small" danger onClick={() => api.post(`/tools/${r.id}/mark_broken/`).then(fetchTools)}>Сломан</Button>}
+                  </Space>
+                ),
+              },
+            ]}
+          />
+          <Title level={5} style={{ marginTop: 24 }}>📋 Движения инструментов</Title>
+          <Table
+            dataSource={toolMovements}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            columns={[
+              { title: 'Инструмент', dataIndex: 'tool_name', key: 'tool' },
+              { title: 'Тип', dataIndex: 'movement_type_display', key: 'type' },
+              { title: 'Сотрудник', dataIndex: 'master_name', key: 'master', render: (v: string) => v || '—' },
+              { title: 'Кто выдал', dataIndex: 'performed_by_name', key: 'by', render: (v: string) => v || '—' },
+              { title: 'Дата', dataIndex: 'created_at', key: 'date', render: (v: string) => v ? new Date(v).toLocaleString('ru-RU') : '—' },
+            ]}
+          />
+          <Modal title="Добавить инструмент" open={toolModal} onCancel={() => setToolModal(false)} footer={null}>
+            <Form form={toolForm} layout="vertical" onFinish={createTool}>
+              <Form.Item name="name" label="Название" rules={[{ required: true }]}><Input /></Form.Item>
+              <Form.Item name="tool_type" label="Тип" rules={[{ required: true }]}>
+                <Select options={[
+                  { value: 'drill', label: 'Дрель/шуруповёрт' }, { value: 'perforator', label: 'Перфоратор' },
+                  { value: 'grinder', label: 'Болгарка' }, { value: 'multimeter', label: 'Мультиметр' },
+                  { value: 'crimper', label: 'Обжимной инструмент' }, { value: 'ladder', label: 'Лестница/стремянка' },
+                  { value: 'tester', label: 'Тестер/кабелеискатель' }, { value: 'other', label: 'Другое' },
+                ]} />
+              </Form.Item>
+              <Form.Item name="serial_number" label="Инвентарный номер"><Input /></Form.Item>
+              <Form.Item name="model_name" label="Модель"><Input /></Form.Item>
+              <Form.Item name="quantity" label="Количество" initialValue={1}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+              <Form.Item name="cost_price" label="Стоимость (₽)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+              <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
+              <Button type="primary" htmlType="submit" block>Добавить</Button>
+            </Form>
+          </Modal>
+          <Modal title="Выдать инструмент" open={toolIssueModal} onCancel={() => setToolIssueModal(false)} footer={null}>
+            <Form layout="vertical" onFinish={confirmIssueTool}>
+              <Form.Item name="master_id" label="Сотрудник" rules={[{ required: true }]}>
+                <Select
+                  showSearch
+                  placeholder="Выберите сотрудника"
+                  optionFilterProp="label"
+                  options={masters.map((m: any) => ({ value: m.id, label: `${m.full_name || m.user?.username} (${m.region?.name || '—'})` }))}
+                />
+              </Form.Item>
+              <Form.Item name="quantity" label="Количество" initialValue={1}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+              <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
+              <Button type="primary" htmlType="submit" block>Выдать</Button>
+            </Form>
+          </Modal>
         </div>
       ) : (
         /* ═══════════ Вкладка: Настройки склада ═══════════ */

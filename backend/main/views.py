@@ -20,6 +20,7 @@ from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateIt
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
+from .models import Tool, ToolMovement
 from .models import ErcAccount, ErcBillingRecord
 from .models import StorageLocation
 from .models import OutgoingInvoice, OutgoingInvoiceItem
@@ -48,6 +49,7 @@ from .serializers import ErcAccountSerializer, ErcBillingRecordSerializer
 from .serializers import StorageLocationSerializer, StorageLocationDetailSerializer
 from .serializers import OutgoingInvoiceSerializer, OutgoingInvoiceCreateSerializer
 from .serializers import CallLogSerializer
+from .serializers import ToolSerializer, ToolMovementSerializer
 from .serializers import AsteriskSipPeerSerializer, AsteriskTrunkSerializer, AsteriskRouteSerializer
 from .serializers import AsteriskIvrSerializer, AsteriskIvrOptionSerializer
 from .serializers import AsteriskVoicemailSerializer, AsteriskCallRecordingSerializer
@@ -133,6 +135,53 @@ class MasterViewSet(viewsets.ModelViewSet):
             result.append(data)
 
         return Response({'items': result})
+
+    @action(detail=True, methods=['post'])
+    def return_zip(self, request, pk=None):
+        """Мастер возвращает материал из ЗИП обратно на склад"""
+        master = self.get_object()
+        inv_item_id = request.data.get('inventory_item_id')
+        qty = int(request.data.get('quantity', 1))
+
+        if not inv_item_id:
+            return Response({'error': 'Укажите inventory_item_id'}, status=400)
+
+        try:
+            inv_item = InventoryItem.objects.get(id=inv_item_id)
+        except InventoryItem.DoesNotExist:
+            return Response({'error': 'Материал не найден'}, status=404)
+
+        # Находим IssueOrderItem, где у мастера есть этот материал
+        from django.db.models import F
+        issue_item = IssueOrderItem.objects.filter(
+            issue_order__master=master,
+            inventory_item=inv_item,
+            quantity_used__lt=F('quantity_issued'),
+        ).order_by('issue_order__issued_at').first()
+
+        if not issue_item:
+            return Response({'error': 'У вас нет этого материала в ЗИП или он уже полностью использован'}, status=404)
+
+        # Увеличиваем used, чтобы освободить остаток
+        issue_item.quantity_used = min(
+            issue_item.quantity_issued,
+            issue_item.quantity_used + qty
+        )
+        issue_item.save(update_fields=['quantity_used'])
+
+        # Создаём движение возврата
+        inv_item.quantity += qty
+        if inv_item.status == 'with_master':
+            inv_item.status = 'in_stock'
+        inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
+
+        InventoryMovement.objects.create(
+            item=inv_item, movement_type='return_from_master', quantity=qty,
+            master=master, performed_by=request.user,
+            notes=f'Возврат из ЗИП: {request.data.get("notes", "")}'
+        )
+
+        return Response({'ok': True, 'message': f'Возвращено {qty} шт. {inv_item.name}'})
 
     @action(detail=True, methods=['get'])
     def zip_orders(self, request, pk=None):
@@ -3273,7 +3322,10 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
         serializer = IssueOrderCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        order = get_object_or_404(Order, id=data['order_id'])
+        order_id = data.get('order_id')
+        order = None
+        if order_id:
+            order = get_object_or_404(Order, id=order_id)
         master = get_object_or_404(Master, id=data['master_id'])
         issue_order = IssueOrder.objects.create(order=order, master=master, issued_by=request.user, notes=data.get('notes', ''))
         for item_data in data.get('items', []):
@@ -4313,6 +4365,71 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         if user.is_staff or role in ['admin', 'general_director', 'executive_director', 'technical_director']:
             return AuditLog.objects.select_related('user').all()
         return AuditLog.objects.select_related('user').filter(user=user)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Инструменты (выдача/возврат)
+# ══════════════════════════════════════════════════════════════════
+
+class ToolViewSet(viewsets.ModelViewSet):
+    """Инструменты на складе"""
+    queryset = Tool.objects.all()
+    serializer_class = ToolSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['tool_type', 'status', 'current_holder']
+    search_fields = ['name', 'serial_number', 'barcode', 'model_name']
+
+    @action(detail=True, methods=['post'])
+    def issue(self, request, pk=None):
+        """Выдать инструмент сотруднику"""
+        tool = self.get_object()
+        master_id = request.data.get('master_id')
+        qty = int(request.data.get('quantity', 1))
+        if not master_id:
+            return Response({'error': 'Укажите master_id'}, status=400)
+        try:
+            master = Master.objects.get(id=master_id)
+        except Master.DoesNotExist:
+            return Response({'error': 'Сотрудник не найден'}, status=404)
+        if tool.quantity < qty:
+            return Response({'error': f'Недостаточно на складе (доступно: {tool.quantity})'}, status=400)
+        ToolMovement.objects.create(
+            tool=tool, movement_type='issued', quantity=qty,
+            master=master, performed_by=request.user,
+            notes=request.data.get('notes', f'Выдан {master}')
+        )
+        return Response(ToolSerializer(tool).data)
+
+    @action(detail=True, methods=['post'])
+    def return_tool(self, request, pk=None):
+        """Вернуть инструмент на склад"""
+        tool = self.get_object()
+        qty = int(request.data.get('quantity', 1))
+        ToolMovement.objects.create(
+            tool=tool, movement_type='returned', quantity=qty,
+            master=tool.current_holder, performed_by=request.user,
+            notes=request.data.get('notes', 'Возврат на склад')
+        )
+        return Response(ToolSerializer(tool).data)
+
+    @action(detail=True, methods=['post'])
+    def mark_broken(self, request, pk=None):
+        """Пометить инструмент как сломанный"""
+        tool = self.get_object()
+        ToolMovement.objects.create(
+            tool=tool, movement_type='broken', quantity=1,
+            performed_by=request.user,
+            notes=request.data.get('notes', 'Поломка')
+        )
+        return Response(ToolSerializer(tool).data)
+
+
+class ToolMovementViewSet(viewsets.ReadOnlyModelViewSet):
+    """Движения инструментов (только чтение)"""
+    queryset = ToolMovement.objects.select_related('tool', 'master', 'performed_by').all()
+    serializer_class = ToolMovementSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['tool', 'master', 'movement_type']
 
 
 # ══════════════════════════════════════════════════════════════════

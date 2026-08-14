@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl,
+  ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -63,6 +63,31 @@ const MasterZipScreen: React.FC = () => {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const onRefresh = () => { setRefreshing(true); fetchData(); };
+
+  const returnMaterial = (item: ZipItem) => {
+    Alert.alert(
+      'Возврат на склад',
+      `Вернуть «${item.item_name}» (остаток: ${item.remaining})?`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: '↩ Вернуть',
+          onPress: async () => {
+            try {
+              const res = await api.post(`/masters/${masterId}/return_zip/`, {
+                inventory_item_id: item.inventory_item_id,
+                quantity: 1,
+              });
+              Alert.alert('Готово', res.data?.message || 'Материал возвращён на склад');
+              fetchData();
+            } catch (e: any) {
+              Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось вернуть');
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const totalRemaining = items.reduce((s, i) => s + (i.remaining || 0), 0);
 
@@ -165,6 +190,14 @@ const MasterZipScreen: React.FC = () => {
                   <Text style={[styles.statLabel, { color: theme.textTertiary }]}>остаток</Text>
                 </View>
               </View>
+              {item.remaining > 0 && (
+                <TouchableOpacity
+                  style={[styles.returnBtn, { backgroundColor: '#fa8c16' }]}
+                  onPress={() => returnMaterial(item)}
+                >
+                  <Text style={styles.returnBtnText}>↩ Вернуть на склад</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         />
@@ -234,6 +267,8 @@ const styles = StyleSheet.create({
   statItem: { alignItems: 'center' },
   statValue: { fontSize: 16, fontWeight: '700' },
   statLabel: { fontSize: 10 },
+  returnBtn: { marginTop: 10, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
+  returnBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 14 },
   tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, marginBottom: 8 },
   tab: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center', backgroundColor: '#f0f0f0' },
