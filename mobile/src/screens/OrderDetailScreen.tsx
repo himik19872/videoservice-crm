@@ -37,6 +37,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [updating, setUpdating] = useState(false);
   const [media, setMedia] = useState<any[]>([]);
   const [issueOrders, setIssueOrders] = useState<any[]>([]);
+  const [usedMaterials, setUsedMaterials] = useState<any[]>([]);
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
@@ -69,6 +70,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     try {
       const res = await api.get(`/orders/${id}/`);
       setOrder(res.data);
+      setUsedMaterials(res.data.used_materials || []);
       // Кешируем заявку для офлайн-режима
       await cacheSingleOrder(res.data);
     } catch (e) {
@@ -525,6 +527,29 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         ) : (
           <Text style={[styles.emptyText, { color: theme.textTertiary }]}>Материалов пока нет</Text>
         )}
+
+        {/* Использованные материалы из ЗИП */}
+        {usedMaterials.length > 0 && (
+          <>
+            <Text style={[styles.subSectionTitle, { color: theme.primary, marginTop: 12 }]}>📝 Добавлено из ЗИП</Text>
+            {usedMaterials.map((um: any) => (
+              <View key={`um-${um.id}`} style={[styles.materialCard, { backgroundColor: theme.card }]}>
+                <View style={styles.materialItemHeader}>
+                  <Text style={[styles.materialItemName, { color: theme.text }]}>{um.item_name}</Text>
+                  <View style={[styles.sourceBadge, { backgroundColor: '#f9f0ff', borderColor: '#d3adf7' }]}>
+                    <Text style={[styles.sourceBadgeText, { color: '#722ed1' }]}>🎒 ЗИП</Text>
+                  </View>
+                </View>
+                <View style={styles.materialItemRow}>
+                  <Text style={[styles.materialQty, { color: theme.textSecondary }]}>Кол-во: {um.quantity}</Text>
+                  <Text style={[styles.materialQty, { color: um.payment_type === 'paid' ? '#fa8c16' : '#52c41a' }]}>
+                    {um.payment_type_display}{um.price ? ` · ${um.price}₽` : ''}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
       </View>
 
       {/* Модалка: отчёт об использовании материалов */}
@@ -947,6 +972,7 @@ const styles = StyleSheet.create({
   // Материалы
   section: { marginBottom: 16 },
   sectionTitle: { fontWeight: '700', fontSize: 15, marginBottom: 8 },
+  subSectionTitle: { fontWeight: '600', fontSize: 13, marginBottom: 6 },
   emptyText: { fontSize: 13, fontStyle: 'italic' },
   materialCard: { borderRadius: 10, padding: 12, marginBottom: 8, elevation: 1 },
   materialCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },

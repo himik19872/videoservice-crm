@@ -414,6 +414,7 @@ class OrderSerializer(serializers.ModelSerializer):
     history = OrderHistorySerializer(many=True, read_only=True)
     media = OrderMediaSerializer(many=True, read_only=True)
     issue_orders = serializers.SerializerMethodField()
+    used_materials = serializers.SerializerMethodField()
     # Данные умного домофона из подъезда клиента
     entrance_ip = serializers.SerializerMethodField()
     entrance_access_code = serializers.SerializerMethodField()
@@ -445,7 +446,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'client_available_from', 'client_available_to',
             'assigned_at', 'scheduled_at', 'accepted_at', 'started_at', 'paused_at',
             'completed_at', 'confirmed_at', 'confirmed_by',
-            'helpers', 'history', 'media', 'issue_orders',
+            'helpers', 'history', 'media', 'issue_orders', 'used_materials',
             'entrance_ip', 'entrance_access_code', 'entrance_programming_code',
             'parent_order', 'parent_order_id', 'linked_orders', 'estimates',
             'management_company_id', 'management_company_name',
@@ -524,6 +525,24 @@ class OrderSerializer(serializers.ModelSerializer):
                 } for item in io.items.all()],
             })
         return result
+
+    def get_used_materials(self, obj):
+        """Материалы, использованные в заявке (OrderMaterial — со склада и из ЗИП)"""
+        materials = obj.ordermaterial_set.select_related('item').all()
+        return [{
+            'id': om.id,
+            'inventory_item_id': om.item_id,
+            'item_name': om.item.name,
+            'item_barcode': om.item.barcode,
+            'item_type': om.item.get_item_type_display(),
+            'quantity': om.quantity,
+            'source': om.source,
+            'source_display': '🎒 ЗИП мастера' if om.source == 'master_zip' else '🏭 Со склада',
+            'payment_type': om.payment_type,
+            'payment_type_display': 'По гарантии' if om.payment_type == 'warranty' else 'За деньги',
+            'price': str(om.price) if om.price else None,
+            'used_at': om.used_at.isoformat() if om.used_at else None,
+        } for om in materials]
 
     def _get_client_entrance(self, obj):
         """Находит подъезд клиента: сначала через client.entrance, потом через building + номер."""

@@ -95,7 +95,7 @@ class MasterViewSet(viewsets.ModelViewSet):
             'source': item.source,
             'source_display': item.get_source_display(),
             'order_id': item.issue_order.order_id,
-            'order_number': item.issue_order.order.number,
+            'order_number': item.issue_order.order.number if item.issue_order.order else 'Без заявки',
             'issued_at': item.issue_order.issued_at.isoformat(),
         } for item in items])
 
@@ -191,7 +191,7 @@ class MasterViewSet(viewsets.ModelViewSet):
         return Response([{
             'id': io.id,
             'order_id': io.order_id,
-            'order_number': io.order.number,
+            'order_number': io.order.number if io.order else 'Без заявки',
             'status': io.status,
             'status_display': io.get_status_display(),
             'issued_at': io.issued_at.isoformat(),
