@@ -739,6 +739,32 @@ const OrdersDetailPage: React.FC = () => {
         <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>Материалы ещё не выдавались</Text>
       )}
 
+      {/* Материалы, добавленные из ЗИП мастера */}
+      {(order as any).used_materials && (order as any).used_materials.length > 0 && (
+        <>
+          <Divider />
+          <Title level={5}>📝 Добавлено из ЗИП мастером</Title>
+          <Table
+            dataSource={(order as any).used_materials}
+            rowKey="id"
+            size="small"
+            pagination={false}
+            columns={[
+              { title: 'Материал', dataIndex: 'item_name', key: 'item_name' },
+              { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity' },
+              { title: 'Источник', dataIndex: 'source_display', key: 'source', render: (v: string) => <Tag color="purple">{v}</Tag> },
+              { title: 'Оплата', dataIndex: 'payment_type_display', key: 'payment', render: (v: string, r: any) => (
+                <Space>
+                  <Tag color={r.payment_type === 'paid' ? 'orange' : 'green'}>{v}</Tag>
+                  {r.price && <Text>{r.price} ₽</Text>}
+                </Space>
+              )},
+              { title: 'Дата', dataIndex: 'used_at', key: 'date', render: (v: string) => v ? new Date(v).toLocaleString('ru-RU') : '—' },
+            ]}
+          />
+        </>
+      )}
+
       {/* Модалка: выдать материалы со склада */}
       <Modal
         title="Выдать материалы"

@@ -178,6 +178,7 @@ export interface Order {
   media?: OrderMedia[];
   helpers?: { id: number; username: string; full_name: string }[];
   issue_orders?: IssueOrderInfo[];
+  used_materials?: UsedMaterial[];
   entrance_ip?: string | null;
   entrance_access_code?: string | null;
   entrance_programming_code?: string | null;
@@ -221,6 +222,21 @@ export interface IssueOrderItemInfo {
   need_return_old: boolean;
   old_item_description: string;
   old_item_returned: boolean;
+}
+
+export interface UsedMaterial {
+  id: number;
+  inventory_item_id: number;
+  item_name: string;
+  item_barcode: string;
+  item_type: string;
+  quantity: number;
+  source: string;
+  source_display: string;
+  payment_type: string;
+  payment_type_display: string;
+  price: string | null;
+  used_at: string | null;
 }
 
 export interface OrderMedia {
