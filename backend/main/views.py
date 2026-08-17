@@ -29,6 +29,7 @@ from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, 
 from .models import AsteriskVoicemail, AsteriskCallRecording
 from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem, Apartment
 from .models import MCContact, MCPayment, MCComment
+from .models import ReturnRequest, ReturnOrder, ReturnOrderItem
 from .models import AppVersion  # noqa
 from django.db.models import Q
 from .serializers import (
@@ -58,6 +59,7 @@ from .serializers import BuildingSystemSerializer
 from .serializers import MCContactSerializer, MCPaymentSerializer, MCCommentSerializer
 from .serializers import ApartmentSerializer, ApartmentDetailSerializer
 from .serializers import AuditLogSerializer
+from .serializers import ReturnRequestSerializer, ReturnOrderSerializer, ReturnOrderItemSerializer
 from .serializers import AppVersionSerializer  # noqa
 
 
@@ -6664,3 +6666,332 @@ def migration_status_view(request):
     global _migration_state
     with _migration_lock:
         return Response({**_migration_state})
+
+
+# ══════════════════════════════════════════════════════════════════
+# Запрос возврата / Ордер приёмки
+# ══════════════════════════════════════════════════════════════════
+
+class ReturnRequestViewSet(viewsets.ModelViewSet):
+    queryset = ReturnRequest.objects.all()
+    serializer_class = ReturnRequestSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['master', 'status', 'item_type']
+
+    def create(self, request, *args, **kwargs):
+        """Принимает master_id / inventory_item_id / tool_id"""
+        data = dict(request.data)
+        if data.get('master_id') is not None and data.get('master') is None:
+            data['master'] = data.pop('master_id')
+        if data.get('inventory_item_id') is not None and data.get('inventory_item') is None:
+            data['inventory_item'] = data.pop('inventory_item_id')
+        if data.get('tool_id') is not None and data.get('tool') is None:
+            data['tool'] = data.pop('tool_id')
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def perform_create(self, serializer):
+        instance = serializer.save(requested_by=self.request.user)
+        # Уведомление мастеру: склад запросил сдачу
+        item_name = instance.inventory_item.name if instance.inventory_item else (
+            instance.tool.name if instance.tool else 'позиция')
+        send_push_notification(
+            instance.master.user_id,
+            '📦 Запрос возврата со склада',
+            f'Склад запросил к сдаче: {item_name} × {instance.quantity}',
+            data={'type': 'return_requested', 'return_request_id': instance.id},
+        )
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        """Мастер отмечает позицию как сданную на склад (привозит)"""
+        rr = self.get_object()
+        if rr.status != 'pending':
+            return Response({'error': 'Только ожидающий возврат можно сдать'}, status=400)
+        rr.status = 'submitted'
+        rr.notes = request.data.get('notes', rr.notes)
+        rr.save(update_fields=['status', 'notes', 'updated_at'])
+
+        # Автосоздание/пополнение ордера на приёмку для этого мастера
+        return_order = None
+        submitted_qs = ReturnRequest.objects.filter(
+            master=rr.master, status='submitted',
+        ).exclude(return_order_items__isnull=False)
+        if submitted_qs.exists():
+            # Берём первый не завершённый ордер мастера
+            return_order = ReturnOrder.objects.filter(
+                master=rr.master, status__in=['draft', 'pending'],
+            ).order_by('-created_at').first()
+            if not return_order:
+                return_order = ReturnOrder.objects.create(
+                    master=rr.master, created_by=request.user, status='pending',
+                )
+            existing_req_ids = set(return_order.items.values_list('return_request_id', flat=True))
+            for sr in submitted_qs:
+                if sr.id in existing_req_ids:
+                    continue
+                item_name = sr.inventory_item.name if sr.inventory_item else (
+                    sr.tool.name if sr.tool else 'позиция')
+                ReturnOrderItem.objects.create(
+                    return_order=return_order,
+                    return_request=sr,
+                    item_type=sr.item_type,
+                    inventory_item=sr.inventory_item,
+                    tool=sr.tool,
+                    name=item_name,
+                    quantity=sr.quantity,
+                    quantity_accepted=0,
+                    serial_number=sr.serial_number,
+                )
+
+        # Уведомление кладовщикам: «Мастер сдал оборудование»
+        dispatchers = User.objects.filter(profile__role__in=['admin', 'dispatcher'])
+        item_name = rr.inventory_item.name if rr.inventory_item else (rr.tool.name if rr.tool else '')
+        for u in dispatchers:
+            send_push_notification(u.id, '🔔 Мастер сдал оборудование',
+                                   f'{rr.master.user.get_full_name()}: {item_name} — ожидает приёмки',
+                                   data={'type': 'return_submitted', 'return_request_id': rr.id})
+
+        return Response({'ok': True, 'status': 'submitted',
+                         'return_order_id': return_order.id if return_order else None})
+
+    @action(detail=True, methods=['post'])
+    def accept(self, request, pk=None):
+        """Кладовщик принимает позицию"""
+        rr = self.get_object()
+        if rr.status != 'submitted':
+            return Response({'error': 'Сначала мастер должен сдать позицию'}, status=400)
+        rr.status = 'accepted'
+        rr.notes = request.data.get('notes', rr.notes)
+        rr.save(update_fields=['status', 'notes', 'updated_at'])
+
+        # Возвращаем материал на склад
+        if rr.item_type == 'material' and rr.inventory_item:
+            inv_item = rr.inventory_item
+            inv_item.quantity += rr.quantity
+            if inv_item.status == 'with_master':
+                inv_item.status = 'in_stock'
+            inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
+            InventoryMovement.objects.create(
+                item=inv_item, movement_type='return_from_master',
+                quantity=rr.quantity, master=rr.master,
+                performed_by=request.user,
+                notes=f'Возврат по запросу №{rr.id}: {rr.notes or ""}'
+            )
+        elif rr.item_type == 'tool' and rr.tool:
+            tool = rr.tool
+            tool.quantity += rr.quantity
+            if tool.status == 'issued':
+                tool.status = 'in_stock'
+            tool.current_holder = None
+            tool.save(update_fields=['quantity', 'status', 'current_holder', 'updated_at'])
+            ToolMovement.objects.create(
+                tool=tool, movement_type='returned',
+                quantity=rr.quantity, master=rr.master,
+                performed_by=request.user,
+                notes=f'Возврат по запросу №{rr.id}: {rr.notes or ""}'
+            )
+
+        return Response({'ok': True, 'status': 'accepted'})
+
+
+class ReturnOrderViewSet(viewsets.ModelViewSet):
+    queryset = ReturnOrder.objects.all()
+    serializer_class = ReturnOrderSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['master', 'status']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        """Мастер подтверждает сдачу позиций ордера (привозит на склад)"""
+        ro = self.get_object()
+        if ro.status not in ['draft', 'partial']:
+            return Response({'error': 'Ордер уже в обработке'}, status=400)
+        ro.status = 'pending'
+        ro.save(update_fields=['status'])
+
+        # Уведомление кладовщикам
+        dispatchers = User.objects.filter(profile__role__in=['admin', 'dispatcher'])
+        for u in dispatchers:
+            send_push_notification(u.id, '📦 Мастер привёз оборудование',
+                                   f'{ro.master.user.get_full_name()}: ордер №{ro.id} — ожидает приёмки',
+                                   data={'type': 'return_order_pending', 'return_order_id': ro.id})
+
+        return Response({'ok': True, 'status': 'pending'})
+
+    @action(detail=True, methods=['post'])
+    def accept_item(self, request, pk=None):
+        """Кладовщик принимает/редактирует позицию в ордере"""
+        ro = self.get_object()
+        item_id = request.data.get('item_id')
+        qty_accepted = request.data.get('quantity_accepted')
+        condition = request.data.get('condition')
+        notes = request.data.get('notes')
+
+        try:
+            item = ro.items.get(id=item_id)
+        except ReturnOrderItem.DoesNotExist:
+            return Response({'error': 'Позиция не найдена'}, status=404)
+
+        if qty_accepted is not None:
+            item.quantity_accepted = min(qty_accepted, item.quantity)
+        if condition is not None:
+            item.condition = condition
+        if notes is not None:
+            item.notes = notes
+        item.save(update_fields=['quantity_accepted', 'condition', 'notes'])
+
+        return Response({'ok': True, 'item': ReturnOrderItemSerializer(item).data})
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """Кладовщик завершает приёмку ордера"""
+        ro = self.get_object()
+        if ro.status not in ['draft', 'pending']:
+            return Response({'error': 'Ордер не ожидает приёмки'}, status=400)
+
+        all_accepted = all(item.quantity_accepted > 0 for item in ro.items.all())
+        ro.status = 'completed' if all_accepted else 'partial'
+        ro.completed_at = timezone.now()
+        ro.save(update_fields=['status', 'completed_at'])
+
+        # Обработка каждой позиции: возврат на склад
+        for item in ro.items.all():
+            if item.quantity_accepted <= 0:
+                continue
+            if item.item_type == 'material' and item.inventory_item:
+                inv_item = item.inventory_item
+                inv_item.quantity += item.quantity_accepted
+                if inv_item.status == 'with_master':
+                    inv_item.status = 'in_stock'
+                inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
+                InventoryMovement.objects.create(
+                    item=inv_item, movement_type='return_from_master',
+                    quantity=item.quantity_accepted, master=ro.master,
+                    performed_by=request.user,
+                    notes=f'Приёмка по ордеру №{ro.id}: {item.notes or ""}'
+                )
+            elif item.item_type == 'tool' and item.tool:
+                tool = item.tool
+                tool.quantity += item.quantity_accepted
+                if tool.status == 'issued':
+                    tool.status = 'in_stock'
+                tool.current_holder = None
+                tool.save(update_fields=['quantity', 'status', 'current_holder', 'updated_at'])
+                ToolMovement.objects.create(
+                    tool=tool, movement_type='returned',
+                    quantity=item.quantity_accepted, master=ro.master,
+                    performed_by=request.user,
+                    notes=f'Приёмка по ордеру №{ro.id}: {item.notes or ""}'
+                )
+            # Обновляем статус связанного ReturnRequest
+            if item.return_request:
+                item.return_request.status = 'accepted'
+                item.return_request.save(update_fields=['status', 'updated_at'])
+
+        return Response({'ok': True, 'status': ro.status})
+
+
+# ══════════════════════════════════════════════════════════════════
+# Карточка мастера: полный список материалов и инструментов
+# ══════════════════════════════════════════════════════════════════
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def master_card(request, master_id):
+    """Карточка мастера: все материалы, инструменты и долги"""
+    from django.db.models import F
+    master = get_object_or_404(Master, id=master_id)
+
+    # Материалы у мастера
+    material_items = IssueOrderItem.objects.filter(
+        issue_order__master=master,
+        quantity_issued__gt=F('quantity_used'),
+    ).exclude(issue_order__status='returned').select_related('inventory_item', 'issue_order__order')
+
+    # Группируем материалы
+    mat_agg = {}
+    for item in material_items:
+        key = item.inventory_item_id
+        if key not in mat_agg:
+            mat_agg[key] = {
+                'inventory_item_id': item.inventory_item_id,
+                'name': item.inventory_item.name,
+                'barcode': item.inventory_item.barcode,
+                'item_type': item.inventory_item.get_item_type_display(),
+                'unit': item.inventory_item.unit,
+                'issued': 0, 'used': 0, 'returned': 0,
+                'issued_serials': [], 'returned_serials': [],
+                'return_types': [],
+            }
+        mat_agg[key]['issued'] += item.quantity_issued
+        mat_agg[key]['used'] += item.quantity_used
+        mat_agg[key]['returned'] += item.quantity_returned
+        if item.issued_serials:
+            mat_agg[key]['issued_serials'].extend(item.issued_serials)
+        if item.returned_serials:
+            mat_agg[key]['returned_serials'].extend(item.returned_serials)
+        if item.return_type and item.return_type != 'none':
+            mat_agg[key]['return_types'].append(item.get_return_type_display())
+
+    materials = []
+    for data in mat_agg.values():
+        data['remaining'] = max(0, data['issued'] - data['used'] - data['returned'])
+        materials.append(data)
+
+    # Инструменты у мастера
+    held_tools = Tool.objects.filter(current_holder=master)
+    tools = []
+    for t in held_tools:
+        tools.append({
+            'id': t.id,
+            'name': t.name,
+            'tool_type': t.get_tool_type_display(),
+            'serial_number': t.serial_number,
+            'model_name': t.model_name,
+            'quantity': t.quantity,
+            'status': t.get_status_display(),
+        })
+
+    # Долги по оборудованию (MasterInventoryDebt)
+    debts = MasterInventoryDebt.objects.filter(master=master, is_returned=False)
+    debts_data = []
+    for d in debts:
+        debts_data.append({
+            'id': d.id,
+            'description': d.description,
+            'quantity': d.quantity,
+            'serial_number': d.serial_number,
+            'submitted_at': d.submitted_at.isoformat() if d.submitted_at else None,
+            'submitted_by_name': d.submitted_by.get_full_name() if d.submitted_by else '',
+            'order_number': d.order.number if d.order else '',
+            'condition': d.get_condition_display(),
+        })
+
+    # Запросы возврата (активные)
+    return_requests = ReturnRequest.objects.filter(master=master, status__in=['pending', 'submitted'])
+    req_data = ReturnRequestSerializer(return_requests, many=True).data
+
+    # Ордера на приёмку (активные)
+    return_orders = ReturnOrder.objects.filter(master=master, status__in=['draft', 'pending'])
+    ord_data = ReturnOrderSerializer(return_orders, many=True).data
+
+    return Response({
+        'master': {
+            'id': master.id,
+            'name': master.user.get_full_name() or master.user.username,
+            'phone': master.phone,
+            'region': master.region.name if master.region else '',
+        },
+        'materials': materials,
+        'tools': tools,
+        'debts': debts_data,
+        'return_requests': req_data,
+        'return_orders': ord_data,
+    })

@@ -2532,3 +2532,100 @@ def update_residents_on_building_change(sender, instance, **kwargs):
             if instance.district:
                 update_fields['district'] = instance.district
             Client.objects.filter(pk=client.pk).update(**update_fields)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Запрос возврата оборудования / инструмента от склада мастеру
+# ══════════════════════════════════════════════════════════════════
+
+class ReturnRequest(models.Model):
+    """Запрос склада мастеру: «сдай такую-то позицию»"""
+    STATUS_CHOICES = [
+        ('pending', _('Ожидает сдачи')),
+        ('submitted', _('Сдано мастером')),
+        ('accepted', _('Принято кладовщиком')),
+        ('rejected', _('Отклонено')),
+    ]
+    ITEM_TYPE_CHOICES = [
+        ('material', _('Материал')),
+        ('tool', _('Инструмент')),
+    ]
+
+    master = models.ForeignKey(Master, on_delete=models.CASCADE, related_name='return_requests', verbose_name=_('Мастер'))
+    requested_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='requested_returns', verbose_name=_('Запросил (кладовщик)'))
+    item_type = models.CharField(max_length=10, choices=ITEM_TYPE_CHOICES, verbose_name=_('Тип позиции'))
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='return_requests', verbose_name=_('Материал'))
+    tool = models.ForeignKey(Tool, on_delete=models.SET_NULL, null=True, blank=True, related_name='return_requests', verbose_name=_('Инструмент'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    serial_number = models.CharField(max_length=200, blank=True, verbose_name=_('Серийный номер'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name=_('Статус'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Запрос возврата')
+        verbose_name_plural = _('Запросы возврата')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        item_name = self.inventory_item.name if self.inventory_item else (self.tool.name if self.tool else '—')
+        return f'Запрос возврата: {item_name} от {self.master} ({self.get_status_display()})'
+
+
+class ReturnOrder(models.Model):
+    """Ордер на приёмку от мастера (создаётся при приезде мастера на склад)"""
+    STATUS_CHOICES = [
+        ('draft', _('Черновик')),
+        ('pending', _('Ожидает приёмки')),
+        ('completed', _('Принято')),
+        ('partial', _('Частично принято')),
+    ]
+
+    master = models.ForeignKey(Master, on_delete=models.CASCADE, related_name='return_orders', verbose_name=_('Мастер'))
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_return_orders', verbose_name=_('Создал (кладовщик)'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name=_('Статус'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Завершено'))
+
+    class Meta:
+        verbose_name = _('Ордер на приёмку')
+        verbose_name_plural = _('Ордера на приёмку')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Ордер приёмки №{self.id}: {self.master} ({self.get_status_display()})'
+
+
+class ReturnOrderItem(models.Model):
+    """Позиция в ордере на приёмку"""
+    CONDITION_CHOICES = [
+        ('working', _('Рабочее')),
+        ('broken', _('Сломанное')),
+        ('repairable', _('Ремонтопригодное')),
+        ('missing', _('Отсутствует')),
+    ]
+    ITEM_TYPE_CHOICES = [
+        ('material', _('Материал')),
+        ('tool', _('Инструмент')),
+    ]
+
+    return_order = models.ForeignKey(ReturnOrder, on_delete=models.CASCADE, related_name='items', verbose_name=_('Ордер приёмки'))
+    return_request = models.ForeignKey(ReturnRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name='return_order_items', verbose_name=_('Запрос возврата'))
+    item_type = models.CharField(max_length=10, choices=ITEM_TYPE_CHOICES, verbose_name=_('Тип позиции'))
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='return_order_items', verbose_name=_('Материал'))
+    tool = models.ForeignKey(Tool, on_delete=models.SET_NULL, null=True, blank=True, related_name='return_order_items', verbose_name=_('Инструмент'))
+    name = models.CharField(max_length=300, verbose_name=_('Название'))
+    quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество к сдаче'))
+    quantity_accepted = models.PositiveIntegerField(default=0, verbose_name=_('Принято'))
+    serial_number = models.CharField(max_length=200, blank=True, verbose_name=_('Серийный номер'))
+    condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='broken', verbose_name=_('Состояние'))
+    notes = models.TextField(blank=True, verbose_name=_('Примечания'))
+
+    class Meta:
+        verbose_name = _('Позиция ордера приёмки')
+        verbose_name_plural = _('Позиции ордеров приёмки')
+
+    def __str__(self):
+        return f'{self.name} x{self.quantity_accepted}/{self.quantity} ({self.get_condition_display()})'

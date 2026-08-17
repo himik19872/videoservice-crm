@@ -26,7 +26,22 @@ interface ZipOrder {
   order_number: string;
   order_id: number;
   issued_at: string;
+  status: string;
+  status_display: string;
   items: ZipItem[];
+}
+
+interface ReturnRequestItem {
+  id: number;
+  item_name: string;
+  item_type: string;
+  item_type_display: string;
+  quantity: number;
+  serial_number: string;
+  status: string;
+  status_display: string;
+  notes: string;
+  created_at: string;
 }
 
 const MasterZipScreen: React.FC = () => {
@@ -34,9 +49,11 @@ const MasterZipScreen: React.FC = () => {
   const { theme } = useTheme();
   const [items, setItems] = useState<ZipItem[]>([]);
   const [orders, setOrders] = useState<ZipOrder[]>([]);
+  const [returnRequests, setReturnRequests] = useState<ReturnRequestItem[]>([]);
+  const [submittedItems, setSubmittedItems] = useState<ReturnRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<'balance' | 'orders'>('balance');
+  const [tab, setTab] = useState<'balance' | 'orders' | 'returns'>('balance');
 
   const masterId = user?.master_profile?.id;
 
@@ -46,12 +63,16 @@ const MasterZipScreen: React.FC = () => {
       return;
     }
     try {
-      const [invRes, ordersRes] = await Promise.all([
+      const [invRes, ordersRes, reqRes] = await Promise.all([
         api.get(`/masters/${masterId}/inventory/`),
         api.get(`/masters/${masterId}/zip_orders/`),
+        api.get('/return-requests/', { params: { master: masterId } }),
       ]);
       setItems(invRes.data.items || []);
       setOrders(ordersRes.data || []);
+      const allReq: ReturnRequestItem[] = reqRes.data.results || reqRes.data || [];
+      setReturnRequests(allReq.filter(r => r.status === 'pending'));
+      setSubmittedItems(allReq.filter(r => r.status === 'submitted'));
     } catch (e) {
       console.error('ZIP load error:', e);
     } finally {
@@ -82,6 +103,28 @@ const MasterZipScreen: React.FC = () => {
               fetchData();
             } catch (e: any) {
               Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось вернуть');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const submitReturn = (req: ReturnRequestItem) => {
+    Alert.alert(
+      'Сдача на склад',
+      `Подтвердить сдачу «${req.item_name}» на склад?`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: '🚚 Сдал',
+          onPress: async () => {
+            try {
+              await api.post(`/return-requests/${req.id}/submit/`);
+              Alert.alert('Готово', 'Оборудование отмечено как сданное. Кладовщик выполнит приёмку.');
+              fetchData();
+            } catch (e: any) {
+              Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
             }
           },
         },
@@ -125,6 +168,12 @@ const MasterZipScreen: React.FC = () => {
             <Text style={[styles.summaryValue, { color: '#1677ff' }]}>{orders.length}</Text>
             <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>накладных</Text>
           </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryValue, { color: returnRequests.length > 0 ? '#fa541c' : '#8c8c8c' }]}>
+              {returnRequests.length}
+            </Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>к сдаче</Text>
+          </View>
         </View>
       </View>
 
@@ -141,6 +190,14 @@ const MasterZipScreen: React.FC = () => {
           onPress={() => setTab('orders')}
         >
           <Text style={[styles.tabText, tab === 'orders' && { color: '#fff' }]}>📋 Накладные</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, tab === 'returns' && { backgroundColor: theme.primary }]}
+          onPress={() => setTab('returns')}
+        >
+          <Text style={[styles.tabText, tab === 'returns' && { color: '#fff' }]}>
+            🔄 К сдаче{returnRequests.length > 0 ? ` (${returnRequests.length})` : ''}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -201,7 +258,7 @@ const MasterZipScreen: React.FC = () => {
             </View>
           )}
         />
-      ) : (
+      ) : tab === 'orders' ? (
         <FlatList
           data={orders}
           keyExtractor={(o) => String(o.id)}
@@ -239,6 +296,59 @@ const MasterZipScreen: React.FC = () => {
                   )}
                 </View>
               ))}
+            </View>
+          )}
+        />
+      ) : (
+        <FlatList
+          data={[...returnRequests, ...submittedItems]}
+          keyExtractor={(r) => `rr-${r.id}`}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <Text style={[styles.empty, { color: theme.textTertiary }]}>
+              Нет оборудования к сдаче. Склад не запрашивал возврат.
+            </Text>
+          }
+          renderItem={({ item: req }) => (
+            <View style={[styles.returnCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={styles.returnHeader}>
+                <Text style={[styles.returnName, { color: theme.text }]} numberOfLines={2}>
+                  {req.item_type === 'tool' ? '🔧' : '📦'} {req.item_name}
+                </Text>
+                <View style={[
+                  styles.returnBadge,
+                  { backgroundColor: req.status === 'pending' ? '#fff1f0' : '#e6f7ff',
+                    borderColor: req.status === 'pending' ? '#ffa39e' : '#91d5ff' },
+                ]}>
+                  <Text style={[
+                    styles.returnBadgeText,
+                    { color: req.status === 'pending' ? '#cf1322' : '#1677ff' },
+                  ]}>
+                    {req.status === 'pending' ? '⚠️ К сдаче' : '📦 Сдано, ждёт приёмки'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.returnMeta}>
+                <Text style={[styles.returnMetaText, { color: theme.textTertiary }]}>
+                  Кол-во: {req.quantity}
+                  {req.serial_number ? ` · S/N: ${req.serial_number}` : ''}
+                </Text>
+                <Text style={[styles.returnMetaText, { color: theme.textTertiary }]}>
+                  Запрошено: {new Date(req.created_at).toLocaleDateString('ru-RU')}
+                </Text>
+                {req.notes ? (
+                  <Text style={[styles.returnNotes, { color: theme.textSecondary }]}>📝 {req.notes}</Text>
+                ) : null}
+              </View>
+              {req.status === 'pending' && (
+                <TouchableOpacity
+                  style={[styles.submitBtn, { backgroundColor: '#52c41a' }]}
+                  onPress={() => submitReturn(req)}
+                >
+                  <Text style={styles.submitBtnText}>🚚 Я сдал это на склад</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         />
@@ -285,6 +395,16 @@ const styles = StyleSheet.create({
   orderItemSource: { fontSize: 14 },
   orderItemMeta: { fontSize: 11, marginTop: 2 },
   orderItemReturn: { fontSize: 11, marginTop: 2 },
+  returnCard: { borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1 },
+  returnHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  returnName: { fontSize: 14, fontWeight: '600', flex: 1 },
+  returnBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, borderWidth: 1 },
+  returnBadgeText: { fontSize: 10, fontWeight: '700' },
+  returnMeta: { marginTop: 6 },
+  returnMetaText: { fontSize: 11, marginTop: 2 },
+  returnNotes: { fontSize: 11, marginTop: 4, fontStyle: 'italic' },
+  submitBtn: { marginTop: 10, paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
+  submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });
 
 export default MasterZipScreen;

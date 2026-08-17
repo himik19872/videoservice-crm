@@ -16,6 +16,7 @@ from .models import AsteriskSipPeer, AsteriskTrunk, AsteriskRoute, AsteriskIvr, 
 from .models import AsteriskVoicemail, AsteriskCallRecording
 from .models import BuildingEntrance, ManagementCompany, Tariff, PaymentRecord, BewardDevice, BuildingSystem
 from .models import MCContact, MCPayment, MCComment
+from .models import ReturnRequest, ReturnOrder, ReturnOrderItem
 
 
 from .models import AuditLog  # noqa
@@ -1674,3 +1675,69 @@ class AuditLogSerializer(serializers.ModelSerializer):
         if obj.user:
             return obj.user.get_full_name() or obj.user.username
         return 'Система'
+
+
+# ══════════════════════════════════════════════════════════════════
+# Запрос возврата / Ордер приёмки
+# ══════════════════════════════════════════════════════════════════
+
+class ReturnRequestSerializer(serializers.ModelSerializer):
+    master_name = serializers.SerializerMethodField()
+    requested_by_name = serializers.SerializerMethodField()
+    item_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    item_type_display = serializers.CharField(source='get_item_type_display', read_only=True)
+
+    class Meta:
+        model = ReturnRequest
+        fields = ['id', 'master', 'master_name', 'requested_by', 'requested_by_name',
+                  'item_type', 'item_type_display', 'inventory_item', 'tool',
+                  'item_name', 'quantity', 'serial_number', 'status', 'status_display',
+                  'notes', 'created_at', 'updated_at']
+
+    def get_master_name(self, obj):
+        return obj.master.user.get_full_name() or obj.master.user.username if obj.master else ''
+
+    def get_requested_by_name(self, obj):
+        if obj.requested_by:
+            return obj.requested_by.get_full_name() or obj.requested_by.username
+        return ''
+
+    def get_item_name(self, obj):
+        if obj.inventory_item:
+            return obj.inventory_item.name
+        if obj.tool:
+            return f'{obj.tool.get_tool_type_display()} {obj.tool.name}'
+        return '—'
+
+
+class ReturnOrderItemSerializer(serializers.ModelSerializer):
+    condition_display = serializers.CharField(source='get_condition_display', read_only=True)
+    item_type_display = serializers.CharField(source='get_item_type_display', read_only=True)
+
+    class Meta:
+        model = ReturnOrderItem
+        fields = ['id', 'return_order', 'return_request', 'item_type', 'item_type_display',
+                  'inventory_item', 'tool', 'name', 'quantity', 'quantity_accepted',
+                  'serial_number', 'condition', 'condition_display', 'notes']
+
+
+class ReturnOrderSerializer(serializers.ModelSerializer):
+    master_name = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    items = ReturnOrderItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ReturnOrder
+        fields = ['id', 'master', 'master_name', 'created_by', 'created_by_name',
+                  'status', 'status_display', 'notes', 'items',
+                  'created_at', 'completed_at']
+
+    def get_master_name(self, obj):
+        return obj.master.user.get_full_name() or obj.master.user.username if obj.master else ''
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return ''

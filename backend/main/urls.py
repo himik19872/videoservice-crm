@@ -20,6 +20,7 @@ from .views import (
     AuditLogViewSet,
     AppVersionViewSet,
     ToolViewSet, ToolMovementViewSet,
+    ReturnRequestViewSet, ReturnOrderViewSet,
     AsteriskSipPeerViewSet, AsteriskTrunkViewSet, AsteriskRouteViewSet,
     AsteriskIvrViewSet, AsteriskIvrOptionViewSet,
     AsteriskVoicemailViewSet, AsteriskCallRecordingViewSet,
@@ -45,6 +46,7 @@ from .asterisk_views import (
 )
 from .max_views import MaxSettingsViewSet, max_webhook_view
 from .inventory_views import issue_zip_to_master, master_inventory
+from .views import master_card  # noqa: E402
 
 router = DefaultRouter()
 router.register(r'regions', RegionViewSet)
@@ -99,6 +101,8 @@ router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 router.register(r'app-versions', AppVersionViewSet, basename='app-versions')
 router.register(r'tools', ToolViewSet, basename='tools')
 router.register(r'tool-movements', ToolMovementViewSet, basename='tool-movements')
+router.register(r'return-requests', ReturnRequestViewSet, basename='return-requests')
+router.register(r'return-orders', ReturnOrderViewSet, basename='return-orders')
 
 urlpatterns = [
     path('auth/login/', login_view, name='auth-login'),
@@ -138,6 +142,7 @@ urlpatterns = [
     path('system/migrate/status/', migration_status_view, name='migration-status'),
     path('inventory/issue-zip/', issue_zip_to_master, name='issue-zip'),
     path('masters/<int:master_id>/inventory/', master_inventory, name='master-inventory'),
+    path('masters/<int:master_id>/card/', master_card, name='master-card'),
     path('rostelecom/get-calls/', rostelecom_get_calls_view, name='rostelecom-get-calls'),
     path('rostelecom/sync-calls/', rostelecom_sync_calls_view, name='rostelecom-sync-calls'),
     path('rostelecom/status/', rostelecom_status_view, name='rostelecom-status'),

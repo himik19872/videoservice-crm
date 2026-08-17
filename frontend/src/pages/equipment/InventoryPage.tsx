@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic, Form, Input, Tooltip, Popconfirm, Switch, Divider } from 'antd';
-import { PlusOutlined, ReloadOutlined, ExportOutlined, BarcodeOutlined, ShopOutlined, FileTextOutlined, SendOutlined, ShoppingCartOutlined, EditOutlined, EnvironmentOutlined, DeleteOutlined, CheckCircleOutlined, PrinterOutlined, ScanOutlined, ToolOutlined, TeamOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, ExportOutlined, BarcodeOutlined, ShopOutlined, FileTextOutlined, SendOutlined, ShoppingCartOutlined, EditOutlined, EnvironmentOutlined, DeleteOutlined, CheckCircleOutlined, PrinterOutlined, ScanOutlined, ToolOutlined, TeamOutlined, ImportOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import BarcodeScanner from '../../components/BarcodeScanner';
@@ -29,7 +29,7 @@ const InventoryPage: React.FC = () => {
   const [editModal, setEditModal] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [tab, setTab] = useState<'items' | 'movements' | 'upd' | 'masters' | 'tools' | 'settings'>('items');
+  const [tab, setTab] = useState<'items' | 'movements' | 'upd' | 'masters' | 'tools' | 'settings' | 'returns'>('items');
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
@@ -65,6 +65,11 @@ const InventoryPage: React.FC = () => {
   const [toolForm] = Form.useForm();
   const [toolIssueModal, setToolIssueModal] = useState(false);
   const [selectedTool, setSelectedTool] = useState<any>(null);
+
+  // Приёмка (return orders)
+  const [returnOrders, setReturnOrders] = useState<any[]>([]);
+  const [returnsLoading, setReturnsLoading] = useState(false);
+
   const navigate = useNavigate();
 
   const statusColors: Record<string, string> = {
@@ -157,6 +162,15 @@ const InventoryPage: React.FC = () => {
       setToolMovements(movRes.data.results || movRes.data || []);
     } catch { message.error('Ошибка загрузки инструментов'); }
     finally { setToolsLoading(false); }
+  };
+
+  const fetchReturnOrders = async () => {
+    setReturnsLoading(true);
+    try {
+      const res = await api.get('/return-orders/', { params: { page_size: 100 } });
+      setReturnOrders(res.data.results || res.data || []);
+    } catch { message.error('Ошибка загрузки ордеров приёмки'); }
+    finally { setReturnsLoading(false); }
   };
 
   const createTool = async (values: any) => {
@@ -498,6 +512,7 @@ const InventoryPage: React.FC = () => {
         <Button type={tab === 'upd' ? 'primary' : 'default'} icon={<FileTextOutlined />} onClick={() => { setTab('upd'); fetchUpdList(); }}>УПД</Button>
         <Button type={tab === 'masters' ? 'primary' : 'default'} icon={<TeamOutlined />} onClick={() => { setTab('masters'); fetchMasters(); }}>Мастера</Button>
         <Button type={tab === 'tools' ? 'primary' : 'default'} icon={<ToolOutlined />} onClick={() => { setTab('tools'); fetchTools(); }}>Инструменты</Button>
+        <Button type={tab === 'returns' ? 'primary' : 'default'} icon={<ImportOutlined />} onClick={() => { setTab('returns'); fetchReturnOrders(); }}>Приёмка</Button>
         <Button type={tab === 'settings' ? 'primary' : 'default'} icon={<EnvironmentOutlined />} onClick={() => { setTab('settings'); fetchStorageLocations(); }}>Ячейки</Button>
         {tab === 'items' && (
           <>
@@ -509,9 +524,9 @@ const InventoryPage: React.FC = () => {
           </>
         )}
         <Button icon={<ReloadOutlined />} onClick={
-          tab === 'masters' ? fetchMasters : tab === 'tools' ? fetchTools : tab === 'settings' ? fetchStorageLocations : fetchAll
+          tab === 'masters' ? fetchMasters : tab === 'tools' ? fetchTools : tab === 'returns' ? fetchReturnOrders : tab === 'settings' ? fetchStorageLocations : fetchAll
         }>Обновить</Button>
-        {tab !== 'settings' && tab !== 'masters' && tab !== 'tools' && (
+        {tab !== 'settings' && tab !== 'masters' && tab !== 'tools' && tab !== 'returns' && (
           <>
             <Button icon={<ShopOutlined />} onClick={() => navigate('/suppliers')}>Поставщики</Button>
             <Button icon={<FileTextOutlined />} onClick={() => navigate('/supply-invoices')}>Накладные</Button>
@@ -599,11 +614,16 @@ const InventoryPage: React.FC = () => {
               { title: 'Телефон', dataIndex: 'phone', key: 'phone' },
               { title: 'Район', dataIndex: 'region_name', key: 'region', render: (_: any, r: any) => r.region?.name || '—' },
               {
-                title: '', key: 'actions', width: 120,
+                title: '', key: 'actions', width: 220,
                 render: (_: any, r: any) => (
-                  <Button type="primary" size="small" icon={<ShopOutlined />} onClick={() => openMasterInventory(r)}>
-                    Выдать / ЗИП
-                  </Button>
+                  <Space size={4}>
+                    <Button type="primary" size="small" icon={<ShopOutlined />} onClick={() => openMasterInventory(r)}>
+                      Выдать / ЗИП
+                    </Button>
+                    <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/masters/${r.id}`)}>
+                      Карточка
+                    </Button>
+                  </Space>
                 ),
               },
             ]}
@@ -735,6 +755,46 @@ const InventoryPage: React.FC = () => {
               <Button type="primary" htmlType="submit" block>Выдать</Button>
             </Form>
           </Modal>
+        </div>
+      ) : tab === 'returns' ? (
+        /* ═══════════ Вкладка: Приёмка от мастеров ═══════════ */
+        <div>
+          <Table
+            dataSource={returnOrders}
+            rowKey="id"
+            loading={returnsLoading}
+            pagination={false}
+            columns={[
+              { title: '№', dataIndex: 'id', key: 'id', width: 70 },
+              { title: 'Мастер', dataIndex: 'master_name', key: 'master', render: (_: any, r: any) => r.master_name || r.master || '—' },
+              {
+                title: 'Статус', dataIndex: 'status_display', key: 'status', width: 150,
+                render: (s: string, r: any) => {
+                  const color = r.status === 'pending' ? 'blue' : r.status === 'completed' ? 'green' : r.status === 'partial' ? 'orange' : 'default';
+                  return <Tag color={color}>{s}</Tag>;
+                },
+              },
+              { title: 'Позиций', key: 'cnt', width: 90, render: (_: any, r: any) => (r.items || []).length },
+              {
+                title: 'Принято', key: 'acc', width: 110,
+                render: (_: any, r: any) => {
+                  const items = r.items || [];
+                  const acc = items.filter((i: any) => i.quantity_accepted > 0).length;
+                  return `${acc}/${items.length}`;
+                },
+              },
+              { title: 'Создан', dataIndex: 'created_at', key: 'date', render: (v: string) => v ? new Date(v).toLocaleString('ru-RU') : '—' },
+              {
+                title: '', key: 'actions', width: 140,
+                render: (_: any, r: any) => (
+                  <Button size="small" type="primary" icon={<ImportOutlined />} onClick={() => navigate(`/masters/${r.master}`)}>
+                    Карточка мастера
+                  </Button>
+                ),
+              },
+            ]}
+            locale={{ emptyText: 'Ордеров на приёмку нет' }}
+          />
         </div>
       ) : (
         /* ═══════════ Вкладка: Настройки склада ═══════════ */
