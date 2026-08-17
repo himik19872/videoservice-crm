@@ -1505,6 +1505,24 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
             need_return_old=True,
             old_item_returned=False,
         ).update(old_item_returned=True)
+
+        # Перемещаем сданное оборудование: рабочее → на склад, остальное → в ремонт
+        if debt.item:
+            if debt.condition == 'working':
+                InventoryMovement.objects.create(
+                    item=debt.item, movement_type='return_from_master',
+                    quantity=debt.quantity, master=debt.master,
+                    performed_by=request.user,
+                    notes=f'Приёмка старого оборудования по заявке {debt.order.number if debt.order else ""} (S/N: {debt.serial_number})'
+                )
+            else:
+                # Сломанное/ремонтопригодное → в ремонт
+                InventoryMovement.objects.create(
+                    item=debt.item, movement_type='to_repair',
+                    quantity=debt.quantity, master=debt.master,
+                    performed_by=request.user,
+                    notes=f'В ремонт: старое оборудование по заявке {debt.order.number if debt.order else ""} (S/N: {debt.serial_number})'
+                )
         return Response({'ok': True, 'debt_id': debt.id, 'status': 'accepted'})
 
     @action(detail=True, methods=['post'])
@@ -3243,6 +3261,19 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             item=item, movement_type='out_to_master', quantity=qty,
             master=master, performed_by=request.user,
             notes=request.data.get('notes', f'Выдано мастеру {master}')
+        )
+        return Response(InventoryItemSerializer(item).data)
+
+    @action(detail=True, methods=['post'])
+    def return_from_repair(self, request, pk=None):
+        """Вернуть оборудование из ремонта на склад"""
+        item = self.get_object()
+        if item.status != 'repair':
+            return Response({'error': 'Оборудование не в ремонте'}, status=400)
+        InventoryMovement.objects.create(
+            item=item, movement_type='from_repair', quantity=item.quantity,
+            performed_by=request.user,
+            notes=request.data.get('notes', 'Возврат из ремонта')
         )
         return Response(InventoryItemSerializer(item).data)
 
@@ -6917,22 +6948,28 @@ class ReturnOrderViewSet(viewsets.ModelViewSet):
         ro.completed_at = timezone.now()
         ro.save(update_fields=['status', 'completed_at'])
 
-        # Обработка каждой позиции: возврат на склад
+        # Обработка каждой позиции: рабочее → склад, остальное → ремонт
         for item in ro.items.all():
             if item.quantity_accepted <= 0:
                 continue
             if item.item_type == 'material' and item.inventory_item:
                 inv_item = item.inventory_item
-                inv_item.quantity += item.quantity_accepted
-                if inv_item.status == 'with_master':
-                    inv_item.status = 'in_stock'
-                inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
-                InventoryMovement.objects.create(
-                    item=inv_item, movement_type='return_from_master',
-                    quantity=item.quantity_accepted, master=ro.master,
-                    performed_by=request.user,
-                    notes=f'Приёмка по ордеру №{ro.id}: {item.notes or ""}'
-                )
+                if item.condition == 'working':
+                    # InventoryMovement.save сам увеличит quantity и поставит in_stock
+                    InventoryMovement.objects.create(
+                        item=inv_item, movement_type='return_from_master',
+                        quantity=item.quantity_accepted, master=ro.master,
+                        performed_by=request.user,
+                        notes=f'Приёмка по ордеру №{ro.id}: {item.notes or ""}'
+                    )
+                else:
+                    # Сломанное/ремонтопригодное/отсутствует → в ремонт
+                    InventoryMovement.objects.create(
+                        item=inv_item, movement_type='to_repair',
+                        quantity=item.quantity_accepted, master=ro.master,
+                        performed_by=request.user,
+                        notes=f'В ремонт: приёмка по ордеру №{ro.id} (S/N: {item.serial_number})'
+                    )
             elif item.item_type == 'tool' and item.tool:
                 tool = item.tool
                 tool.quantity += item.quantity_accepted

@@ -1048,6 +1048,7 @@ class InventoryItem(models.Model):
         ('installed', _('Установлено')),
         ('returned', _('Возвращено')),
         ('defective', _('Брак')),
+        ('repair', _('В ремонте')),
         ('written_off', _('Списано')),
     ]
 
@@ -1100,6 +1101,8 @@ class InventoryMovement(models.Model):
         ('return_from_client', _('Возврат от клиента')),
         ('written_off', _('Списано')),
         ('defect', _('Брак')),
+        ('to_repair', _('В ремонт')),
+        ('from_repair', _('Из ремонта')),
     ]
 
     item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name='movements', verbose_name=_('Оборудование'))
@@ -1140,6 +1143,11 @@ class InventoryMovement(models.Model):
                 item.status = 'written_off'
             elif self.movement_type == 'defect':
                 item.status = 'defective'
+            elif self.movement_type == 'to_repair':
+                item.quantity += self.quantity
+                item.status = 'repair'
+            elif self.movement_type == 'from_repair':
+                item.status = 'in_stock'
             item.save(update_fields=['quantity', 'status', 'updated_at'])
         super().save(*args, **kwargs)
 

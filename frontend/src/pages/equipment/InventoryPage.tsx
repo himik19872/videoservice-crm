@@ -29,7 +29,7 @@ const InventoryPage: React.FC = () => {
   const [editModal, setEditModal] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [tab, setTab] = useState<'items' | 'movements' | 'upd' | 'masters' | 'tools' | 'settings' | 'returns'>('items');
+  const [tab, setTab] = useState<'items' | 'movements' | 'upd' | 'masters' | 'tools' | 'settings' | 'returns' | 'repair'>('items');
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
@@ -70,11 +70,15 @@ const InventoryPage: React.FC = () => {
   const [returnOrders, setReturnOrders] = useState<any[]>([]);
   const [returnsLoading, setReturnsLoading] = useState(false);
 
+  // Ремонт
+  const [repairItems, setRepairItems] = useState<InventoryItem[]>([]);
+  const [repairLoading, setRepairLoading] = useState(false);
+
   const navigate = useNavigate();
 
   const statusColors: Record<string, string> = {
     in_stock: 'green', with_master: 'blue', installed: 'purple',
-    returned: 'orange', defective: 'red', written_off: 'default',
+    returned: 'orange', defective: 'red', repair: 'geekblue', written_off: 'default',
   };
 
   useEffect(() => { fetchAll(); fetchStorageLocations(); }, []);
@@ -171,6 +175,24 @@ const InventoryPage: React.FC = () => {
       setReturnOrders(res.data.results || res.data || []);
     } catch { message.error('Ошибка загрузки ордеров приёмки'); }
     finally { setReturnsLoading(false); }
+  };
+
+  const fetchRepairItems = async () => {
+    setRepairLoading(true);
+    try {
+      const res = await api.get('/inventory/', { params: { page_size: 300, status: 'repair' } });
+      setRepairItems(res.data.results || res.data || []);
+    } catch { message.error('Ошибка загрузки оборудования в ремонте'); }
+    finally { setRepairLoading(false); }
+  };
+
+  const returnFromRepair = async (itemId: number) => {
+    try {
+      await api.post(`/inventory/${itemId}/return_from_repair/`, {});
+      message.success('Оборудование возвращено из ремонта на склад');
+      fetchRepairItems();
+      fetchAll();
+    } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
   };
 
   const createTool = async (values: any) => {
@@ -513,6 +535,7 @@ const InventoryPage: React.FC = () => {
         <Button type={tab === 'masters' ? 'primary' : 'default'} icon={<TeamOutlined />} onClick={() => { setTab('masters'); fetchMasters(); }}>Мастера</Button>
         <Button type={tab === 'tools' ? 'primary' : 'default'} icon={<ToolOutlined />} onClick={() => { setTab('tools'); fetchTools(); }}>Инструменты</Button>
         <Button type={tab === 'returns' ? 'primary' : 'default'} icon={<ImportOutlined />} onClick={() => { setTab('returns'); fetchReturnOrders(); }}>Приёмка</Button>
+        <Button type={tab === 'repair' ? 'primary' : 'default'} icon={<ToolOutlined />} onClick={() => { setTab('repair'); fetchRepairItems(); }}>Ремонт</Button>
         <Button type={tab === 'settings' ? 'primary' : 'default'} icon={<EnvironmentOutlined />} onClick={() => { setTab('settings'); fetchStorageLocations(); }}>Ячейки</Button>
         {tab === 'items' && (
           <>
@@ -524,9 +547,9 @@ const InventoryPage: React.FC = () => {
           </>
         )}
         <Button icon={<ReloadOutlined />} onClick={
-          tab === 'masters' ? fetchMasters : tab === 'tools' ? fetchTools : tab === 'returns' ? fetchReturnOrders : tab === 'settings' ? fetchStorageLocations : fetchAll
+          tab === 'masters' ? fetchMasters : tab === 'tools' ? fetchTools : tab === 'returns' ? fetchReturnOrders : tab === 'repair' ? fetchRepairItems : tab === 'settings' ? fetchStorageLocations : fetchAll
         }>Обновить</Button>
-        {tab !== 'settings' && tab !== 'masters' && tab !== 'tools' && tab !== 'returns' && (
+        {tab !== 'settings' && tab !== 'masters' && tab !== 'tools' && tab !== 'returns' && tab !== 'repair' && (
           <>
             <Button icon={<ShopOutlined />} onClick={() => navigate('/suppliers')}>Поставщики</Button>
             <Button icon={<FileTextOutlined />} onClick={() => navigate('/supply-invoices')}>Накладные</Button>
@@ -794,6 +817,48 @@ const InventoryPage: React.FC = () => {
               },
             ]}
             locale={{ emptyText: 'Ордеров на приёмку нет' }}
+          />
+        </div>
+      ) : tab === 'repair' ? (
+        /* ═══════════ Вкладка: Ремонт ═══════════ */
+        <div>
+          <Card style={{ marginBottom: 16 }}>
+            <Title level={5} style={{ margin: 0 }}><ToolOutlined /> Оборудование в ремонте</Title>
+            <Text type="secondary">Список оборудования, отправленного в ремонт. После ремонта верните на склад.</Text>
+          </Card>
+          <Table
+            dataSource={repairItems}
+            rowKey="id"
+            loading={repairLoading}
+            pagination={false}
+            columns={[
+              { title: 'Название', dataIndex: 'name', key: 'name' },
+              { title: 'Тип', dataIndex: 'item_type_display', key: 'type' },
+              { title: 'S/N', dataIndex: 'serial_number', key: 'sn', render: (v: string) => v || '—' },
+              { title: 'Кол-во', dataIndex: 'quantity', key: 'qty' },
+              {
+                title: 'Статус', dataIndex: 'status_display', key: 'status',
+                render: (s: string) => <Tag color="geekblue">🔧 {s}</Tag>,
+              },
+              {
+                title: 'Последнее движение', key: 'last', render: (_: any, r: any) => {
+                  const m = r.last_movement;
+                  return m ? `${m.notes || ''}` : '—';
+                },
+              },
+              {
+                title: '', key: 'actions', width: 220,
+                render: (_: any, r: any) => (
+                  <Space>
+                    <Button size="small" type="primary" icon={<CheckCircleOutlined />}
+                      onClick={() => returnFromRepair(r.id)}>
+                      Вернуть на склад
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+            locale={{ emptyText: 'В ремонте ничего нет' }}
           />
         </div>
       ) : (
