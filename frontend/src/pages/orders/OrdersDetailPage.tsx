@@ -35,7 +35,7 @@ const OrdersDetailPage: React.FC = () => {
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
   const [inventoryLoading, setInventoryLoading] = useState(false);
-  const [materialForm, setMaterialForm] = useState<Record<number, { qty: number; needReturn: boolean; oldDesc: string; serials: string }>>({});
+  const [materialForm, setMaterialForm] = useState<Record<number, { qty: number; needReturn: boolean; oldDesc: string; oldSerial: string; serials: string }>>({});
   const [materialSaving, setMaterialSaving] = useState(false);
   // Объединение заявок
   const [linkModalOpen, setLinkModalOpen] = useState(false);
@@ -311,6 +311,7 @@ const OrdersDetailPage: React.FC = () => {
         serials: (v.serials || '').split(/[,\n;]/).map((s: string) => s.trim()).filter(Boolean),
         need_return_old: v.needReturn,
         old_item_description: v.oldDesc,
+        old_item_serial: v.oldSerial || '',
       }));
     if (items.length === 0) { message.warning('Выберите хотя бы один материал'); return; }
 
@@ -768,6 +769,60 @@ const OrdersDetailPage: React.FC = () => {
         </>
       )}
 
+      {/* Долги мастеров по возврату старого оборудования */}
+      {(order as any).inventory_debts && (order as any).inventory_debts.length > 0 && (
+        <>
+          <Divider />
+          <Title level={5}>🔄 Возврат старого оборудования (долги мастеров)</Title>
+          <Table
+            dataSource={(order as any).inventory_debts}
+            rowKey="id"
+            size="small"
+            pagination={false}
+            columns={[
+              { title: 'Мастер', dataIndex: 'master_name', key: 'master', render: (v: string) => <Text strong>{v}</Text> },
+              { title: 'Что сдать', dataIndex: 'description', key: 'desc' },
+              { title: 'Серийник старого', dataIndex: 'serial_number', key: 'sn', render: (v: string) => v ? <Tag color="orange">{v}</Tag> : '—' },
+              { title: 'Кол-во', dataIndex: 'quantity', key: 'qty', width: 60 },
+              {
+                title: 'Статус', key: 'status', width: 220,
+                render: (_: any, d: any) => {
+                  if (d.is_returned) return <Tag color="green">✅ Принято на склад</Tag>;
+                  if (d.submitted_at) return <Tag color="cyan">📦 Сдано мастером — ожидает приёмки</Tag>;
+                  return <Tag color="red">❌ Числится за мастером</Tag>;
+                },
+              },
+              {
+                title: 'Сдал', dataIndex: 'submitted_by_name', key: 'submitted_by', width: 130,
+                render: (v: string, d: any) => d.submitted_at ? `${v || '—'} · ${new Date(d.submitted_at).toLocaleDateString('ru-RU')}` : '—',
+              },
+              {
+                title: 'Принял', dataIndex: 'accepted_by_name', key: 'accepted_by', width: 130,
+                render: (v: string, d: any) => d.is_returned ? `${v || '—'} · ${new Date(d.returned_at).toLocaleDateString('ru-RU')}` : '—',
+              },
+              {
+                title: '', key: 'actions', width: 150,
+                render: (_: any, d: any) => {
+                  if (d.is_returned) return null;
+                  if (d.submitted_at && isStaff) {
+                    return (
+                      <Button size="small" type="primary" onClick={async () => {
+                        try {
+                          await api.post(`/orders/${order.id}/accept_return/`, { debt_id: d.id });
+                          message.success('Оборудование принято на склад');
+                          fetchOrder();
+                        } catch (e: any) { message.error(e?.response?.data?.error || 'Ошибка'); }
+                      }}>✅ Принять на склад</Button>
+                    );
+                  }
+                  return <Text type="secondary">Ожидает сдачи мастером</Text>;
+                },
+              },
+            ]}
+          />
+        </>
+      )}
+
       {/* Модалка: выдать материалы со склада */}
       <Modal
         title="Выдать материалы"
@@ -845,19 +900,28 @@ const OrdersDetailPage: React.FC = () => {
                   ),
                 },
                 {
-                  title: 'Возврат старого', key: 'needReturn', width: 140,
+                  title: 'Возврат старого', key: 'needReturn', width: 210,
                   render: (_: any, r: any) => (
-                    <Space size={4}>
-                      <Checkbox
-                        checked={materialForm[r.id]?.needReturn || false}
-                        onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], needReturn: e.target.checked } }))}
-                      />
+                    <Space size={4} direction="vertical" style={{ width: '100%' }}>
+                      <Space size={4}>
+                        <Checkbox
+                          checked={materialForm[r.id]?.needReturn || false}
+                          onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], needReturn: e.target.checked } }))}
+                        />
+                        <Input
+                          size="small"
+                          placeholder="Что вернуть?"
+                          value={materialForm[r.id]?.oldDesc || ''}
+                          onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], oldDesc: e.target.value } }))}
+                          style={{ width: 110 }}
+                          disabled={!materialForm[r.id]?.needReturn}
+                        />
+                      </Space>
                       <Input
                         size="small"
-                        placeholder="Что вернуть?"
-                        value={materialForm[r.id]?.oldDesc || ''}
-                        onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], oldDesc: e.target.value } }))}
-                        style={{ width: 110 }}
+                        placeholder="Серийник старого"
+                        value={materialForm[r.id]?.oldSerial || ''}
+                        onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], oldSerial: e.target.value } }))}
                         disabled={!materialForm[r.id]?.needReturn}
                       />
                     </Space>

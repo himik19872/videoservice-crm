@@ -38,6 +38,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [media, setMedia] = useState<any[]>([]);
   const [issueOrders, setIssueOrders] = useState<any[]>([]);
   const [usedMaterials, setUsedMaterials] = useState<any[]>([]);
+  const [inventoryDebts, setInventoryDebts] = useState<any[]>([]);
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
@@ -71,6 +72,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       const res = await api.get(`/orders/${id}/`);
       setOrder(res.data);
       setUsedMaterials(res.data.used_materials || []);
+      setInventoryDebts(res.data.inventory_debts || []);
       // Кешируем заявку для офлайн-режима
       await cacheSingleOrder(res.data);
     } catch (e) {
@@ -230,6 +232,24 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     } finally {
       setUpdating(false);
     }
+  };
+
+  const submitReturn = async (debtId: number) => {
+    Alert.alert('Сдать оборудование', 'Вы сдаёте оборудование на склад. Кладовщик подтвердит приёмку.', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: '🚚 Сдать на склад',
+        onPress: async () => {
+          try {
+            await api.post(`/orders/${id}/return_item/`, { debt_id: debtId });
+            Alert.alert('Готово', 'Оборудование сдано на склад. Ожидает приёмки кладовщиком.');
+            fetchOrder();
+          } catch (e: any) {
+            Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
+          }
+        },
+      },
+    ]);
   };
 
   const takePhoto = async () => {
@@ -548,6 +568,51 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                     {um.payment_type_display}{um.price ? ` · ${um.price}₽` : ''}
                   </Text>
                 </View>
+              </View>
+            ))}
+          </>
+        )}
+
+        {/* Долги по возврату старого оборудования */}
+        {inventoryDebts.length > 0 && (
+          <>
+            <Text style={[styles.subSectionTitle, { color: theme.primary, marginTop: 12 }]}>🔄 Возврат старого оборудования</Text>
+            {inventoryDebts.map((d: any) => (
+              <View key={`debt-${d.id}`} style={[styles.materialCard, { backgroundColor: theme.card }]}>
+                <View style={styles.materialItemHeader}>
+                  <Text style={[styles.materialItemName, { color: theme.text }]}>{d.description}</Text>
+                  {d.is_returned ? (
+                    <View style={[styles.sourceBadge, { backgroundColor: '#f6ffed', borderColor: '#b7eb8f' }]}>
+                      <Text style={[styles.sourceBadgeText, { color: '#52c41a' }]}>✅ Принято</Text>
+                    </View>
+                  ) : d.submitted_at ? (
+                    <View style={[styles.sourceBadge, { backgroundColor: '#e6fffb', borderColor: '#87e8de' }]}>
+                      <Text style={[styles.sourceBadgeText, { color: '#13c2c2' }]}>📦 Сдано</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.sourceBadge, { backgroundColor: '#fff1f0', borderColor: '#ffa39e' }]}>
+                      <Text style={[styles.sourceBadgeText, { color: '#f5222d' }]}>❌ На руках</Text>
+                    </View>
+                  )}
+                </View>
+                {d.serial_number ? (
+                  <Text style={[styles.materialBarcode, { color: '#fa8c16' }]}>🔑 Серийник: {d.serial_number}</Text>
+                ) : null}
+                <Text style={[styles.materialQty, { color: theme.textSecondary, marginTop: 4 }]}>
+                  {d.is_returned
+                    ? `Принял: ${d.accepted_by_name || '—'}`
+                    : d.submitted_at
+                      ? `Сдал: ${d.submitted_by_name || '—'} · ${new Date(d.submitted_at).toLocaleDateString('ru-RU')}`
+                      : 'Оборудование числится за мастером до приёмки кладовщиком'}
+                </Text>
+                {!d.is_returned && !d.submitted_at && canAct && (
+                  <TouchableOpacity
+                    style={[styles.receiveBtn, { backgroundColor: '#fa8c16' }]}
+                    onPress={() => submitReturn(d.id)}
+                  >
+                    <Text style={styles.receiveBtnText}>🚚 Сдать на склад</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </>

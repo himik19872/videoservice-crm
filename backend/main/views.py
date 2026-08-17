@@ -1410,16 +1410,44 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
 
     @action(detail=True, methods=['post'])
     def return_item(self, request, pk=None):
-        """Мастер возвращает сломанное/старое оборудование на склад"""
-        debt = MasterInventoryDebt.objects.filter(order_id=pk, is_returned=False).first()
+        """Мастер сдаёт старое/сломанное оборудование на склад (ожидает приёмки кладовщиком)"""
+        debt_id = request.data.get('debt_id')
+        debt = None
+        if debt_id:
+            debt = MasterInventoryDebt.objects.filter(id=debt_id, is_returned=False).first()
+        if not debt:
+            debt = MasterInventoryDebt.objects.filter(order_id=pk, is_returned=False).first()
         if not debt:
             return Response({'error': 'Нет невозвращённого оборудования по этой заявке'}, status=404)
+        debt.submitted_at = timezone.now()
+        debt.submitted_by = request.user
+        debt.condition = request.data.get('condition', 'broken')
+        debt.notes = request.data.get('notes', debt.notes or '')
+        debt.save()
+        return Response({'ok': True, 'debt_id': debt.id, 'status': 'submitted'})
+
+    @action(detail=True, methods=['post'])
+    def accept_return(self, request, pk=None):
+        """Кладовщик принимает сданное мастером оборудование — долг закрывается"""
+        debt_id = request.data.get('debt_id')
+        debt = MasterInventoryDebt.objects.filter(id=debt_id, is_returned=False).first() if debt_id else None
+        if not debt:
+            debt = MasterInventoryDebt.objects.filter(order_id=pk, is_returned=False).first()
+        if not debt:
+            return Response({'error': 'Нет оборудования к приёмке по этой заявке'}, status=404)
         debt.is_returned = True
         debt.returned_at = timezone.now()
         debt.accepted_by = request.user
-        debt.condition = request.data.get('condition', 'broken')
+        debt.condition = request.data.get('condition', debt.condition or 'broken')
         debt.save()
-        return Response({'ok': True})
+        # Отмечаем в IssueOrderItem, что старое возвращено
+        IssueOrderItem.objects.filter(
+            issue_order__order_id=pk,
+            inventory_item=debt.item,
+            need_return_old=True,
+            old_item_returned=False,
+        ).update(old_item_returned=True)
+        return Response({'ok': True, 'debt_id': debt.id, 'status': 'accepted'})
 
     @action(detail=True, methods=['post'])
     def add_material(self, request, pk=None):
@@ -3346,8 +3374,20 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
                 issued_serials=serials,
                 need_return_old=item_data.get('need_return_old', False),
                 old_item_description=item_data.get('old_item_description', ''),
+                old_item_serial=item_data.get('old_item_serial', ''),
                 notes=item_data.get('notes', ''),
             )
+            # Если требуется возврат старого оборудования — создаём долг за мастером
+            if item_data.get('need_return_old', False) and order and master:
+                MasterInventoryDebt.objects.create(
+                    master=master,
+                    order=order,
+                    item=inv_item,
+                    description=item_data.get('old_item_description', '') or inv_item.name,
+                    serial_number=item_data.get('old_item_serial', ''),
+                    quantity=item_data.get('quantity_issued', 1),
+                    notes=f'Требуется возврат старого оборудования по заявке #{order.number}',
+                )
             if source == 'warehouse':
                 InventoryMovement.objects.create(item=inv_item, movement_type='out_to_master', quantity=qty, master=master, order=order, performed_by=request.user, notes=f'Ордер №{issue_order.id}')
             # Для master_zip — движение не создаётся, т.к. материал уже у мастера
@@ -3553,7 +3593,7 @@ class MasterSalaryViewSet(viewsets.ModelViewSet):
             inv_qs = inv_qs.filter(master_id=master_id, is_returned=False)
         return Response({
             'cash_debts': [{'id': d.id, 'master': str(d.master), 'order': d.order.number, 'amount': float(d.amount), 'is_paid': d.is_paid_to_office} for d in cash_qs],
-            'inventory_debts': [{'id': d.id, 'master': str(d.master), 'order': d.order.number, 'description': d.description, 'is_returned': d.is_returned, 'condition': d.condition} for d in inv_qs],
+            'inventory_debts': [{'id': d.id, 'master': str(d.master), 'order': d.order.number, 'description': d.description, 'serial_number': d.serial_number, 'is_returned': d.is_returned, 'submitted_at': d.submitted_at.isoformat() if d.submitted_at else None, 'condition': d.condition} for d in inv_qs],
         })
 
 

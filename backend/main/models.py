@@ -1490,8 +1490,11 @@ class MasterInventoryDebt(models.Model):
     item = models.ForeignKey(InventoryItem, on_delete=models.SET_NULL, null=True, related_name='master_debts', verbose_name=_('Позиция склада'))
     description = models.CharField(max_length=300, verbose_name=_('Что нужно сдать'))
     quantity = models.PositiveIntegerField(default=1, verbose_name=_('Количество'))
+    serial_number = models.CharField(max_length=200, blank=True, verbose_name=_('Серийный номер старого'))
     is_returned = models.BooleanField(default=False, verbose_name=_('Возвращено'))
     returned_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата возврата'))
+    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Сдано мастером (дата)'))
+    submitted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='submitted_returns', verbose_name=_('Сдал (мастер)'))
     condition = models.CharField(max_length=20, choices=[('working', _('Рабочее')), ('broken', _('Сломанное')), ('repairable', _('Ремонтопригодное'))], default='broken', verbose_name=_('Состояние'))
     accepted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='accepted_returns', verbose_name=_('Принял'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
@@ -2064,6 +2067,7 @@ class IssueOrderItem(models.Model):
     quantity_returned = models.PositiveIntegerField(default=0, verbose_name=_('Возвращено'))
     need_return_old = models.BooleanField(default=False, verbose_name=_('Требуется возврат старого'))
     old_item_description = models.CharField(max_length=300, blank=True, verbose_name=_('Что нужно вернуть (старое)'))
+    old_item_serial = models.CharField(max_length=200, blank=True, verbose_name=_('Серийный номер старого (обязателен к возврату)'))
     old_item_returned = models.BooleanField(default=False, verbose_name=_('Старое возвращено'))
     # Тип возврата/утилизации оборудования
     return_type = models.CharField(max_length=15, choices=[

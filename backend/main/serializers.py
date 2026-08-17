@@ -415,6 +415,7 @@ class OrderSerializer(serializers.ModelSerializer):
     media = OrderMediaSerializer(many=True, read_only=True)
     issue_orders = serializers.SerializerMethodField()
     used_materials = serializers.SerializerMethodField()
+    inventory_debts = serializers.SerializerMethodField()
     # Данные умного домофона из подъезда клиента
     entrance_ip = serializers.SerializerMethodField()
     entrance_access_code = serializers.SerializerMethodField()
@@ -446,7 +447,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'client_available_from', 'client_available_to',
             'assigned_at', 'scheduled_at', 'accepted_at', 'started_at', 'paused_at',
             'completed_at', 'confirmed_at', 'confirmed_by',
-            'helpers', 'history', 'media', 'issue_orders', 'used_materials',
+            'helpers', 'history', 'media', 'issue_orders', 'used_materials', 'inventory_debts',
             'entrance_ip', 'entrance_access_code', 'entrance_programming_code',
             'parent_order', 'parent_order_id', 'linked_orders', 'estimates',
             'management_company_id', 'management_company_name',
@@ -527,6 +528,25 @@ class OrderSerializer(serializers.ModelSerializer):
                 } for item in io.items.all()],
             })
         return result
+
+    def get_inventory_debts(self, obj):
+        """Долги мастера по оборудованию (старое/сломанное к возврату)"""
+        debts = obj.inventory_debts.select_related('master__user').all()
+        return [{
+            'id': d.id,
+            'master_id': d.master_id,
+            'master_name': str(d.master) if d.master else '',
+            'description': d.description,
+            'serial_number': d.serial_number,
+            'quantity': d.quantity,
+            'is_returned': d.is_returned,
+            'returned_at': d.returned_at.isoformat() if d.returned_at else None,
+            'submitted_at': d.submitted_at.isoformat() if d.submitted_at else None,
+            'submitted_by_name': d.submitted_by.get_full_name() or d.submitted_by.username if d.submitted_by else '',
+            'accepted_by_name': d.accepted_by.get_full_name() or d.accepted_by.username if d.accepted_by else '',
+            'condition': d.condition,
+            'notes': d.notes,
+        } for d in debts]
 
     def get_used_materials(self, obj):
         """Материалы, использованные в заявке (OrderMaterial — со склада и из ЗИП)"""
