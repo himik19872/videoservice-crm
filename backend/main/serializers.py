@@ -519,6 +519,8 @@ class OrderSerializer(serializers.ModelSerializer):
                     'quantity_used': item.quantity_used,
                     'quantity_returned': item.quantity_returned,
                     'remaining': item.remaining,
+                    'issued_serials': item.issued_serials or [],
+                    'returned_serials': item.returned_serials or [],
                     'need_return_old': item.need_return_old,
                     'old_item_description': item.old_item_description,
                     'old_item_returned': item.old_item_returned,

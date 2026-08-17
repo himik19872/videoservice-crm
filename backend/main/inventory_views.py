@@ -108,6 +108,8 @@ def master_inventory(request, master_id):
             'quantity_used': ioi.quantity_used,
             'quantity_returned': ioi.quantity_returned,
             'remaining': ioi.remaining,
+            'issued_serials': ioi.issued_serials or [],
+            'returned_serials': ioi.returned_serials or [],
             'order_id': ioi.issue_order.order_id,
             'order_number': ioi.issue_order.order.number if ioi.issue_order.order else 'ЗИП (без заявки)',
             'issued_at': ioi.issue_order.issued_at.isoformat(),

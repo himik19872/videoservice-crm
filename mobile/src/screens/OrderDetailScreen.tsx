@@ -49,7 +49,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Состояние для модалки «Отчитаться об использовании материалов»
   const [usageModal, setUsageModal] = useState<any>(null); // io
-  const [usageItems, setUsageItems] = useState<Record<number, { used: number; returned: number; returnType: string; oldReturned: boolean }>>({});
+  const [usageItems, setUsageItems] = useState<Record<number, { used: number; returned: number; returnType: string; oldReturned: boolean; serials: string }>>({});
 
   // Состояние для модалки «Добавить материал из ЗИП»
   const [zipModal, setZipModal] = useState(false);
@@ -154,6 +154,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         returned: item.quantity_returned || 0,
         returnType: item.return_type || 'working',
         oldReturned: item.old_item_returned || false,
+        serials: '',
       };
     });
     setUsageItems(init);
@@ -170,6 +171,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         quantity_returned: v.returned,
         return_type: v.returnType,
         old_item_returned: v.oldReturned,
+        returned_serials: (v.serials || '').split(/[,\n;]/).map((s: string) => s.trim()).filter(Boolean),
       }));
       await api.post(`/issue-orders/${usageModal.id}/report_usage/`, { items });
       Alert.alert('Готово', 'Отчёт об использовании отправлен');
@@ -621,6 +623,21 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                           ))}
                         </View>
                       </View>
+                      {/* Серийные номера возвращаемого оборудования */}
+                      {u.returned > 0 && (
+                        <View style={styles.usageReturnRow}>
+                          <Text style={[styles.usageLabel, { color: theme.textSecondary }]}>
+                            Серийные номера (через запятую):
+                          </Text>
+                          <TextInput
+                            style={[styles.serialInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.card }]}
+                            value={u.serials}
+                            onChangeText={(text) => setUsageItems(prev => ({ ...prev, [item.inventory_item_id]: { ...prev[item.inventory_item_id], serials: text } }))}
+                            placeholder="SN-001, SN-002..."
+                            placeholderTextColor={theme.textTertiary}
+                          />
+                        </View>
+                      )}
                     </View>
                   );
                 })}
@@ -1012,6 +1029,7 @@ const styles = StyleSheet.create({
   usageReturnTypes: { flexDirection: 'row', gap: 8, marginTop: 6, flexWrap: 'wrap' },
   usageReturnType: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1 },
   usageReturnTypeText: { fontSize: 11, fontWeight: '600' },
+  serialInput: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, marginTop: 6 },
   usageModalButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 14 },
   usageCancelBtn: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 8, borderWidth: 1 },
   usageSubmitBtn: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 8 },

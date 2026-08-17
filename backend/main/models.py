@@ -2072,6 +2072,9 @@ class IssueOrderItem(models.Model):
         ('repair', _('В ремонт')),
         ('defect', _('Брак/списание')),
     ], default='none', verbose_name=_('Куда сдать оборудование'))
+    # Серийные номера: выданные и возвращённые (для позиций с посерийным учётом)
+    issued_serials = models.JSONField(default=list, blank=True, verbose_name=_('Серийные номера (выдано)'))
+    returned_serials = models.JSONField(default=list, blank=True, verbose_name=_('Серийные номера (возвращено)'))
     notes = models.CharField(max_length=300, blank=True, verbose_name=_('Примечание'))
 
     class Meta:

@@ -94,6 +94,8 @@ class MasterViewSet(viewsets.ModelViewSet):
             'quantity_remaining': item.remaining,
             'source': item.source,
             'source_display': item.get_source_display(),
+            'issued_serials': item.issued_serials or [],
+            'returned_serials': item.returned_serials or [],
             'order_id': item.issue_order.order_id,
             'order_number': item.issue_order.order.number if item.issue_order.order else 'Без заявки',
             'issued_at': item.issue_order.issued_at.isoformat(),
@@ -207,6 +209,8 @@ class MasterViewSet(viewsets.ModelViewSet):
                 'quantity_returned': item.quantity_returned,
                 'remaining': item.remaining,
                 'return_type': item.return_type,
+                'issued_serials': item.issued_serials or [],
+                'returned_serials': item.returned_serials or [],
                 'need_return_old': item.need_return_old,
                 'old_item_description': item.old_item_description,
                 'old_item_returned': item.old_item_returned,
@@ -3332,9 +3336,14 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
             inv_item = get_object_or_404(InventoryItem, id=item_data['inventory_item_id'])
             qty = item_data.get('quantity_issued', 1)
             source = item_data.get('source', 'warehouse')
+            serials = item_data.get('serials', [])
+            # Валидация: количество серийников не превышает количество
+            if serials:
+                serials = serials[:qty]
             IssueOrderItem.objects.create(
                 issue_order=issue_order, inventory_item=inv_item,
                 source=source, quantity_issued=qty,
+                issued_serials=serials,
                 need_return_old=item_data.get('need_return_old', False),
                 old_item_description=item_data.get('old_item_description', ''),
                 notes=item_data.get('notes', ''),
@@ -3357,7 +3366,7 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def report_usage(self, request, pk=None):
-        """Сотрудник отчитывается: сколько использовал, сколько вернул и куда"""
+        """Сотрудник отчитывается: сколько использовал, сколько вернул и куда (с серийными номерами)"""
         issue_order = self.get_object()
         items_data = {it['item_id']: it for it in request.data.get('items', [])}
         for item in issue_order.items.all():
@@ -3368,24 +3377,29 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
                 item.old_item_returned = d.get('old_item_returned', item.old_item_returned)
                 if 'return_type' in d:
                     item.return_type = d['return_type']
+                # Серийные номера возвращённого оборудования
+                returned_serials = d.get('returned_serials', [])
+                if returned_serials:
+                    item.returned_serials = returned_serials
                 item.save()
                 if item.quantity_returned > 0:
                     inv_item = item.inventory_item
+                    serials_note = f', серийники: {", ".join(returned_serials)}' if returned_serials else ''
                     # Определяем тип движения по return_type
                     if item.return_type == 'repair':
                         inv_item.status = 'defective'  # в ремонт → статус брак/ремонт
                         inv_item.save(update_fields=['status', 'updated_at'])
-                        InventoryMovement.objects.create(item=inv_item, movement_type='defect', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'В ремонт по ордеру №{issue_order.id}')
+                        InventoryMovement.objects.create(item=inv_item, movement_type='defect', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'В ремонт по ордеру №{issue_order.id}{serials_note}')
                     elif item.return_type == 'defect':
                         inv_item.status = 'defective'
                         inv_item.save(update_fields=['status', 'updated_at'])
-                        InventoryMovement.objects.create(item=inv_item, movement_type='defect', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'Брак по ордеру №{issue_order.id}')
+                        InventoryMovement.objects.create(item=inv_item, movement_type='defect', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'Брак по ордеру №{issue_order.id}{serials_note}')
                     else:
                         # Рабочее или по умолчанию — возврат на склад
                         inv_item.quantity += item.quantity_returned
                         inv_item.status = 'in_stock'
                         inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
-                        InventoryMovement.objects.create(item=inv_item, movement_type='return_from_master', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'Возврат по ордеру №{issue_order.id}')
+                        InventoryMovement.objects.create(item=inv_item, movement_type='return_from_master', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'Возврат по ордеру №{issue_order.id}{serials_note}')
         from django.db.models import F as _F
         all_used = not issue_order.items.filter(quantity_issued__gt=_F('quantity_used') + _F('quantity_returned')).exists()
         issue_order.status = 'fully_used' if all_used else 'partially_used'

@@ -35,7 +35,7 @@ const OrdersDetailPage: React.FC = () => {
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
   const [inventorySearch, setInventorySearch] = useState('');
   const [inventoryLoading, setInventoryLoading] = useState(false);
-  const [materialForm, setMaterialForm] = useState<Record<number, { qty: number; needReturn: boolean; oldDesc: string }>>({});
+  const [materialForm, setMaterialForm] = useState<Record<number, { qty: number; needReturn: boolean; oldDesc: string; serials: string }>>({});
   const [materialSaving, setMaterialSaving] = useState(false);
   // Объединение заявок
   const [linkModalOpen, setLinkModalOpen] = useState(false);
@@ -308,6 +308,7 @@ const OrdersDetailPage: React.FC = () => {
         inventory_item_id: parseInt(invId),
         quantity_issued: v.qty,
         source: v.source || 'warehouse',
+        serials: (v.serials || '').split(/[,\n;]/).map((s: string) => s.trim()).filter(Boolean),
         need_return_old: v.needReturn,
         old_item_description: v.oldDesc,
       }));
@@ -726,6 +727,8 @@ const OrdersDetailPage: React.FC = () => {
               columns={[
                 { title: 'Материал', dataIndex: 'item_name', key: 'item_name' },
                 { title: 'Штрихкод', dataIndex: 'barcode', key: 'barcode', render: (v: string) => v || '—' },
+                { title: 'Серийники (выдано)', dataIndex: 'issued_serials', key: 'serials_out', render: (v: string[]) => v && v.length > 0 ? v.map(s => <Tag key={s} color="blue">{s}</Tag>) : '—' },
+                { title: 'Серийники (возврат)', dataIndex: 'returned_serials', key: 'serials_in', render: (v: string[]) => v && v.length > 0 ? v.map(s => <Tag key={s} color="orange">{s}</Tag>) : '—' },
                 { title: 'Выдано', dataIndex: 'quantity_issued', key: 'quantity_issued' },
                 { title: 'Исп.', dataIndex: 'quantity_used', key: 'quantity_used' },
                 { title: 'Возвр.', dataIndex: 'quantity_returned', key: 'quantity_returned' },
@@ -826,6 +829,18 @@ const OrdersDetailPage: React.FC = () => {
                       onChange={(v) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], qty: v || 0 } }))}
                       style={{ width: 60 }}
                       size="small"
+                    />
+                  ),
+                },
+                {
+                  title: 'Серийные номера', key: 'serials', width: 180,
+                  render: (_: any, r: any) => (
+                    <Input
+                      size="small"
+                      placeholder="SN1, SN2..."
+                      value={materialForm[r.id]?.serials || ''}
+                      onChange={(e) => setMaterialForm(prev => ({ ...prev, [r.id]: { ...prev[r.id], serials: e.target.value } }))}
+                      disabled={(materialForm[r.id]?.qty || 0) === 0}
                     />
                   ),
                 },
