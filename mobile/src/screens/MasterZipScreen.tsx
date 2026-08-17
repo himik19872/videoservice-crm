@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Alert,
+  ActivityIndicator, RefreshControl, Alert, Modal, TextInput,
 } from 'react-native';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,6 +44,17 @@ interface ReturnRequestItem {
   created_at: string;
 }
 
+interface MasterDebt {
+  id: number;
+  type: string;
+  description: string;
+  serial_number: string;
+  quantity: number;
+  is_returned: boolean;
+  submitted_at: string | null;
+  order_number: string;
+}
+
 const MasterZipScreen: React.FC = () => {
   const { user } = useAuth();
   const { theme } = useTheme();
@@ -51,9 +62,14 @@ const MasterZipScreen: React.FC = () => {
   const [orders, setOrders] = useState<ZipOrder[]>([]);
   const [returnRequests, setReturnRequests] = useState<ReturnRequestItem[]>([]);
   const [submittedItems, setSubmittedItems] = useState<ReturnRequestItem[]>([]);
+  const [masterDebts, setMasterDebts] = useState<MasterDebt[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<'balance' | 'orders' | 'returns'>('balance');
+
+  // Модалка ввода серийника при сдаче долга
+  const [serialModal, setSerialModal] = useState<{ debtId: number; desc: string } | null>(null);
+  const [serialInput, setSerialInput] = useState('');
 
   const masterId = user?.master_profile?.id;
 
@@ -70,6 +86,7 @@ const MasterZipScreen: React.FC = () => {
       ]);
       setItems(invRes.data.items || []);
       setOrders(ordersRes.data || []);
+      setMasterDebts(invRes.data.debts || []);
       const allReq: ReturnRequestItem[] = reqRes.data.results || reqRes.data || [];
       setReturnRequests(allReq.filter(r => r.status === 'pending'));
       setSubmittedItems(allReq.filter(r => r.status === 'submitted'));
@@ -132,7 +149,29 @@ const MasterZipScreen: React.FC = () => {
     );
   };
 
+  const submitDebtReturn = (debt: MasterDebt) => {
+    setSerialModal({ debtId: debt.id, desc: debt.description });
+    setSerialInput(debt.serial_number || '');
+  };
+
+  const confirmDebtReturn = async () => {
+    if (!serialModal) return;
+    try {
+      await api.post(`/masters/${masterId}/submit_debt/`, {
+        debt_id: serialModal.debtId,
+        serial_number: serialInput.trim(),
+      });
+      Alert.alert('Готово', 'Оборудование сдано на склад. Ожидает приёмки кладовщиком.');
+      setSerialModal(null);
+      setSerialInput('');
+      fetchData();
+    } catch (e: any) {
+      Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
+    }
+  };
+
   const totalRemaining = items.reduce((s, i) => s + (i.remaining || 0), 0);
+  const totalToReturn = returnRequests.length + masterDebts.filter(d => !d.submitted_at).length;
 
   if (loading) {
     return (
@@ -169,8 +208,8 @@ const MasterZipScreen: React.FC = () => {
             <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>накладных</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={[styles.summaryValue, { color: returnRequests.length > 0 ? '#fa541c' : '#8c8c8c' }]}>
-              {returnRequests.length}
+            <Text style={[styles.summaryValue, { color: totalToReturn > 0 ? '#fa541c' : '#8c8c8c' }]}>
+              {totalToReturn}
             </Text>
             <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>к сдаче</Text>
           </View>
@@ -196,7 +235,7 @@ const MasterZipScreen: React.FC = () => {
           onPress={() => setTab('returns')}
         >
           <Text style={[styles.tabText, tab === 'returns' && { color: '#fff' }]}>
-            🔄 К сдаче{returnRequests.length > 0 ? ` (${returnRequests.length})` : ''}
+            🔄 К сдаче{totalToReturn > 0 ? ` (${totalToReturn})` : ''}
           </Text>
         </TouchableOpacity>
       </View>
@@ -301,7 +340,7 @@ const MasterZipScreen: React.FC = () => {
         />
       ) : (
         <FlatList
-          data={[...returnRequests, ...submittedItems]}
+          data={[...returnRequests, ...submittedItems, ...masterDebts.map(d => ({ ...d, _isDebt: true }))]}
           keyExtractor={(r) => `rr-${r.id}`}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={styles.list}
@@ -310,7 +349,41 @@ const MasterZipScreen: React.FC = () => {
               Нет оборудования к сдаче. Склад не запрашивал возврат.
             </Text>
           }
-          renderItem={({ item: req }) => (
+          renderItem={({ item }) => {
+            const req: any = item;
+            const isDebt = !!req._isDebt;
+
+            if (isDebt) {
+              return (
+                <View style={[styles.returnCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                  <View style={styles.returnHeader}>
+                    <Text style={[styles.returnName, { color: theme.text }]} numberOfLines={2}>
+                      📦 {req.description}
+                    </Text>
+                    <View style={[styles.returnBadge, { backgroundColor: '#fff1f0', borderColor: '#ffa39e' }]}>
+                      <Text style={[styles.returnBadgeText, { color: '#cf1322' }]}>⚠️ К сдаче (старое)</Text>
+                    </View>
+                  </View>
+                  <View style={styles.returnMeta}>
+                    <Text style={[styles.returnMetaText, { color: theme.textTertiary }]}>
+                      Кол-во: {req.quantity}
+                      {req.serial_number ? ` · S/N: ${req.serial_number}` : ''}
+                    </Text>
+                    <Text style={[styles.returnMetaText, { color: theme.textTertiary }]}>
+                      Заявка: {req.order_number || '—'} · Требуется возврат
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.submitBtn, { backgroundColor: '#52c41a' }]}
+                    onPress={() => submitDebtReturn(req)}
+                  >
+                    <Text style={styles.submitBtnText}>🚚 Я сдал это на склад</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            }
+
+            return (
             <View style={[styles.returnCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={styles.returnHeader}>
                 <Text style={[styles.returnName, { color: theme.text }]} numberOfLines={2}>
@@ -349,10 +422,46 @@ const MasterZipScreen: React.FC = () => {
                   <Text style={styles.submitBtnText}>🚚 Я сдал это на склад</Text>
                 </TouchableOpacity>
               )}
-            </View>
-          )}
+            </View>);
+          }}
         />
       )}
+
+      {/* Модалка: ввод серийного номера при сдаче долга */}
+      <Modal
+        visible={!!serialModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setSerialModal(null)}
+      >
+        <View style={[styles.serialOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+          <View style={[styles.serialModal, { backgroundColor: theme.card }]}>
+            <Text style={[styles.serialTitle, { color: theme.text }]}>🔑 Сдача старого оборудования</Text>
+            <Text style={[styles.serialSubtitle, { color: theme.textSecondary }]}>
+              {serialModal?.desc}
+            </Text>
+            <Text style={[styles.serialLabel, { color: theme.textSecondary }]}>
+              Серийный номер снятого оборудования:
+            </Text>
+            <TextInput
+              style={[styles.serialInputField, { color: theme.text, borderColor: theme.border, backgroundColor: theme.card }]}
+              value={serialInput}
+              onChangeText={setSerialInput}
+              placeholder="Впишите серийный номер"
+              placeholderTextColor={theme.textTertiary}
+              autoCapitalize="characters"
+            />
+            <View style={styles.serialButtons}>
+              <TouchableOpacity style={[styles.serialCancelBtn, { borderColor: theme.border }]} onPress={() => setSerialModal(null)}>
+                <Text style={{ color: theme.textSecondary }}>Отмена</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.serialOkBtn, { backgroundColor: '#fa8c16' }]} onPress={confirmDebtReturn}>
+                <Text style={styles.serialOkBtnText}>🚚 Сдать на склад</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -405,6 +514,16 @@ const styles = StyleSheet.create({
   returnNotes: { fontSize: 11, marginTop: 4, fontStyle: 'italic' },
   submitBtn: { marginTop: 10, paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
   submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  serialOverlay: { flex: 1, justifyContent: 'center', padding: 24 },
+  serialModal: { borderRadius: 12, padding: 20 },
+  serialTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  serialSubtitle: { fontSize: 13, marginBottom: 12 },
+  serialLabel: { fontSize: 12, marginBottom: 6 },
+  serialInputField: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, marginBottom: 16 },
+  serialButtons: { flexDirection: 'row', gap: 10 },
+  serialCancelBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1 },
+  serialOkBtn: { flex: 2, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  serialOkBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });
 
 export default MasterZipScreen;

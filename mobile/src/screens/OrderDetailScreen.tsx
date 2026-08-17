@@ -58,6 +58,10 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [zipLoading, setZipLoading] = useState(false);
   const [zipQty, setZipQty] = useState<Record<number, number>>({});
   const [zipPaymentType, setZipPaymentType] = useState<'warranty' | 'paid'>('warranty');
+
+  // Состояние для модалки ввода серийника при сдаче старого оборудования
+  const [serialModal, setSerialModal] = useState<{ debtId: number; desc: string; oldSerial: string } | null>(null);
+  const [serialInput, setSerialInput] = useState('');
   const [zipPrice, setZipPrice] = useState('');
 
   useEffect(() => {
@@ -234,22 +238,25 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
-  const submitReturn = async (debtId: number) => {
-    Alert.alert('Сдать оборудование', 'Вы сдаёте оборудование на склад. Кладовщик подтвердит приёмку.', [
-      { text: 'Отмена', style: 'cancel' },
-      {
-        text: '🚚 Сдать на склад',
-        onPress: async () => {
-          try {
-            await api.post(`/orders/${id}/return_item/`, { debt_id: debtId });
-            Alert.alert('Готово', 'Оборудование сдано на склад. Ожидает приёмки кладовщиком.');
-            fetchOrder();
-          } catch (e: any) {
-            Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
-          }
-        },
-      },
-    ]);
+  const submitReturn = (debt: any) => {
+    setSerialModal({ debtId: debt.id, desc: debt.description, oldSerial: debt.serial_number || '' });
+    setSerialInput(debt.serial_number || '');
+  };
+
+  const confirmReturnSerial = async () => {
+    if (!serialModal) return;
+    try {
+      await api.post(`/orders/${id}/return_item/`, {
+        debt_id: serialModal.debtId,
+        serial_number: serialInput.trim(),
+      });
+      Alert.alert('Готово', 'Оборудование сдано на склад. Ожидает приёмки кладовщиком.');
+      setSerialModal(null);
+      setSerialInput('');
+      fetchOrder();
+    } catch (e: any) {
+      Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось');
+    }
   };
 
   const takePhoto = async () => {
@@ -605,10 +612,10 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                       ? `Сдал: ${d.submitted_by_name || '—'} · ${new Date(d.submitted_at).toLocaleDateString('ru-RU')}`
                       : 'Оборудование числится за мастером до приёмки кладовщиком'}
                 </Text>
-                {!d.is_returned && !d.submitted_at && canAct && (
+                {!d.is_returned && !d.submitted_at && (
                   <TouchableOpacity
                     style={[styles.receiveBtn, { backgroundColor: '#fa8c16' }]}
-                    onPress={() => submitReturn(d.id)}
+                    onPress={() => submitReturn(d)}
                   >
                     <Text style={styles.receiveBtnText}>🚚 Сдать на склад</Text>
                   </TouchableOpacity>
@@ -618,6 +625,44 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </>
         )}
       </View>
+
+      {/* Модалка: ввод серийника снимаемого оборудования */}
+      {serialModal && (
+        <Modal
+          visible={!!serialModal}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setSerialModal(null)}
+        >
+          <View style={[styles.usageOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+            <View style={[styles.usageModal, { backgroundColor: theme.card }]}>
+              <Text style={[styles.usageTitle, { color: theme.text }]}>🔑 Сдача старого оборудования</Text>
+              <Text style={[styles.usageSubtitle, { color: theme.textSecondary }]}>
+                {serialModal.desc}
+              </Text>
+              <Text style={[styles.usageLabel, { color: theme.textSecondary, marginTop: 12 }]}>
+                Серийный номер снятого оборудования:
+              </Text>
+              <TextInput
+                style={[styles.serialInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.card }]}
+                value={serialInput}
+                onChangeText={setSerialInput}
+                placeholder="Впишите серийный номер"
+                placeholderTextColor={theme.textTertiary}
+                autoCapitalize="characters"
+              />
+              <View style={styles.usageModalButtons}>
+                <TouchableOpacity style={[styles.usageCancelBtn, { borderColor: theme.border }]} onPress={() => setSerialModal(null)}>
+                  <Text style={{ color: theme.textSecondary }}>Отмена</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.usageSubmitBtn, { backgroundColor: '#fa8c16' }]} onPress={confirmReturnSerial}>
+                  <Text style={styles.usageSubmitText}>🚚 Сдать на склад</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* Модалка: отчёт об использовании материалов */}
       {usageModal && (

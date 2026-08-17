@@ -138,7 +138,23 @@ class MasterViewSet(viewsets.ModelViewSet):
             data['order_number'] = '—'
             result.append(data)
 
-        return Response({'items': result})
+        # Долги по возврату старого оборудования
+        from .models import MasterInventoryDebt
+        debts_qs = MasterInventoryDebt.objects.filter(master=master, is_returned=False).select_related('order', 'submitted_by', 'accepted_by')
+        debts = []
+        for d in debts_qs:
+            debts.append({
+                'id': d.id,
+                'type': 'debt',
+                'description': d.description,
+                'serial_number': d.serial_number,
+                'quantity': d.quantity,
+                'is_returned': d.is_returned,
+                'submitted_at': d.submitted_at.isoformat() if d.submitted_at else None,
+                'order_number': d.order.number if d.order else '',
+            })
+
+        return Response({'items': result, 'debts': debts})
 
     @action(detail=True, methods=['post'])
     def return_zip(self, request, pk=None):
@@ -186,6 +202,34 @@ class MasterViewSet(viewsets.ModelViewSet):
         )
 
         return Response({'ok': True, 'message': f'Возвращено {qty} шт. {inv_item.name}'})
+
+    @action(detail=True, methods=['post'])
+    def submit_debt(self, request, pk=None):
+        """Мастер сдаёт старое оборудование (долг) — серийник вписывается при сдаче"""
+        master = self.get_object()
+        debt_id = request.data.get('debt_id')
+        debt = None
+        if debt_id:
+            debt = MasterInventoryDebt.objects.filter(id=debt_id, master=master, is_returned=False).first()
+        if not debt:
+            return Response({'error': 'Долг не найден'}, status=404)
+        debt.submitted_at = timezone.now()
+        debt.submitted_by = request.user
+        debt.condition = request.data.get('condition', 'broken')
+        if request.data.get('serial_number'):
+            debt.serial_number = request.data.get('serial_number')
+        debt.notes = request.data.get('notes', debt.notes or '')
+        debt.save()
+
+        # Уведомление кладовщикам
+        dispatchers = User.objects.filter(profile__role__in=['admin', 'dispatcher'])
+        for u in dispatchers:
+            send_push_notification(u.id, '🔔 Мастер сдал старое оборудование',
+                                   f'{debt.master.user.get_full_name()}: {debt.description}'
+                                   + (f' (S/N: {debt.serial_number})' if debt.serial_number else '') + ' — ожидает приёмки',
+                                   data={'type': 'debt_submitted', 'debt_id': debt.id})
+
+        return Response({'ok': True, 'debt_id': debt.id, 'status': 'submitted'})
 
     @action(detail=True, methods=['get'])
     def zip_orders(self, request, pk=None):
@@ -1424,8 +1468,20 @@ tr:nth-child(even) {{ background: #f9f9f9; }}
         debt.submitted_at = timezone.now()
         debt.submitted_by = request.user
         debt.condition = request.data.get('condition', 'broken')
+        # Мастер вписывает серийный номер снятого оборудования при сдаче
+        if request.data.get('serial_number'):
+            debt.serial_number = request.data.get('serial_number')
         debt.notes = request.data.get('notes', debt.notes or '')
         debt.save()
+
+        # Уведомление кладовщикам: мастер сдал старое оборудование
+        dispatchers = User.objects.filter(profile__role__in=['admin', 'dispatcher'])
+        for u in dispatchers:
+            send_push_notification(u.id, '🔔 Мастер сдал старое оборудование',
+                                   f'{debt.master.user.get_full_name()}: {debt.description}'
+                                   + (f' (S/N: {debt.serial_number})' if debt.serial_number else '') + ' — ожидает приёмки',
+                                   data={'type': 'debt_submitted', 'debt_id': debt.id})
+
         return Response({'ok': True, 'debt_id': debt.id, 'status': 'submitted'})
 
     @action(detail=True, methods=['post'])

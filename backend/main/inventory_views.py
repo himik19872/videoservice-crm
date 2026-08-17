@@ -116,4 +116,20 @@ def master_inventory(request, master_id):
             'need_return_old': ioi.need_return_old,
         })
 
-    return Response({'master_name': str(master), 'items': result, 'total': len(result)})
+    # Долги по возврату старого оборудования (MasterInventoryDebt)
+    from .models import MasterInventoryDebt
+    debts_qs = MasterInventoryDebt.objects.filter(master=master, is_returned=False).select_related('order')
+    debts = []
+    for d in debts_qs:
+        debts.append({
+            'id': d.id,
+            'type': 'debt',
+            'description': d.description,
+            'serial_number': d.serial_number,
+            'quantity': d.quantity,
+            'is_returned': d.is_returned,
+            'submitted_at': d.submitted_at.isoformat() if d.submitted_at else None,
+            'order_number': d.order.number if d.order else '',
+        })
+
+    return Response({'master_name': str(master), 'items': result, 'total': len(result), 'debts': debts})
