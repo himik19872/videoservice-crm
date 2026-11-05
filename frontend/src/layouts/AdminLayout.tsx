@@ -43,9 +43,9 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Подтверждение заявок',
     },
     {
-      key: '/orders/create',
-      icon: <AppstoreOutlined />,
-      label: 'Новая заявка',
+      key: '/clients',
+      icon: <UsergroupAddOutlined />,
+      label: 'Клиенты',
     },
     {
       key: '/legal-entities',
@@ -53,19 +53,9 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Юрлица',
     },
     {
-      key: '/clients',
-      icon: <UsergroupAddOutlined />,
-      label: 'Клиенты',
-    },
-    {
-      key: '/clients/create',
-      icon: <AppstoreOutlined />,
-      label: 'Новый клиент',
-    },
-    {
       key: '/equipment',
       icon: <AppstoreOutlined />,
-      label: 'Оборудование',
+      label: 'Оборудование у клиентов',
     },
     {
       key: '/masters',
@@ -88,24 +78,9 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Дома',
     },
     {
-      key: '/inventory',
-      icon: <ShopOutlined />,
-      label: 'Склад',
-    },
-    {
-      key: '/storage-locations',
-      icon: <EnvironmentOutlined />,
-      label: 'Места хранения',
-    },
-    {
       key: '/management-companies',
       icon: <BankOutlined />,
       label: 'УК / ТСЖ',
-    },
-    {
-      key: '/tariffs',
-      icon: <DollarOutlined />,
-      label: 'Тарифы',
     },
     {
       key: '/entrances',
@@ -113,14 +88,29 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Подъезды',
     },
     {
+      key: '/tariffs',
+      icon: <DollarOutlined />,
+      label: 'Тарифы',
+    },
+    {
       key: '/beward-devices',
       icon: <SafetyCertificateOutlined />,
       label: 'Beward IP',
     },
     {
-      key: '/instructions',
-      icon: <BookOutlined />,
-      label: 'Инструкции',
+      key: '/inventory',
+      icon: <ShopOutlined />,
+      label: 'Склад',
+    },
+    {
+      key: '/estimates',
+      icon: <CalculatorOutlined />,
+      label: 'Сметы и КП',
+    },
+    {
+      key: '/estimate-services',
+      icon: <ToolOutlined />,
+      label: 'Справочник услуг',
     },
     {
       key: '/finance',
@@ -138,64 +128,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Сообщения',
     },
     {
-      key: '/estimates',
-      icon: <CalculatorOutlined />,
-      label: 'Сметы и КП',
-    },
-    {
-      key: '/estimate-services',
-      icon: <ToolOutlined />,
-      label: 'Услуги',
-    },
-    {
-      key: '/import',
-      icon: <FileExcelOutlined />,
-      label: 'Импорт',
-    },
-    {
-      key: '/settings/legal-entities',
-      icon: <BankOutlined />,
-      label: 'Юрлица',
-    },
-    {
-      key: '/settings/estimate-template',
-      icon: <FileTextOutlined />,
-      label: 'Шаблон КП',
+      key: '/instructions',
+      icon: <BookOutlined />,
+      label: 'Инструкции',
     },
     {
       key: '/reports',
       icon: <BarChartOutlined />,
-      label: 'Отчеты',
-    },
-    {
-      key: '/settings/system',
-      icon: <SettingOutlined />,
-      label: 'Системные настройки',
-    },
-    {
-      key: '/settings/asterisk',
-      icon: <PhoneOutlined />,
-      label: 'Asterisk PBX',
-    },
-    {
-      key: '/settings/traccar',
-      icon: <SettingOutlined />,
-      label: 'Traccar GPS',
-    },
-    {
-      key: '/settings/telegram',
-      icon: <SettingOutlined />,
-      label: 'Telegram',
-    },
-    {
-      key: '/settings/admin',
-      icon: <SettingOutlined />,
-      label: 'Настройки',
-    },
-    {
-      key: '/settings/migration',
-      icon: <SwapOutlined />,
-      label: 'Миграция',
+      label: 'Отчёты',
     },
     {
       key: '/audit-log',
@@ -203,11 +143,81 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Журнал действий',
     },
     {
-      key: '/settings/stats',
-      icon: <HddOutlined />,
-      label: 'Статистика',
+      key: '/import',
+      icon: <FileExcelOutlined />,
+      label: 'Импорт',
+    },
+    {
+      key: 'settings',
+      icon: <SettingOutlined />,
+      label: 'Настройки',
+      children: [
+        {
+          key: '/settings/system',
+          icon: <SettingOutlined />,
+          label: 'Системные настройки',
+        },
+        {
+          key: '/settings/estimate-template',
+          icon: <FileTextOutlined />,
+          label: 'Шаблон КП',
+        },
+        {
+          key: '/storage-locations',
+          icon: <EnvironmentOutlined />,
+          label: 'Места хранения',
+        },
+        {
+          key: '/settings/traccar',
+          icon: <EnvironmentOutlined />,
+          label: 'Traccar GPS',
+        },
+        {
+          key: '/settings/telegram',
+          icon: <MessageOutlined />,
+          label: 'Telegram-бот',
+        },
+        {
+          key: '/settings/asterisk',
+          icon: <PhoneOutlined />,
+          label: 'Asterisk PBX',
+        },
+        {
+          key: '/settings/update',
+          icon: <HddOutlined />,
+          label: 'Обновление приложения',
+        },
+        {
+          key: '/settings/stats',
+          icon: <HddOutlined />,
+          label: 'Статистика сервера',
+        },
+        {
+          key: '/settings/migration',
+          icon: <SwapOutlined />,
+          label: 'Миграция',
+        },
+        {
+          key: '/settings/admin',
+          icon: <SafetyCertificateOutlined />,
+          label: 'Пользователи и права',
+        },
+      ],
     },
   ];
+
+  /** Заголовок страницы: ищем пункт меню, включая подменю */
+  const currentTitle = (() => {
+    const flat: any[] = [];
+    menuItems.forEach((item: any) => {
+      if (item.children) flat.push(...item.children);
+      else flat.push(item);
+    });
+    return flat.find(item => item.key === location.pathname)?.label || '';
+  })();
+
+  const settingsOpen = location.pathname.startsWith('/settings')
+    || location.pathname.startsWith('/storage-locations');
 
   const handleMenuClick = ({ key }: { key: string }) => {
     navigate(key);
@@ -227,6 +237,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
+          defaultOpenKeys={settingsOpen ? ['settings'] : []}
           items={menuItems}
           onClick={handleMenuClick}
           style={{ borderRight: 0 }}
@@ -265,7 +276,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       <Layout>
         <Header style={{ background: token.colorBgLayout, padding: '0 24px' }}>
           <Text style={{ fontSize: '18px', fontWeight: '500' }}>
-            {menuItems.find(item => item.key === location.pathname)?.label}
+            {currentTitle}
           </Text>
         </Header>
         <Content style={{ margin: '24px', background: token.colorBgLayout, minHeight: 280 }}>

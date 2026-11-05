@@ -66,8 +66,13 @@ def _day_bounds(day):
 
 # ── Загрузка точек из Traccar ────────────────────────────────────────────────
 def fetch_positions(settings, device_ids, dt_from, dt_to):
-    """Позиции за период. Запрашиваем по одному устройству — так надёжнее."""
+    """Позиции за период. Запрашиваем по одному устройству — так надёжнее.
+
+    Ошибки авторизации (401/403) НЕ игнорируются — иначе синхронизация молча
+    возвращает пустой трек и кажется, что всё работает.
+    """
     positions = []
+    last_error = ''
     for device_id in device_ids:
         try:
             positions.extend(_api_get(settings, '/api/positions', {
@@ -75,8 +80,28 @@ def fetch_positions(settings, device_ids, dt_from, dt_to):
                 'from': dt_from.astimezone(dt_timezone.utc).isoformat(),
                 'to': dt_to.astimezone(dt_timezone.utc).isoformat(),
             }))
-        except Exception:
+        except requests.HTTPError as e:
+            code = getattr(getattr(e, 'response', None), 'status_code', None)
+            if code in (401, 403):
+                msg = ('Traccar отклонил авторизацию (HTTP {}). '
+                       'Проверьте логин/пароль в настройках интеграции.'.format(code))
+                try:
+                    settings.last_error = msg
+                    settings.save(update_fields=['last_error', 'updated_at'])
+                except Exception:
+                    pass
+                raise RuntimeError(msg)
+            last_error = str(e)
             continue
+        except Exception as e:
+            last_error = str(e)
+            continue
+    if last_error and not positions:
+        try:
+            settings.last_error = last_error[:500]
+            settings.save(update_fields=['last_error', 'updated_at'])
+        except Exception:
+            pass
     return positions
 
 
@@ -212,8 +237,15 @@ def sync_master_day(master, day, settings=None):
 def sync_day(day=None, settings=None):
     """Синхронизировать всех мастеров с маяками за конкретный день"""
     day = day or timezone.localdate()
+    settings = settings or get_active_settings()
     masters = Master.objects.select_related('traccar_device', 'user').all()
     results = [sync_master_day(m, day, settings) for m in masters]
+    if settings:
+        try:
+            settings.last_sync_at = timezone.now()
+            settings.save(update_fields=['last_sync_at', 'updated_at'])
+        except Exception:
+            pass
     return {
         'date': str(day),
         'masters': len(results),

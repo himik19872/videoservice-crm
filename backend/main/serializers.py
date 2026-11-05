@@ -774,8 +774,9 @@ class BuildingSystemSerializer(serializers.ModelSerializer):
 class TraccarSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = TraccarSettings
-        fields = ['id', 'server_url', 'username', 'password', 'is_active', 'sync_interval_minutes', 'updated_at']
-        read_only_fields = ['id', 'updated_at']
+        fields = ['id', 'server_url', 'username', 'password', 'is_active', 'sync_interval_minutes',
+                  'last_sync_at', 'last_error', 'updated_at']
+        read_only_fields = ['id', 'updated_at', 'last_sync_at', 'last_error']
         extra_kwargs = {'password': {'write_only': True}}
 
 

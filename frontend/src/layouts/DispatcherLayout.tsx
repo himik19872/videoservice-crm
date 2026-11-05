@@ -49,27 +49,15 @@ const DispatcherLayout: React.FC<DispatcherLayoutProps> = ({ children }) => {
       perm: 'orders_confirm',
     },
     {
-      key: '/orders/create',
-      icon: <AppstoreOutlined />,
-      label: 'Новая заявка',
-      perm: 'orders_create',
-    },
-    {
       key: '/clients',
       icon: <UsergroupAddOutlined />,
       label: 'Клиенты',
       perm: 'clients_view',
     },
     {
-      key: '/clients/create',
-      icon: <AppstoreOutlined />,
-      label: 'Новый клиент',
-      perm: 'clients_create',
-    },
-    {
       key: '/equipment',
       icon: <AppstoreOutlined />,
-      label: 'Оборудование',
+      label: 'Оборудование у клиентов',
       perm: 'equipment_view',
     },
     {

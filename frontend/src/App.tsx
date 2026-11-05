@@ -133,12 +133,8 @@ function AppContent() {
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="/storage-locations" element={<StorageLocationsPage />} />
           <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
+          <Route path="/management-companies" element={<CompaniesPage />} />
           <Route path="/management-companies/create" element={<CompanyCreatePage />} />
-          <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
-          <Route path="/management-companies/create" element={<CompanyCreatePage />} />
-        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
-        <Route path="/management-companies" element={<CompaniesPage />} />
-        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
           <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
           <Route path="/tariffs" element={<TariffsPage />} />
           <Route path="/entrances" element={<EntrancesPage />} />
@@ -262,12 +258,8 @@ function AppContent() {
           <Route path="/erc-payments" element={<ErcPaymentsPage />} />
           <Route path="/storage-locations" element={<StorageLocationsPage />} />
           <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
+          <Route path="/management-companies" element={<CompaniesPage />} />
           <Route path="/management-companies/create" element={<CompanyCreatePage />} />
-          <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
-          <Route path="/management-companies/create" element={<CompanyCreatePage />} />
-        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
-        <Route path="/management-companies" element={<CompaniesPage />} />
-        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
           <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
           <Route path="/tariffs" element={<TariffsPage />} />
           <Route path="/entrances" element={<EntrancesPage />} />
@@ -332,9 +324,8 @@ function AppContent() {
         <Route path="/erc-payments" element={<ErcPaymentsPage />} />
         <Route path="/storage-locations" element={<StorageLocationsPage />} />
         <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
-        <Route path="/management-companies/create" element={<CompanyCreatePage />} />
-        <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
         <Route path="/management-companies" element={<CompaniesPage />} />
+        <Route path="/management-companies/create" element={<CompanyCreatePage />} />
         <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
         <Route path="/tariffs" element={<TariffsPage />} />
         <Route path="/entrances" element={<EntrancesPage />} />

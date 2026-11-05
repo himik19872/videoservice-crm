@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Form, Input, InputNumber, Switch, Button, message, Spin, Table, Tag, Space, Modal, Popconfirm, Divider, Select, DatePicker, Statistic, Row, Col } from 'antd';
+import { Typography, Card, Form, Input, InputNumber, Switch, Button, message, Spin, Table, Tag, Space, Modal, Popconfirm, Divider, Select, DatePicker, Statistic, Row, Col, Alert } from 'antd';
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, LinkOutlined, SyncOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import dayjs from 'dayjs';
@@ -13,6 +13,8 @@ interface TraccarSettings {
   password: string;
   is_active: boolean;
   sync_interval_minutes: number;
+  last_sync_at?: string | null;
+  last_error?: string;
 }
 
 interface TraccarDevice {
@@ -158,7 +160,7 @@ const TraccarIntegrationPage: React.FC = () => {
     try {
       const response = await api.post('/traccar/settings/test_connection/');
       if (response.data.ok) {
-        message.success(`Соединение установлено! Статус: ${response.data.status}`);
+        message.success(`Соединение установлено! Версия Traccar: ${response.data.version || '?'}, устройств: ${response.data.devices ?? '—'}`);
       } else {
         message.error(`Ошибка соединения: ${response.data.error || 'Неизвестная ошибка'}`);
       }
@@ -241,6 +243,33 @@ const TraccarIntegrationPage: React.FC = () => {
   return (
     <div>
       <Title level={3}>Настройки интеграции с Traccar GPS</Title>
+
+      {/* Статус последней синхронизации */}
+      {settings && (settings.last_error || settings.last_sync_at) && (
+        <div style={{ marginBottom: 16 }}>
+          {settings.last_error ? (
+            <Alert
+              type="error"
+              showIcon
+              message="Синхронизация с Traccar не работает"
+              description={
+                <div>
+                  <div>{settings.last_error}</div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#888' }}>
+                    Проверьте логин/пароль учётной записи Traccar — без авторизации данные с маяков не поступают.
+                  </div>
+                </div>
+              }
+            />
+          ) : (
+            <Alert
+              type="success"
+              showIcon
+              message={`Последняя успешная синхронизация: ${new Date(settings.last_sync_at).toLocaleString('ru-RU')}`}
+            />
+          )}
+        </div>
+      )}
 
       {/* Настройки сервера */}
       <Card title="Сервер Traccar" style={{ marginBottom: 16 }}

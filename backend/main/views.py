@@ -2440,21 +2440,55 @@ class TraccarSettingsViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def test_connection(self, request):
-        """Проверка соединения с сервером Traccar"""
+        """Проверка соединения с сервером Traccar (с проверкой авторизации)"""
         import requests
         settings = TraccarSettings.objects.first()
         if not settings:
             return Response({'error': 'Настройки не найдены'}, status=400)
 
+        base = settings.server_url.rstrip('/')
         try:
-            resp = requests.get(
-                f"{settings.server_url.rstrip('/')}/api/server",
-                auth=(settings.username, settings.password),
-                timeout=5
-            )
-            return Response({'ok': resp.status_code == 200, 'status': resp.status_code, 'version': resp.json().get('version', '?')})
+            resp = requests.get(f'{base}/api/server',
+                                auth=(settings.username, settings.password),
+                                timeout=8)
+            version = ''
+            try:
+                version = resp.json().get('version', '')
+            except Exception:
+                pass
         except Exception as e:
-            return Response({'ok': False, 'error': str(e)})
+            settings.last_error = f'Нет связи с сервером: {e}'
+            settings.save(update_fields=['last_error', 'updated_at'])
+            return Response({'ok': False, 'error': f'Нет связи с сервером Traccar: {e}'})
+
+        # Проверяем именно авторизацию: /api/server доступен без логина
+        try:
+            auth_resp = requests.get(f'{base}/api/devices',
+                                     auth=(settings.username, settings.password),
+                                     timeout=12)
+        except Exception as e:
+            settings.last_error = f'Ошибка запроса устройств: {e}'
+            settings.save(update_fields=['last_error', 'updated_at'])
+            return Response({'ok': False, 'error': f'Ошибка запроса к API: {e}'})
+
+        if auth_resp.status_code == 401:
+            msg = ('Неверный логин или пароль Traccar (HTTP 401). '
+                   'Проверьте учётную запись в настройках — без авторизации данные с маяков не поступают.')
+            settings.last_error = msg
+            settings.save(update_fields=['last_error', 'updated_at'])
+            return Response({'ok': False, 'status': 401, 'error': msg,
+                             'version': version})
+        if auth_resp.status_code != 200:
+            msg = f'Traccar вернул HTTP {auth_resp.status_code}'
+            settings.last_error = msg
+            settings.save(update_fields=['last_error', 'updated_at'])
+            return Response({'ok': False, 'status': auth_resp.status_code, 'error': msg})
+
+        devices = auth_resp.json()
+        settings.last_error = ''
+        settings.save(update_fields=['last_error', 'updated_at'])
+        return Response({'ok': True, 'status': 200, 'version': version,
+                         'devices': len(devices)})
 
     @action(detail=False, methods=['post'])
     def discover(self, request):

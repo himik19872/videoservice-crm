@@ -761,6 +761,8 @@ class TraccarSettings(models.Model):
     password = models.CharField(max_length=100, verbose_name=_('Пароль'))
     is_active = models.BooleanField(default=False, verbose_name=_('Интеграция активна'))
     sync_interval_minutes = models.PositiveIntegerField(default=5, verbose_name=_('Интервал синхронизации (мин)'))
+    last_sync_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Последняя успешная синхронизация'))
+    last_error = models.TextField(blank=True, default='', verbose_name=_('Последняя ошибка'))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
 
     class Meta:

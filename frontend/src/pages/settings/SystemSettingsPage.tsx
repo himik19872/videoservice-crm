@@ -133,39 +133,22 @@ const SettingsPage: React.FC = () => {
               <Input.Password placeholder="Secret xxx..." />
             </Form.Item>
 
-            <Divider>Max (мессенджер)</Divider>
-            <Form.Item name="max_bot_active" label="Max бот активен" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item name="max_bot_name" label="Имя бота">
-              <Input placeholder="CRM Bot" />
-            </Form.Item>
-            <Form.Item name="max_bot_token" label="Токен бота Max">
-              <Input.Password placeholder="Вставьте токен..." />
-            </Form.Item>
-            <Form.Item name="max_api_url" label="Max API URL">
-              <Input placeholder="https://business.max.ru" />
-            </Form.Item>
-
-            <Divider>Traccar (GPS-трекеры)</Divider>
-            <Form.Item name="traccar_active" label="Traccar активен" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item name="traccar_url" label="Traccar URL">
-              <Input placeholder="http://traccar.example.com:8082" />
-            </Form.Item>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="traccar_user" label="Логин">
-                  <Input placeholder="admin" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="traccar_pass" label="Пароль">
-                  <Input.Password placeholder="..." />
-                </Form.Item>
-              </Col>
-            </Row>
+            <Divider>Мессенджеры и GPS</Divider>
+            <Alert
+              type="info"
+              showIcon
+              message="Эти интеграции настраиваются в отдельных разделах"
+              description={
+                <Space direction="vertical" size={4}>
+                  <Button type="link" size="small" onClick={() => navigate('/settings/telegram')} style={{ padding: 0 }}>
+                    ✈️ Telegram-бот — открыть настройки →
+                  </Button>
+                  <Button type="link" size="small" onClick={() => navigate('/settings/traccar')} style={{ padding: 0 }}>
+                    📡 Traccar GPS — открыть настройки →
+                  </Button>
+                </Space>
+              }
+            />
           </TabPane>
 
           <TabPane tab={<span><SafetyOutlined /> Медиа</span>} key="media">

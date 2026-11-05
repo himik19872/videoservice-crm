@@ -23,7 +23,12 @@ class Command(BaseCommand):
             return
 
         days = max(1, min(int(options['days']), 31))
-        summary = sync_days(days)
+        try:
+            summary = sync_days(days)
+        except RuntimeError as e:
+            # Ошибка авторизации Traccar — показываем внятно в логе cron
+            self.stderr.write(self.style.ERROR('ОШИБКА Traccar: {}'.format(e)))
+            raise SystemExit(1)
         for day in summary:
             self.stdout.write('{date}: мастеров {masters}, пробег {km} км'.format(
                 date=day['date'], masters=day['masters'], km=day['distance_km']))
