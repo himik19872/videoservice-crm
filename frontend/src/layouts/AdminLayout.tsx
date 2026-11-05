@@ -133,6 +133,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Инструкции',
     },
     {
+      key: '/guides',
+      icon: <BookOutlined />,
+      label: 'Руководства (печать)',
+    },
+    {
       key: '/reports',
       icon: <BarChartOutlined />,
       label: 'Отчёты',

@@ -11,7 +11,7 @@ import {
   HomeOutlined,
   BarChartOutlined,
   CheckCircleOutlined, FileExcelOutlined, DollarOutlined,
-  FileTextOutlined, BankOutlined, ShopOutlined,
+  FileTextOutlined, BankOutlined, ShopOutlined, BookOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -125,6 +125,11 @@ const DispatcherLayout: React.FC<DispatcherLayoutProps> = ({ children }) => {
       icon: <EnvironmentOutlined />,
       label: 'Места хранения',
       perm: 'inventory_view',
+    },
+    {
+      key: '/guides',
+      icon: <BookOutlined />,
+      label: 'Руководства (печать)',
     },
   ];
 

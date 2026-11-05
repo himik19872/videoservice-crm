@@ -63,6 +63,7 @@ import EntranceDetailPage from './pages/EntranceDetailPage';
 import BewardDevicesPage from './pages/BewardDevicesPage';
 import DownloadAppPage from './pages/DownloadAppPage';
 import InstructionsPage from './pages/InstructionsPage';
+import GuidesPage from './pages/GuidesPage';
 import MasterDashboardPage from './pages/master/MasterDashboardPage';
 import MasterOrdersPage from './pages/master/MasterOrdersPage';
 import MasterProfilePage from './pages/master/MasterProfilePage';
@@ -140,6 +141,7 @@ function AppContent() {
           <Route path="/entrances" element={<EntrancesPage />} />
           <Route path="/entrances/:id" element={<EntranceDetailPage />} />
           <Route path="/beward-devices" element={<BewardDevicesPage />} />
+          <Route path="/guides" element={<GuidesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -189,6 +191,7 @@ function AppContent() {
           <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/beward-devices" element={<BewardDevicesPage />} />
+          <Route path="/guides" element={<GuidesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </DispatcherLayout>
@@ -217,6 +220,7 @@ function AppContent() {
           <Route path="/estimate-services" element={<EstimateServicesPage />} />
           {user?.role === 'accountant' && <Route path="/settings/admin" element={<AdminSettingsPage />} />}
           <Route path="/beward-devices" element={<BewardDevicesPage />} />
+          <Route path="/guides" element={<GuidesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AdminLayout>
@@ -332,6 +336,7 @@ function AppContent() {
         <Route path="/entrances/:id" element={<EntranceDetailPage />} />
         <Route path="/beward-devices" element={<BewardDevicesPage />} />
         <Route path="/instructions" element={<InstructionsPage />} />
+        <Route path="/guides" element={<GuidesPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AdminLayout>
