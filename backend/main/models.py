@@ -623,6 +623,8 @@ class Order(models.Model):
     apartment = models.CharField(max_length=20, default='', blank=True, verbose_name=_('Квартира'))
     entrance = models.CharField(max_length=10, default='', blank=True, verbose_name=_('Подъезд'))
     address = models.CharField(max_length=500, blank=True, verbose_name=_('Адрес'))
+    latitude = models.FloatField(null=True, blank=True, verbose_name=_('Широта'))
+    longitude = models.FloatField(null=True, blank=True, verbose_name=_('Долгота'))
 
     description = models.TextField(verbose_name=_('Описание проблемы'))
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', verbose_name=_('Статус'))

@@ -112,6 +112,12 @@ def _parse_dadata_item(item: dict, raw_address: str) -> dict:
 
     has_data = bool(city or street or house)
 
+    def _flt(v):
+        try:
+            return float(v) if v not in (None, '') else None
+        except (TypeError, ValueError):
+            return None
+
     return {
         'city': city,
         'region': region,
@@ -122,6 +128,8 @@ def _parse_dadata_item(item: dict, raw_address: str) -> dict:
         'building_number': block,
         'apartment': flat,
         'postal_code': postal,
+        'latitude': _flt(item.get('geo_lat')),
+        'longitude': _flt(item.get('geo_lon')),
         'full_address': item.get('result', raw_address) if has_data else raw_address,
         'raw': raw_address,
         'success': has_data,
@@ -314,6 +322,8 @@ def _empty_result(raw: str) -> dict:
         'building_number': '',
         'apartment': '',
         'postal_code': '',
+        'latitude': None,
+        'longitude': None,
         'full_address': raw,
         'raw': raw,
         'success': False,

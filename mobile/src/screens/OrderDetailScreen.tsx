@@ -340,6 +340,91 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
+  /**
+   * Построить маршрут до адреса заявки.
+   * Приоритет: точные координаты (DaData) → текстовый адрес → 2GIS → браузер.
+   */
+  const openRoute = async () => {
+    const o: any = order;
+    if (!o) return;
+    // Чистый адрес без квартиры/подъезда — они мешают геокодеру навигатора
+    const rawAddr = o.address || [
+      o.city,
+      o.street_name,
+      o.house_number ? `д. ${o.house_number}` : '',
+      o.building_number ? `к${o.building_number}` : '',
+    ].filter(Boolean).join(', ');
+    const cleanAddr = rawAddr
+      .replace(/,?\s*кв\.?\s*[\w\-/]+/gi, '')
+      .replace(/,?\s*(квартира|офис)\s*[\w\-/]+/gi, '')
+      .replace(/,?\s*подъезд\s*[\w\-/]+/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s*,\s*$/, '')
+      .trim();
+
+    if (!cleanAddr && !o.latitude) {
+      Alert.alert('Нет адреса', 'В заявке не заполнен адрес — маршрут построить нельзя');
+      return;
+    }
+
+    let lat = o.latitude as number | null | undefined;
+    let lon = o.longitude as number | null | undefined;
+
+    // Координаты не определены — просим сервер геокодировать адрес (DaData)
+    if (lat == null || lon == null) {
+      try {
+        const res = await api.post(`/orders/${id}/geocode/`);
+        if (res.data?.success) {
+          lat = res.data.latitude;
+          lon = res.data.longitude;
+          setOrder((prev: any) => prev ? { ...prev, latitude: lat, longitude: lon } : prev);
+        }
+      } catch (e) {
+        // не критично — попробуем текстовый адрес
+      }
+    }
+
+    const encoded = encodeURIComponent(cleanAddr);
+    const hasCoords = lat != null && lon != null;
+
+    // Яндекс.Навигатор: по координатам — точное место; иначе поиск по адресу
+    const naviCoords = hasCoords
+      ? `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`
+      : '';
+    const naviText = `yandexnavi://build_route_on_map?text_to=${encoded}`;
+    const dgis = `dgis://2gis.ru/routeSearch/to/${encoded}/go`;
+    const yandexWeb = hasCoords
+      ? `https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`
+      : `https://yandex.ru/maps/?rtext=~${encoded}&rtt=auto`;
+
+    const openFirstAvailable = async (urls: string[]) => {
+      for (const url of urls) {
+        try {
+          const ok = await Linking.canOpenURL(url);
+          if (ok) {
+            await Linking.openURL(url);
+            return true;
+          }
+        } catch (e) { /* пробуем следующий */ }
+      }
+      return false;
+    };
+
+    const candidates = [
+      ...(naviCoords ? [naviCoords] : []),
+      naviText,
+      dgis,
+    ];
+    const opened = await openFirstAvailable(candidates);
+    if (!opened) {
+      try {
+        await Linking.openURL(yandexWeb);
+      } catch (e) {
+        Alert.alert('Не удалось открыть карты', cleanAddr);
+      }
+    }
+  };
+
   if (loading) return <View style={[styles.centered, { backgroundColor: theme.background }]}><ActivityIndicator size="large" color={theme.primary} /></View>;
   if (!order) return null;
 
@@ -372,44 +457,7 @@ const OrderDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       <Text style={[styles.orderNum, { color: theme.text }]}>{order.number}</Text>
       <Text style={[styles.client, { color: theme.text }]}>{order.client_info?.full_name || '—'}</Text>
       <Text style={[styles.phone, { color: theme.primary }]}>📞 {order.client_info?.phone || order.client?.phone || '—'}</Text>
-      <TouchableOpacity onPress={() => {
-        // Собираем адрес из полей
-        const parts: string[] = [];
-        if (order.city) parts.push(order.city);
-        if (order.street_name) parts.push(order.street_name);
-        if (order.house_number) {
-          let h = 'д.' + order.house_number;
-          if (order.building_number) h += ' к' + order.building_number;
-          parts.push(h);
-        }
-        if (order.apartment) parts.push('кв.' + order.apartment);
-        const addr = parts.join(', ') || order.address || '';
-        if (!addr) return;
-
-        const encoded = encodeURIComponent(addr);
-
-        // Яндекс.Навигатор — правильный формат: только text_to (без lat_to/lon_to)
-        const yandexNavi = `yandexnavi://build_route_on_map?text_to=${encoded}`;
-        // 2GIS
-        const dgis = `dgis://2gis.ru/routeSearch/to/${encoded}/go`;
-        // Яндекс.Карты (браузер — запасной)
-        const yandexWeb = `https://yandex.ru/maps/?rtext=~${encoded}&rtt=auto`;
-
-        // Пробуем Яндекс.Навигатор → 2GIS → браузер
-        Linking.canOpenURL(yandexNavi).then(canNavi => {
-          if (canNavi) {
-            Linking.openURL(yandexNavi);
-          } else {
-            Linking.canOpenURL(dgis).then(can2gis => {
-              if (can2gis) {
-                Linking.openURL(dgis);
-              } else {
-                Linking.openURL(yandexWeb);
-              }
-            }).catch(() => Linking.openURL(yandexWeb));
-          }
-        }).catch(() => Linking.openURL(yandexWeb));
-      }}>
+      <TouchableOpacity onPress={openRoute}>
         <Text style={[styles.address, { color: theme.textSecondary }]}>📍 {order.address || [order.city, order.street_name, 'д.' + order.house_number].filter(Boolean).join(', ')}</Text>
         <Text style={[styles.navHint, { color: theme.primary }]}>🚗 Нажмите, чтобы построить маршрут</Text>
       </TouchableOpacity>

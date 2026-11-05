@@ -977,6 +977,56 @@ class OrderViewSet(viewsets.ModelViewSet):
     search_fields = ['number', 'address', 'description', 'city', 'street_name', 'client__first_name', 'client__last_name']
     ordering_fields = ['created_at', 'priority', 'status', 'cost', 'master__user__last_name', 'region__name', 'address', 'city', 'street_name', 'number', 'order_type']
 
+    @action(detail=True, methods=['post'])
+    def geocode(self, request, pk=None):
+        """Определить координаты адреса заявки (DaData) для навигатора.
+
+        Возвращает lat/lon и сохраняет их в заявке, чтобы мастеру не приходилось
+        ждать геокодирования при каждом нажатии «Маршрут».
+        """
+        order = self.get_object()
+        force = str(request.data.get('force', '')).lower() in ('1', 'true', 'yes')
+
+        if order.latitude and order.longitude and not force:
+            return Response({'success': True, 'latitude': order.latitude,
+                             'longitude': order.longitude, 'cached': True})
+
+        raw = (order.address or '').strip()
+        if not raw:
+            parts = [order.city, order.street_name]
+            if order.house_number:
+                parts.append(f'д. {order.house_number}')
+                if order.building_number:
+                    parts.append(f'к{order.building_number}')
+            raw = ', '.join([p for p in parts if p])
+
+        if not raw:
+            return Response({'success': False, 'error': 'У заявки не заполнен адрес'}, status=400)
+
+        from .geocode_service import geocode_address
+        found = geocode_address(
+            city=order.city or '',
+            street=order.street_name or '',
+            house=order.house_number or '',
+            building=order.building_number or '',
+            full_address=order.address or '',
+        )
+        if not found:
+            return Response({
+                'success': False,
+                'error': 'Не удалось определить координаты адреса. Проверьте город, улицу и номер дома.',
+                'address': raw,
+            })
+
+        lat, lon, normalized = found
+        order.latitude = lat
+        order.longitude = lon
+        order.save(update_fields=['latitude', 'longitude'])
+        return Response({
+            'success': True, 'latitude': lat, 'longitude': lon,
+            'normalized': normalized, 'cached': False,
+        })
+
     def get_queryset(self):
         queryset = Order.objects.all()
         user = self.request.user

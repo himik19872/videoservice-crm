@@ -451,6 +451,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'master', 'master_id', 'master_info', 'equipment', 'equipment_id',
             'building_id', 'region', 'region_id', 'region_info',
             'city', 'street_name', 'house_number', 'building_number', 'apartment', 'entrance', 'address',
+            'latitude', 'longitude',
             'description', 'status', 'priority', 'cost', 'payment_type',
             'payment_type_display', 'is_paid', 'is_warranty',
             'photo_report_required', 'deadline',
@@ -466,7 +467,8 @@ class OrderSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'number', 'assigned_at', 'accepted_at', 'started_at',
             'paused_at', 'completed_at', 'confirmed_at', 'confirmed_by',
-            'created_at', 'updated_at', 'helpers', 'history', 'media', 'issue_orders'
+            'created_at', 'updated_at', 'helpers', 'history', 'media', 'issue_orders',
+            'latitude', 'longitude'
         ]
 
     def get_client_info(self, obj):
