@@ -1003,18 +1003,26 @@ class OrderViewSet(viewsets.ModelViewSet):
         if not raw:
             return Response({'success': False, 'error': 'У заявки не заполнен адрес'}, status=400)
 
-        from .geocode_service import geocode_address
+        from .geocode_service import geocode_address, extract_hints
+        client_addr = ''
+        try:
+            client_addr = (order.client.address if order.client else '') or ''
+        except Exception:
+            client_addr = ''
+        hints = extract_hints(order.address or '', client_addr)
         found = geocode_address(
             city=order.city or '',
             street=order.street_name or '',
             house=order.house_number or '',
             building=order.building_number or '',
-            full_address=order.address or '',
+            full_address=order.address or client_addr,
+            hints=hints,
         )
         if not found:
             return Response({
                 'success': False,
-                'error': 'Не удалось определить координаты адреса. Проверьте город, улицу и номер дома.',
+                'error': 'Не удалось точно определить координаты адреса. '
+                         'Проверьте город, улицу, номер дома и район.',
                 'address': raw,
             })
 

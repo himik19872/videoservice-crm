@@ -100,27 +100,44 @@ def _try_nominatim(query: str):
         return None
 
 
-def build_queries(city='', street='', house='', building='', full_address=''):
+def build_queries(city='', street='', house='', building='', full_address='', hints=None):
     """Варианты запроса от самого точного к самому общему."""
     city = clean_address(city)
     street = clean_address(street)
     house = (house or '').strip()
     building = (building or '').strip()
+    hints = [h for h in (hints or []) if h]
+
+    houses = []
+    if house:
+        if building:
+            houses.append(f'{house}{building}')      # 3а
+            houses.append(f'{house} к {building}')   # 3 к а
+        houses.append(house)
 
     queries = []
     base = ', '.join([p for p in (city, street) if p])
-    if base and house:
-        if building:
-            queries.append(f'{base}, {house}к{building}')
-        queries.append(f'{base}, {house}')
+
+    # 1. Точный вариант с городом
+    if base and houses:
+        for h in houses:
+            queries.append(f'{base}, {h}')
     elif base:
         queries.append(base)
 
+    # 2. С подсказками (посёлок/район) — когда улица есть в разных районах
+    for hint in hints:
+        parts = [street or base, houses[0] if houses else '', hint, city]
+        q = ', '.join([p for p in parts if p])
+        if q:
+            queries.append(q)
+
+    # 3. Полный адрес из карточки
     full = clean_address(full_address or '')
-    if full and full not in queries:
+    if full:
         queries.append(full)
 
-    # Совсем общий вариант — только улица и город
+    # 4. Совсем общий вариант — только улица и город
     if base and base not in queries:
         queries.append(base)
 
@@ -135,24 +152,54 @@ def build_queries(city='', street='', house='', building='', full_address=''):
     return result
 
 
-def geocode_address(city='', street='', house='', building='', full_address=''):
+def extract_hints(*addresses):
+    """Достать уточнения из адреса: посёлок в скобках и район «р-н»."""
+    hints = []
+    for raw in addresses:
+        if not raw:
+            continue
+        for m in re.findall(r'\(([^)]{3,40})\)', raw):
+            hints.append(m.strip())
+        for m in re.findall(r'([А-ЯЁ][а-яё\-]+)\s+р-н', raw):
+            hints.append(m.strip())
+    seen = set()
+    result = []
+    for h in hints:
+        key = h.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(h)
+    return result
+
+
+def _plausible(display_name, hints):
+    """Отбросить явно неверный результат (улица нашлась в другом районе)."""
+    if not display_name:
+        return True
+    if not hints:
+        return True
+    d = display_name.lower()
+    return any(h.lower() in d for h in hints)
+
+
+def geocode_address(city='', street='', house='', building='', full_address='', hints=None):
     """Определить координаты адреса. Возвращает (lat, lon, адрес) или None."""
-    queries = build_queries(city, street, house, building, full_address)
+    queries = build_queries(city, street, house, building, full_address, hints)
     if not queries:
         return None
 
     # 1. DaData — только одним запросом (там работает точный cleaner)
     for q in queries[:1]:
         res = _try_dadata(q)
-        if res:
+        if res and _plausible(res[2], hints):
             return res
 
     # 2. Nominatim — перебираем варианты, соблюдая лимит 1 req/sec
-    for idx, q in enumerate(queries[:3]):
+    for idx, q in enumerate(queries[:5]):
         if idx > 0:
             time.sleep(1.1)
         res = _try_nominatim(q)
-        if res:
+        if res and _plausible(res[2], hints):
             return res
 
     return None
