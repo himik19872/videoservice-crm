@@ -6,6 +6,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 import random
 import string
+from decimal import Decimal
 
 
 def generate_order_number():
@@ -386,6 +387,14 @@ class UserProfile(models.Model):
     ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile', verbose_name=_('Пользователь'))
     role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='master', verbose_name=_('Роль'))
+    ACCESS_SCOPES = [
+        ('both', _('Веб-интерфейс + мобильное приложение')),
+        ('web', _('Только веб-интерфейс')),
+        ('mobile', _('Только мобильное приложение')),
+    ]
+    access_scope = models.CharField(max_length=10, choices=ACCESS_SCOPES, default='both',
+                                    verbose_name=_('Доступ'),
+                                    help_text='Где сотруднику разрешено работать: веб-интерфейс, мобильное приложение или и там, и там')
     phone = models.CharField(max_length=20, blank=True, verbose_name=_('Телефон'))
     is_on_shift = models.BooleanField(default=False, verbose_name=_('На смене'))
     shift_started_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Смена начата'))
@@ -402,10 +411,29 @@ class UserProfile(models.Model):
 
 class Master(models.Model):
     """Мастер-ремонтник"""
+    FUEL_TYPES = [
+        ('ai92', _('Бензин АИ-92')),
+        ('ai95', _('Бензин АИ-95')),
+        ('ai98', _('Бензин АИ-98')),
+        ('dt', _('Дизель')),
+        ('gas', _('Газ')),
+        ('electric', _('Электро')),
+    ]
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='master_profile', verbose_name=_('Пользователь'))
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, related_name='masters', verbose_name=_('Район'))
     phone = models.CharField(max_length=20, verbose_name=_('Телефон'))
     is_available = models.BooleanField(default=True, verbose_name=_('Доступен'))
+
+    # Автомобиль и топливо (для расчёта пробега и расхода)
+    vehicle_name = models.CharField(max_length=100, blank=True, verbose_name=_('Автомобиль'),
+                                    help_text='Например: Лада Веста, гос. номер')
+    fuel_consumption = models.DecimalField(max_digits=5, decimal_places=2, default=8,
+                                           verbose_name=_('Расход топлива (л/100 км)'))
+    fuel_type = models.CharField(max_length=10, choices=FUEL_TYPES, default='ai95', verbose_name=_('Тип топлива'))
+    fuel_price = models.DecimalField(max_digits=8, decimal_places=2, default=0,
+                                     verbose_name=_('Цена топлива (₽/л)'))
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата регистрации'))
 
     class Meta:
@@ -468,6 +496,12 @@ class Client(models.Model):
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
     is_active = models.BooleanField(default=True, verbose_name=_('Активен'), help_text=_('Снимите галочку для умерших/съехавших — они исключаются из статистики'))
     apartment_obj = models.ForeignKey('Apartment', on_delete=models.SET_NULL, null=True, blank=True, related_name='residents', verbose_name=_('Квартира (объект)'))
+
+    # Банковские реквизиты клиента (для актов и УПД, если клиент — юрлицо)
+    bank_name = models.CharField(max_length=300, blank=True, verbose_name=_('Банк'))
+    bik = models.CharField(max_length=9, blank=True, verbose_name=_('БИК'))
+    corr_account = models.CharField(max_length=20, blank=True, verbose_name=_('Корр. счёт'))
+    settlement_account = models.CharField(max_length=20, blank=True, verbose_name=_('Расчётный счёт'))
 
     class Meta:
         verbose_name = _('Клиент')
@@ -758,6 +792,57 @@ class TraccarDevice(models.Model):
         return f"{self.master} → устройство #{self.internal_device_id}"
 
 
+class MasterTrackPoint(models.Model):
+    """Точка трека мастера: с GPS-маяка (Traccar) или из мобильного приложения"""
+    SOURCES = [
+        ('traccar', _('GPS-маяк')),
+        ('app', _('Приложение')),
+    ]
+
+    master = models.ForeignKey(Master, on_delete=models.CASCADE, related_name='track_points', verbose_name=_('Мастер'))
+    source = models.CharField(max_length=10, choices=SOURCES, default='traccar', db_index=True, verbose_name=_('Источник'))
+    latitude = models.FloatField(verbose_name=_('Широта'))
+    longitude = models.FloatField(verbose_name=_('Долгота'))
+    speed_kmh = models.FloatField(null=True, blank=True, verbose_name=_('Скорость (км/ч)'))
+    accuracy = models.FloatField(null=True, blank=True, verbose_name=_('Точность (м)'))
+    distance_km = models.FloatField(default=0, verbose_name=_('Пробег от предыдущей точки (км)'))
+    recorded_at = models.DateTimeField(db_index=True, verbose_name=_('Время точки'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Добавлена'))
+
+    class Meta:
+        verbose_name = _('Точка трека мастера')
+        verbose_name_plural = _('Точки трека мастеров')
+        ordering = ['recorded_at']
+        unique_together = [('master', 'source', 'recorded_at')]
+        indexes = [models.Index(fields=['master', 'recorded_at'])]
+
+    def __str__(self):
+        return f'{self.master_id} {self.source} {self.recorded_at:%d.%m %H:%M}'
+
+
+class MasterDailyMileage(models.Model):
+    """Дневной пробег мастера и расчёт топлива"""
+    master = models.ForeignKey(Master, on_delete=models.CASCADE, related_name='daily_mileage', verbose_name=_('Мастер'))
+    date = models.DateField(db_index=True, verbose_name=_('Дата'))
+    distance_km = models.FloatField(default=0, verbose_name=_('Пробег по маяку (км)'))
+    app_distance_km = models.FloatField(default=0, verbose_name=_('Пробег по приложению (км)'))
+    points_count = models.PositiveIntegerField(default=0, verbose_name=_('Точек трека'))
+    fuel_liters = models.FloatField(default=0, verbose_name=_('Топливо (л)'))
+    fuel_cost = models.FloatField(default=0, verbose_name=_('Стоимость топлива (₽)'))
+    first_point_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Первая точка'))
+    last_point_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Последняя точка'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Дневной пробег мастера')
+        verbose_name_plural = _('Дневной пробег мастеров')
+        ordering = ['-date']
+        unique_together = [('master', 'date')]
+
+    def __str__(self):
+        return f'{self.master} — {self.date:%d.%m.%Y}: {self.distance_km:.1f} км'
+
+
 class TraccarMileage(models.Model):
     """Пробег мастера по заявке"""
     order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='mileage', verbose_name=_('Заявка'))
@@ -994,6 +1079,40 @@ class PushToken(models.Model):
         return f'{self.user.username}: {self.token[:20]}...'
 
 
+class TelegramSettings(models.Model):
+    """Настройки Telegram-бота для уведомлений сотрудникам"""
+    bot_token = models.CharField(max_length=255, verbose_name=_('Токен бота'))
+    bot_username = models.CharField(max_length=100, blank=True, verbose_name=_('Username бота'),
+                                    help_text='Например: VideoServiceBot (для ссылки t.me/…)')
+    bot_name = models.CharField(max_length=100, default='CRM Bot', verbose_name=_('Имя бота'))
+    is_active = models.BooleanField(default=False, verbose_name=_('Активен'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    class Meta:
+        verbose_name = _('Настройки Telegram-бота')
+        verbose_name_plural = _('Настройки Telegram-бота')
+
+    def __str__(self):
+        return 'Telegram Bot: {}'.format(self.bot_name)
+
+
+class TelegramUserLink(models.Model):
+    """Привязка сотрудника CRM к Telegram (chat_id)"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='telegram_link', verbose_name=_('Пользователь'))
+    chat_id = models.CharField(max_length=50, blank=True, verbose_name=_('Chat ID'))
+    username = models.CharField(max_length=100, blank=True, verbose_name=_('Telegram username'))
+    link_code = models.CharField(max_length=20, blank=True, null=True, unique=True, verbose_name=_('Код привязки'))
+    is_subscribed = models.BooleanField(default=True, verbose_name=_('Уведомления'))
+    linked_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Привязан'))
+
+    class Meta:
+        verbose_name = _('Привязка Telegram')
+        verbose_name_plural = _('Привязки Telegram')
+
+    def __str__(self):
+        return '{} → chat {}'.format(self.user.username, self.chat_id or '—')
+
+
 class MaxBotSettings(models.Model):
     """Настройки бота Max"""
     bot_token = models.CharField(max_length=255, verbose_name=_('Токен бота'))
@@ -1065,6 +1184,11 @@ class InventoryItem(models.Model):
     location = models.CharField(max_length=200, blank=True, verbose_name=_('Место хранения'))  # устаревшее, используйте storage_location
     storage_location = models.ForeignKey('StorageLocation', on_delete=models.SET_NULL, null=True, blank=True, related_name='items', verbose_name=_('Ячейка хранения'))
     supplier = models.CharField(max_length=200, blank=True, verbose_name=_('Поставщик'))
+    photo = models.ImageField(upload_to='inventory/%Y/%m/', null=True, blank=True, verbose_name=_('Фото товара'))
+    photo_url = models.URLField(max_length=500, blank=True, verbose_name=_('Ссылка на фото'),
+                                help_text='Например, картинка с сайта производителя')
+    product_url = models.URLField(max_length=500, blank=True, verbose_name=_('Ссылка на товар'),
+                                  help_text='Страница товара на сайте производителя/магазина')
     warranty_months = models.PositiveIntegerField(default=12, verbose_name=_('Гарантия (мес.)'))
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата поступления'))
@@ -1130,17 +1254,21 @@ class InventoryMovement(models.Model):
             item = self.item
             if self.movement_type in ('out_to_master', 'installed'):
                 item.quantity = max(0, item.quantity - self.quantity)
-                if self.movement_type == 'out_to_master':
+                # Статус «У мастера»/«Установлено» — только если на складе
+                # ничего не осталось. Иначе позиция остаётся на складе.
+                if item.quantity > 0:
+                    item.status = 'in_stock'
+                elif self.movement_type == 'out_to_master':
                     item.status = 'with_master'
-                elif self.movement_type == 'installed':
+                else:
                     item.status = 'installed'
             elif self.movement_type in ('in', 'return_from_master', 'return_from_client'):
                 item.quantity += self.quantity
-                if item.status in ('with_master', 'installed', 'returned'):
+                if item.status != 'in_stock':
                     item.status = 'in_stock'
             elif self.movement_type == 'written_off':
                 item.quantity = max(0, item.quantity - self.quantity)
-                item.status = 'written_off'
+                item.status = 'written_off' if item.quantity == 0 else 'in_stock'
             elif self.movement_type == 'defect':
                 item.status = 'defective'
             elif self.movement_type == 'to_repair':
@@ -1214,19 +1342,24 @@ class SupplyInvoice(models.Model):
         self.save(update_fields=['total_ordered', 'total_received', 'updated_at'])
 
     def apply_received(self, user):
-        """Оприходовать принятые позиции на склад"""
+        """Оприходовать принятые позиции на склад (только ещё не оприходованные)"""
         from django.utils import timezone
         for item in self.items.filter(quantity_received__gt=0):
             inv_item = item.inventory_item
-            # Создаём движение прихода
+            delta = (item.quantity_received or 0) - (item.quantity_applied or 0)
+            if delta <= 0:
+                continue
+            # Создаём движение прихода только на разницу
             InventoryMovement.objects.create(
                 item=inv_item,
                 movement_type='in',
-                quantity=item.quantity_received,
+                quantity=delta,
                 supply_invoice=self,
                 performed_by=user,
                 notes=f'Приход по накладной №{self.invoice_number} от {self.invoice_date}'
             )
+            item.quantity_applied = item.quantity_received
+            item.save(update_fields=['quantity_applied'])
         # Определяем статус накладной
         has_partial = self.items.filter(quantity_received__gt=0, quantity_received__lt=models.F('quantity_ordered')).exists()
         all_received = not self.items.filter(quantity_received__lt=models.F('quantity_ordered')).exists()
@@ -1245,6 +1378,7 @@ class SupplyInvoiceItem(models.Model):
     inventory_item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name='supply_items', verbose_name=_('Номенклатура'))
     quantity_ordered = models.PositiveIntegerField(default=0, verbose_name=_('Заказано'))
     quantity_received = models.PositiveIntegerField(default=0, verbose_name=_('Принято'))
+    quantity_applied = models.PositiveIntegerField(default=0, verbose_name=_('Оприходовано'))
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name=_('Цена за ед.'))
     notes = models.CharField(max_length=300, blank=True, verbose_name=_('Примечание'))
 
@@ -1345,14 +1479,7 @@ class OutgoingInvoice(models.Model):
             inv_item = item.inventory_item
             if item.quantity > inv_item.quantity:
                 raise ValueError(f'Недостаточно {inv_item.name}: есть {inv_item.quantity}, требуется {item.quantity}')
-            inv_item.quantity -= item.quantity
-            inv_item.save(update_fields=['quantity', 'updated_at'])
-            # Если остаток 0 — снимаем с ячейки
-            if inv_item.quantity == 0:
-                inv_item.storage_location = None
-                inv_item.status = 'written_off'
-                inv_item.save(update_fields=['storage_location', 'status', 'updated_at'])
-            # Движение
+            # Остаток и статус обновляет InventoryMovement.save — вручную НЕ меняем
             InventoryMovement.objects.create(
                 item=inv_item,
                 movement_type='installed',
@@ -1552,10 +1679,22 @@ class OrderMaterial(models.Model):
 
 class Message(models.Model):
     """Сообщение между сотрудниками (чат)"""
+    ATTACHMENT_TYPES = [
+        ('image', _('Фото')),
+        ('file', _('Документ')),
+        ('audio', _('Голосовое')),
+    ]
+
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages', verbose_name=_('Отправитель'))
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='received_messages', verbose_name=_('Получатель'))
     is_broadcast = models.BooleanField(default=False, verbose_name=_('Всем'))
-    text = models.TextField(verbose_name=_('Текст'))
+    text = models.TextField(blank=True, default='', verbose_name=_('Текст'))
+    # ── Вложения (фото / документы / голосовые) ──
+    attachment = models.FileField(upload_to='chat/%Y/%m/', null=True, blank=True, verbose_name=_('Вложение'))
+    attachment_type = models.CharField(max_length=10, choices=ATTACHMENT_TYPES, blank=True, default='', verbose_name=_('Тип вложения'))
+    attachment_name = models.CharField(max_length=255, blank=True, default='', verbose_name=_('Имя файла'))
+    attachment_size = models.PositiveIntegerField(default=0, verbose_name=_('Размер, байт'))
+    attachment_duration = models.PositiveIntegerField(default=0, verbose_name=_('Длительность, сек'))
     read_by = models.ManyToManyField(User, blank=True, related_name='read_messages', verbose_name=_('Прочитали'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Отправлено'))
 
@@ -1565,7 +1704,7 @@ class Message(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f'{self.sender.username}: {self.text[:50]}'
+        return f'{self.sender.username}: {(self.text or self.attachment_name)[:50]}'
 
 
 class OrderComment(models.Model):
@@ -1705,6 +1844,7 @@ class LegalEntity(models.Model):
     corr_account = models.CharField(max_length=20, blank=True, verbose_name=_('Корр. счёт'))
     settlement_account = models.CharField(max_length=20, blank=True, verbose_name=_('Расчётный счёт'))
     director = models.CharField(max_length=200, blank=True, verbose_name=_('Директор'))
+    accountant = models.CharField(max_length=200, blank=True, verbose_name=_('Главный бухгалтер'))
     is_default = models.BooleanField(default=False, verbose_name=_('По умолчанию'))
     tax_system = models.CharField(max_length=10, choices=[
         ('usn', _('УСН (доходы)')),
@@ -1724,6 +1864,8 @@ class LegalEntity(models.Model):
     cp_show_signature = models.BooleanField(default=True, verbose_name=_('Показывать подпись'))
     cp_logo_file = models.ImageField(upload_to='legal_entity_logos/', null=True, blank=True, verbose_name=_('Логотип (файл)'))
     cp_signature_file = models.ImageField(upload_to='legal_entity_signatures/', null=True, blank=True, verbose_name=_('Подпись (файл)'))
+    stamp_file = models.ImageField(upload_to='legal_entity_stamps/', null=True, blank=True, verbose_name=_('Печать организации (файл)'),
+                                   help_text='PNG с прозрачным фоном — подставляется в счёт, акт и УПД по выбору')
     cp_signature_name = models.CharField(max_length=200, blank=True, verbose_name=_('ФИО подписанта'))
     cp_signature_title = models.CharField(max_length=200, blank=True, verbose_name=_('Должность подписанта'))
 
@@ -1739,6 +1881,36 @@ class LegalEntity(models.Model):
     def save(self, *args, **kwargs):
         if self.is_default:
             LegalEntity.objects.exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class LegalEntityBankAccount(models.Model):
+    """Расчётный счёт юрлица — у одной компании их может быть несколько
+    (например, Банк «Санкт-Петербург» — основной, Сбербанк — дополнительный)"""
+    legal_entity = models.ForeignKey('LegalEntity', on_delete=models.CASCADE,
+                                     related_name='bank_accounts', verbose_name=_('Юрлицо'))
+    title = models.CharField(max_length=100, verbose_name=_('Название счёта'),
+                             help_text='Например: Основной (Банк Санкт-Петербург)')
+    bank_name = models.CharField(max_length=300, blank=True, verbose_name=_('Банк'))
+    settlement_account = models.CharField(max_length=20, blank=True, verbose_name=_('Расчётный счёт'))
+    bik = models.CharField(max_length=9, blank=True, verbose_name=_('БИК'))
+    corr_account = models.CharField(max_length=20, blank=True, verbose_name=_('Корр. счёт'))
+    is_default = models.BooleanField(default=False, verbose_name=_('По умолчанию'))
+    is_active = models.BooleanField(default=True, verbose_name=_('Активен'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создан'))
+
+    class Meta:
+        verbose_name = _('Расчётный счёт юрлица')
+        verbose_name_plural = _('Расчётные счета юрлиц')
+        ordering = ['-is_default', 'title']
+
+    def __str__(self):
+        return f'{self.title} · {self.bank_name} · {self.settlement_account}'
+
+    def save(self, *args, **kwargs):
+        if self.is_default:
+            LegalEntityBankAccount.objects.filter(
+                legal_entity_id=self.legal_entity_id).exclude(pk=self.pk).update(is_default=False)
         super().save(*args, **kwargs)
 
 
@@ -1784,12 +1956,18 @@ class CommercialEstimate(models.Model):
     """Смета / Коммерческое предложение"""
     STATUS_CHOICES = [
         ('draft', _('Черновик')),
+        ('on_approval', _('На согласовании у ГД')),
+        ('approved_internal', _('Согласовано ГД')),
         ('sent', _('Отправлено клиенту')),
-        ('approved', _('Согласовано')),
-        ('rejected', _('Отклонено')),
+        ('approved', _('Согласовано клиентом')),
+        ('invoiced', _('Счёт выставлен')),
+        ('paid', _('Оплачено')),
         ('in_work', _('В работе')),
         ('completed', _('Завершено')),
+        ('rejected', _('Отклонено')),
     ]
+    # Сметы юрлицам дороже этой суммы согласует генеральный директор
+    DIRECTOR_APPROVAL_LIMIT = Decimal('50000')
     TAX_CHOICES = [
         ('usn', _('УСН (доходы)')),
         ('usn_dr', _('УСН (доходы-расходы)')),
@@ -1855,6 +2033,36 @@ class CommercialEstimate(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_estimates', verbose_name=_('Создал'))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Создано'))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Обновлено'))
+
+    # ══════ Согласование и оплата (жизненный цикл) ══════
+    requires_director_approval = models.BooleanField(default=False, verbose_name=_('Требует согласования ГД'))
+    director_approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                             related_name='director_approved_estimates', verbose_name=_('Согласовал (ГД)'))
+    director_approved_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата согласования ГД'))
+    director_comment = models.TextField(blank=True, verbose_name=_('Комментарий ГД'))
+
+    sent_to_client_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Отправлено клиенту'))
+    client_approved_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Клиент согласовал'))
+    client_approved_name = models.CharField(max_length=200, blank=True, verbose_name=_('Кто согласовал со стороны клиента'))
+
+    invoice_number = models.CharField(max_length=50, blank=True, verbose_name=_('Номер счёта'))
+    invoice_date = models.DateField(null=True, blank=True, verbose_name=_('Дата счёта'))
+    invoice_created_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Счёт сформирован'))
+    invoice_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Сумма счёта'))
+
+    payment_confirmed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                             related_name='payment_confirmed_estimates', verbose_name=_('Оплату подтвердил'))
+    payment_confirmed_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Оплата подтверждена'))
+    paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name=_('Оплаченная сумма'))
+    payment_comment = models.CharField(max_length=300, blank=True, verbose_name=_('Комментарий к оплате'))
+
+    work_started_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Работы начаты'))
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Работы завершены'))
+
+    act_number = models.CharField(max_length=50, blank=True, verbose_name=_('Номер акта'))
+    act_date = models.DateField(null=True, blank=True, verbose_name=_('Дата акта'))
+    upd_number = models.CharField(max_length=50, blank=True, verbose_name=_('Номер УПД'))
+    upd_date = models.DateField(null=True, blank=True, verbose_name=_('Дата УПД'))
 
     class Meta:
         verbose_name = _('Смета/КП')
@@ -1960,6 +2168,66 @@ class CommercialEstimate(models.Model):
                 self.number = f'{prefix}-{datetime.now().strftime("%y%m%d")}-{CommercialEstimate.objects.filter(created_at__date=datetime.now().date()).count() + 2:03d}'
         super().save(*args, **kwargs)
 
+    # ── Жизненный цикл сметы ──────────────────────────────────────────────
+    @property
+    def is_legal_client(self):
+        """Клиент — юридическое лицо?"""
+        return bool(self.client and self.client.is_legal)
+
+    def needs_director_approval(self):
+        """Согласование ГД: только для юрлиц и только если итог выше лимита"""
+        if not self.is_legal_client:
+            return False
+        return Decimal(str(self.total or 0)) > self.DIRECTOR_APPROVAL_LIMIT
+
+    def log_event(self, event_type, user=None, comment=''):
+        """Записать событие в журнал сметы"""
+        return EstimateEvent.objects.create(
+            estimate=self, event_type=event_type, user=user, comment=comment or '',
+        )
+
+    @property
+    def status_step(self):
+        """Номер шага в линейке жизненного цикла (для интерфейса)"""
+        order = ['draft', 'on_approval', 'approved_internal', 'sent',
+                 'approved', 'invoiced', 'paid', 'in_work', 'completed']
+        return order.index(self.status) if self.status in order else 0
+
+
+class EstimateEvent(models.Model):
+    """Журнал событий по смете (согласования, счета, оплаты, работы)"""
+    EVENT_TYPES = [
+        ('created', _('Смета создана')),
+        ('submitted', _('Отправлена на согласование')),
+        ('director_approved', _('Согласована ген. директором')),
+        ('director_rejected', _('Отклонена ген. директором')),
+        ('sent', _('Отправлена клиенту')),
+        ('client_approved', _('Согласована клиентом')),
+        ('client_rejected', _('Отклонена клиентом')),
+        ('invoiced', _('Выставлен счёт')),
+        ('paid', _('Оплата подтверждена бухгалтером')),
+        ('in_work', _('Запущена в работу')),
+        ('completed', _('Работы завершены')),
+        ('rejected', _('Отклонена')),
+        ('document', _('Сформирован документ')),
+    ]
+
+    estimate = models.ForeignKey(CommercialEstimate, on_delete=models.CASCADE,
+                                 related_name='events', verbose_name=_('Смета'))
+    event_type = models.CharField(max_length=30, choices=EVENT_TYPES, verbose_name=_('Событие'))
+    comment = models.TextField(blank=True, verbose_name=_('Комментарий'))
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name='estimate_events', verbose_name=_('Пользователь'))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата'))
+
+    class Meta:
+        verbose_name = _('Событие сметы')
+        verbose_name_plural = _('Журнал событий смет')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.estimate_id}: {self.get_event_type_display()}'
+
 
 class EstimateItem(models.Model):
     """Позиция в смете"""
@@ -2049,6 +2317,9 @@ class IssueOrder(models.Model):
     notes = models.TextField(blank=True, verbose_name=_('Примечания'))
     issued_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Дата выдачи'))
     received_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата получения'))
+    confirmed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='confirmed_issue_orders',
+                                     verbose_name=_('Кто подтвердил получение'))
     completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Дата закрытия'))
 
     class Meta:
@@ -2071,6 +2342,7 @@ class IssueOrderItem(models.Model):
     inventory_item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name='issue_items', verbose_name=_('Номенклатура'))
     source = models.CharField(max_length=15, choices=SOURCE_CHOICES, default='warehouse', verbose_name=_('Источник выдачи'))
     quantity_issued = models.PositiveIntegerField(default=0, verbose_name=_('Выдано'))
+    quantity_confirmed = models.PositiveIntegerField(null=True, blank=True, verbose_name=_('Принято сотрудником'))
     quantity_used = models.PositiveIntegerField(default=0, verbose_name=_('Использовано (установлено)'))
     quantity_returned = models.PositiveIntegerField(default=0, verbose_name=_('Возвращено'))
     need_return_old = models.BooleanField(default=False, verbose_name=_('Требуется возврат старого'))

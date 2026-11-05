@@ -7,7 +7,7 @@ from .views import (
     UserProfileViewSet, WorkShiftViewSet, OrderMediaViewSet, PushTokenViewSet,
     InventoryItemViewSet, InventoryMovementViewSet, PaymentViewSet, MasterSalaryViewSet,
     MessageViewSet,
-    LegalEntityViewSet, EstimateServiceViewSet, CommercialEstimateViewSet, EstimateItemViewSet, InstructionViewSet,
+    LegalEntityViewSet, LegalEntityBankAccountViewSet, EstimateServiceViewSet, CommercialEstimateViewSet, EstimateItemViewSet, InstructionViewSet,
     SupplierViewSet, SupplyInvoiceViewSet,
     IssueOrderViewSet, PurchaseRequestViewSet,
     ErcAccountViewSet, ErcBillingRecordViewSet,
@@ -45,6 +45,7 @@ from .asterisk_views import (
     asterisk_dashboard_view,
 )
 from .max_views import MaxSettingsViewSet, max_webhook_view
+from .telegram_views import TelegramSettingsViewSet, telegram_webhook_view
 from .inventory_views import issue_zip_to_master, master_inventory
 from .views import master_card  # noqa: E402
 
@@ -64,12 +65,14 @@ router.register(r'shifts', WorkShiftViewSet, basename='work-shifts')
 router.register(r'order-media', OrderMediaViewSet, basename='order-media')
 router.register(r'push-tokens', PushTokenViewSet, basename='push-tokens')
 router.register(r'max-settings', MaxSettingsViewSet, basename='max-settings')
+router.register(r'telegram-settings', TelegramSettingsViewSet, basename='telegram-settings')
 router.register(r'inventory', InventoryItemViewSet, basename='inventory')
 router.register(r'inventory-movements', InventoryMovementViewSet, basename='inventory-movements')
 router.register(r'payments', PaymentViewSet, basename='payments')
 router.register(r'master-salaries', MasterSalaryViewSet, basename='master-salaries')
 router.register(r'messages', MessageViewSet, basename='messages')
 router.register(r'legal-entities', LegalEntityViewSet, basename='legal-entities')
+router.register(r'bank-accounts', LegalEntityBankAccountViewSet, basename='bank-accounts')
 router.register(r'estimate-services', EstimateServiceViewSet, basename='estimate-services')
 router.register(r'estimates', CommercialEstimateViewSet, basename='estimates')
 router.register(r'estimate-items', EstimateItemViewSet, basename='estimate-items')
@@ -109,6 +112,7 @@ urlpatterns = [
     path('auth/refresh/', refresh_token_view, name='auth-refresh'),
     path('users/me/', me_view, name='users-me'),
     path('max/webhook/', max_webhook_view, name='max-webhook'),
+    path('telegram/webhook/', telegram_webhook_view, name='telegram-webhook'),
     path('import/clients/', import_clients_excel_view, name='import-clients'),
     path('import/erc/', import_erc_excel_view, name='import-erc'),
     path('import/preview/', import_preview_view, name='import-preview'),

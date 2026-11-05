@@ -458,6 +458,12 @@ export interface InventoryItem {
   model_name: string;
   barcode: string | null;
   quantity: number;
+  issued_qty?: number;
+  issued_breakdown?: { master: string; qty: number }[];
+  photo?: string | null;
+  photo_url?: string;
+  photo_display?: string;
+  product_url?: string;
   unit: string;
   cost_price: number | null;
   sale_price: number | null;

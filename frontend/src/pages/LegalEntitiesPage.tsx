@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../services/api';
+import InnSuggest from '../components/InnSuggest';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -103,8 +104,23 @@ const LegalEntitiesPage: React.FC = () => {
             <Select allowClear placeholder="Выберите тип"
               options={Object.entries(LEGAL_TYPES).map(([k, v]) => ({ label: v, value: k }))} />
           </Form.Item>
-          <Space>
-            <Form.Item name="inn" label="ИНН"><Input maxLength={12} style={{ width: 180 }} /></Form.Item>
+          <Space align="start">
+            <Form.Item name="inn" label="ИНН (поиск в ЕГРЮЛ)">
+              <InnSuggest
+                placeholder="ИНН — Enter для поиска"
+                style={{ width: 200 }}
+                onFound={(company) => {
+                  form.setFieldsValue({
+                    full_name: company.name || company.short_name,
+                    inn: company.inn,
+                    kpp: company.kpp,
+                    ogrn: company.ogrn,
+                    legal_address: company.legal_address,
+                    director_name: company.director,
+                  });
+                }}
+              />
+            </Form.Item>
             <Form.Item name="kpp" label="КПП"><Input maxLength={9} style={{ width: 150 }} /></Form.Item>
             <Form.Item name="ogrn" label="ОГРН"><Input maxLength={15} style={{ width: 180 }} /></Form.Item>
           </Space>

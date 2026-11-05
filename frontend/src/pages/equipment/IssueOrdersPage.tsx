@@ -81,6 +81,17 @@ const IssueOrdersPage: React.FC = () => {
     },
     { title: 'Выдан', dataIndex: 'issued_at', key: 'issued', width: 150, render: (v: string) => new Date(v).toLocaleString('ru') },
     {
+      title: 'Подтверждение получения', key: 'confirmed', width: 230,
+      render: (_: any, r: any) => r.status === 'pending' ? (
+        <Tag color="orange">Ждём подтверждения мастера</Tag>
+      ) : (
+        <span style={{ fontSize: 12 }}>
+          <Tag color="green">✅ {r.confirmed_by_name || r.master_name || '—'}</Tag>
+          {r.received_at ? <span style={{ color: '#999' }}>{new Date(r.received_at).toLocaleString('ru')}</span> : null}
+        </span>
+      ),
+    },
+    {
       title: '', key: 'actions', width: 150, render: (_: any, r: IssueOrder) => (
         <Space>
           <Button size="small" icon={<EyeOutlined />} onClick={() => { setSelectedOrder(r); setDetailModal(true); }}>Детали</Button>
@@ -192,6 +203,12 @@ const IssueOrdersPage: React.FC = () => {
               columns={[
                 { title: 'Товар', dataIndex: 'item_name', width: 220 },
                 { title: 'Выдано', dataIndex: 'quantity_issued', width: 70 },
+                {
+                  title: 'Принято', dataIndex: 'quantity_confirmed', width: 85,
+                  render: (v: number | null, r: any) => v == null
+                    ? <Text type="secondary">—</Text>
+                    : <Text style={{ color: v < r.quantity_issued ? '#fa541c' : '#3f8600', fontWeight: 600 }}>{v}</Text>,
+                },
                 { title: 'Исп.', dataIndex: 'quantity_used', width: 60 },
                 { title: 'Возвр.', dataIndex: 'quantity_returned', width: 60 },
                 { title: 'Остаток', dataIndex: 'remaining', width: 70, render: (v: number) => <Text style={{ color: v > 0 ? '#fa8c16' : '#3f8600' }}>{v}</Text> },

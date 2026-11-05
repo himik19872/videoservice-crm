@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic, Form, Input, Tooltip, Popconfirm, Switch, Divider } from 'antd';
-import { PlusOutlined, ReloadOutlined, ExportOutlined, BarcodeOutlined, ShopOutlined, FileTextOutlined, SendOutlined, ShoppingCartOutlined, EditOutlined, EnvironmentOutlined, DeleteOutlined, CheckCircleOutlined, PrinterOutlined, ScanOutlined, ToolOutlined, TeamOutlined, ImportOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Typography, message, Tag, Card, Row, Col, Modal, InputNumber, Select, Statistic, Form, Input, Tooltip, Popconfirm, Switch, Divider, Avatar, Image, Upload, Drawer, Empty, Descriptions } from 'antd';
+import { PlusOutlined, ReloadOutlined, ExportOutlined, BarcodeOutlined, ShopOutlined, FileTextOutlined, SendOutlined, ShoppingCartOutlined, EditOutlined, EnvironmentOutlined, DeleteOutlined, CheckCircleOutlined, PrinterOutlined, ScanOutlined, ToolOutlined, TeamOutlined, ImportOutlined, PictureOutlined, UploadOutlined, LinkOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import BarcodeScanner from '../../components/BarcodeScanner';
@@ -24,13 +24,10 @@ const InventoryPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>({});
   const [issueModal, setIssueModal] = useState(false);
-  const [addModal, setAddModal] = useState(false);
-  const [createModal, setCreateModal] = useState(false);
   const [editModal, setEditModal] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [tab, setTab] = useState<'items' | 'movements' | 'upd' | 'masters' | 'tools' | 'settings' | 'returns' | 'repair'>('items');
-  const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
   const [locEditModal, setLocEditModal] = useState(false);
@@ -73,6 +70,10 @@ const InventoryPage: React.FC = () => {
   // Ремонт
   const [repairItems, setRepairItems] = useState<InventoryItem[]>([]);
   const [repairLoading, setRepairLoading] = useState(false);
+
+  // Карточка товара (фото/ссылки)
+  const [cardItem, setCardItem] = useState<InventoryItem | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   const navigate = useNavigate();
 
@@ -397,42 +398,6 @@ const InventoryPage: React.FC = () => {
     }
   };
 
-  const generateBarcode = async (item: InventoryItem) => {
-    try {
-      const res = await api.post(`/inventory/${item.id}/generate_barcode/`);
-      message.success(`Штрихкод: ${res.data.barcode}`);
-      fetchAll();
-    } catch (e: any) { message.error('Ошибка генерации штрихкода'); }
-  };
-
-  const handleAddStock = async (qty: number) => {
-    if (!selectedItem) return;
-    try {
-      await api.post(`/inventory/${selectedItem.id}/add_stock/`, { quantity: qty });
-      message.success(`Приход: +${qty} шт.`);
-      setAddModal(false);
-      fetchAll();
-    } catch (e: any) { message.error(e.response?.data?.error || 'Ошибка'); }
-  };
-
-  const handleCreateItem = async (values: any) => {
-    try {
-      // Авто-размещение: если не указана ячейка — берём первую свободную
-      const payload = { ...values };
-      if (!payload.storage_location && storageLocations.length > 0) {
-        const freeLoc = storageLocations.find(l => !l.is_full && l.is_active);
-        if (freeLoc) payload.storage_location = freeLoc.id;
-      }
-      await api.post('/inventory/', payload);
-      message.success(payload.storage_location
-        ? 'Позиция создана и размещена в ячейке'
-        : 'Позиция создана');
-      setCreateModal(false);
-      createForm.resetFields();
-      fetchAll();
-    } catch (e: any) { message.error(e.response?.data?.detail || 'Ошибка'); }
-  };
-
   const openEdit = (item: InventoryItem) => {
     setSelectedItem(item);
     editForm.setFieldsValue({
@@ -447,6 +412,8 @@ const InventoryPage: React.FC = () => {
       supplier: item.supplier,
       storage_location: item.storage_location,
       warranty_months: item.warranty_months,
+      photo_url: item.photo_url,
+      product_url: item.product_url,
       notes: item.notes,
     });
     fetchStorageLocations();
@@ -464,6 +431,35 @@ const InventoryPage: React.FC = () => {
     } catch (e: any) { message.error(e.response?.data?.detail || 'Ошибка'); }
   };
 
+  /** Загрузка фото товара */
+  const uploadPhoto = async (item: InventoryItem, file: File) => {
+    const form = new FormData();
+    form.append('photo', file);
+    setPhotoUploading(true);
+    try {
+      const res = await api.post(`/inventory/${item.id}/upload_photo/`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      message.success('Фото загружено');
+      setCardItem(res.data);
+      setSelectedItem(res.data);
+      fetchAll();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Не удалось загрузить фото');
+    } finally { setPhotoUploading(false); }
+  };
+
+  /** Удаление фото товара */
+  const clearPhoto = async (item: InventoryItem) => {
+    try {
+      const res = await api.post(`/inventory/${item.id}/clear_photo/`);
+      message.success('Фото удалено');
+      setCardItem(res.data);
+      setSelectedItem(res.data);
+      fetchAll();
+    } catch (e: any) { message.error('Ошибка'); }
+  };
+
   const handleIssue = async (masterId: number, qty: number) => {
     if (!selectedItem) return;
     try {
@@ -475,12 +471,47 @@ const InventoryPage: React.FC = () => {
   };
 
   const columns = [
-    { title: 'Название', dataIndex: 'name', key: 'name', width: 250 },
+    {
+      title: '', key: 'photo', width: 60,
+      render: (_: any, r: InventoryItem) => (
+        <div onClick={() => setCardItem(r)} style={{ cursor: 'pointer' }}>
+          {r.photo_display ? (
+            <Avatar shape="square" size={40} src={r.photo_display} />
+          ) : (
+            <Avatar shape="square" size={40} icon={<PictureOutlined />} style={{ background: '#f0f0f0', color: '#bbb' }} />
+          )}
+        </div>
+      ),
+    },
+    {
+      title: 'Название', dataIndex: 'name', key: 'name', width: 230,
+      render: (v: string, r: InventoryItem) => (
+        <a onClick={() => setCardItem(r)} title="Открыть карточку товара">{v}</a>
+      ),
+    },
     { title: 'Штрих-код', dataIndex: 'barcode', key: 'barcode', width: 130, render: (v: string | null) => v ? <Tag color="geekblue">{v}</Tag> : <Tag color="default">—</Tag> },
     { title: 'Тип', dataIndex: 'item_type_display', key: 'type', width: 130 },
     { title: 'S/N', dataIndex: 'serial_number', key: 'sn', width: 140 },
     { title: 'Модель', dataIndex: 'model_name', key: 'model', width: 120 },
-    { title: 'Кол-во', dataIndex: 'quantity', key: 'qty', width: 70 },
+    {
+      title: 'На складе', dataIndex: 'quantity', key: 'qty', width: 100,
+      render: (v: number, r: InventoryItem) => (
+        <Text strong style={{ color: v > 0 ? '#3f8600' : '#ff4d4f' }}>{v} {r.unit || 'шт.'}</Text>
+      ),
+    },
+    {
+      title: 'У мастеров', key: 'issued', width: 130,
+      render: (_: any, r: InventoryItem) => {
+        const qty = r.issued_qty || 0;
+        if (!qty) return <Text type="secondary">—</Text>;
+        const tip = (r.issued_breakdown || []).map(b => `${b.master}: ${b.qty}`).join('\n');
+        return (
+          <Tooltip title={tip || undefined}>
+            <Tag color="blue">{qty} шт.</Tag>
+          </Tooltip>
+        );
+      },
+    },
     { title: 'Цена', key: 'price', width: 100, render: (_: any, r: InventoryItem) => r.sale_price ? `${r.sale_price} ₽` : '—' },
     {
       title: 'Ячейка', dataIndex: 'storage_location_info', key: 'loc', width: 110,
@@ -494,13 +525,8 @@ const InventoryPage: React.FC = () => {
       title: 'Статус', dataIndex: 'status_display', key: 'status', width: 110, render: (_: any, r: InventoryItem) => <Tag color={statusColors[r.status]}>{r.status_display}</Tag>
     },
     {
-      title: 'Действия', key: 'actions', width: 300, render: (_: any, r: InventoryItem) => (
-        <Space size="small" wrap>
-          <Button size="small" icon={<PlusOutlined />} onClick={() => { setSelectedItem(r); setAddModal(true); }}>Приход</Button>
-          <Button size="small" icon={<ExportOutlined />} onClick={() => { setSelectedItem(r); setIssueModal(true); }}>Выдать</Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} title="Редактировать">Изменить</Button>
-          <Button size="small" icon={<BarcodeOutlined />} onClick={() => generateBarcode(r)} title="Сгенерировать штрихкод">SKU</Button>
-        </Space>
+      title: 'Действия', key: 'actions', width: 110, render: (_: any, r: InventoryItem) => (
+        <Button size="small" icon={<EyeOutlined />} onClick={() => setCardItem(r)}>Открыть</Button>
       ),
     },
   ];
@@ -539,8 +565,8 @@ const InventoryPage: React.FC = () => {
         <Button type={tab === 'settings' ? 'primary' : 'default'} icon={<EnvironmentOutlined />} onClick={() => { setTab('settings'); fetchStorageLocations(); }}>Ячейки</Button>
         {tab === 'items' && (
           <>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); fetchStorageLocations(); setCreateModal(true); }}>
-              Новая позиция
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/supply-invoices')}>
+              Приход по накладной
             </Button>
             <Button icon={<FileTextOutlined />} onClick={() => setUpdModalVisible(true)}>Выдать по накладной (УПД)</Button>
             <Button icon={<BarcodeOutlined />} onClick={() => setScannerVisible(true)}>Сканер</Button>
@@ -1081,48 +1107,8 @@ const InventoryPage: React.FC = () => {
         )}
       </Modal>
 
-      <Modal title="Приход на склад" open={addModal} onCancel={() => setAddModal(false)} footer={null}>
-        <StockForm item={selectedItem} onSubmit={handleAddStock} mode="add" />
-      </Modal>
-
       <Modal title="Выдать мастеру" open={issueModal} onCancel={() => setIssueModal(false)} footer={null}>
         <IssueForm item={selectedItem} onSubmit={handleIssue} />
-      </Modal>
-
-      <Modal title="Новая позиция на складе" open={createModal} onCancel={() => setCreateModal(false)} footer={null}>
-        <Form form={createForm} layout="vertical" onFinish={handleCreateItem}>
-          <Form.Item name="name" label="Название" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="item_type" label="Тип" rules={[{ required: true }]}>
-            <Select options={ITEM_TYPES} />
-          </Form.Item>
-          <Form.Item name="barcode" label="Штрих-код (SKU)" help="Оставьте пустым — сгенерируется автоматически">
-            <Input placeholder="или авто" prefix={<BarcodeOutlined />} />
-          </Form.Item>
-          <Form.Item name="serial_number" label="Серийный номер"><Input /></Form.Item>
-          <Form.Item name="model_name" label="Модель"><Input /></Form.Item>
-          <Row gutter={12}>
-            <Col span={8}><Form.Item name="quantity" label="Кол-во" initialValue={1}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="cost_price" label="Закупка (₽)" help="Продажа: +25% авто"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="sale_price" label="Продажа (₽)" help="Авто если пусто"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-          </Row>
-          <Form.Item name="supplier" label="Поставщик"><Input placeholder="Название поставщика" /></Form.Item>
-          <Form.Item name="storage_location" label="Ячейка хранения" help="Авто — первая свободная">
-            <Select
-              allowClear
-              showSearch
-              placeholder="Авто-размещение"
-              optionFilterProp="label"
-              options={storageLocations.map(l => ({
-                value: l.id,
-                label: `[${l.code}] ${l.zone || ''} / ст.${l.rack || '—'} / п.${l.shelf || '—'} (своб. ${l.free_space === null ? '∞' : l.free_space})`,
-                disabled: l.is_full,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="warranty_months" label="Гарантия (мес.)" initialValue={12}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
-          <Button type="primary" htmlType="submit" block>Создать</Button>
-        </Form>
       </Modal>
 
       {/* Модалка редактирования */}
@@ -1155,6 +1141,32 @@ const InventoryPage: React.FC = () => {
             />
           </Form.Item>
           <Form.Item name="warranty_months" label="Гарантия (мес.)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+          <Divider orientation="left" plain style={{ fontSize: 13 }}>🖼 Фото и ссылки</Divider>
+          {selectedItem && (
+            <div style={{ marginBottom: 12 }}>
+              {selectedItem.photo_display ? (
+                <Space align="start">
+                  <Image src={selectedItem.photo_display} width={90} height={90} style={{ objectFit: 'cover', borderRadius: 8 }} />
+                  <Space direction="vertical">
+                    <Upload showUploadList={false} accept="image/*" beforeUpload={(f) => { uploadPhoto(selectedItem, f as File); return false; }}>
+                      <Button size="small" icon={<UploadOutlined />} loading={photoUploading}>Заменить фото</Button>
+                    </Upload>
+                    <Button size="small" danger icon={<DeleteOutlined />} onClick={() => clearPhoto(selectedItem)}>Удалить</Button>
+                  </Space>
+                </Space>
+              ) : (
+                <Upload showUploadList={false} accept="image/*" beforeUpload={(f) => { uploadPhoto(selectedItem, f as File); return false; }}>
+                  <Button icon={<UploadOutlined />} loading={photoUploading}>Загрузить фото файлом</Button>
+                </Upload>
+              )}
+            </div>
+          )}
+          <Form.Item name="photo_url" label="Ссылка на фото" help="Используется, если файл не загружен">
+            <Input placeholder="https://..." prefix={<PictureOutlined />} />
+          </Form.Item>
+          <Form.Item name="product_url" label="Ссылка на товар (сайт производителя)">
+            <Input placeholder="https://..." prefix={<LinkOutlined />} />
+          </Form.Item>
           <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
           <Button type="primary" htmlType="submit" block>Сохранить</Button>
         </Form>
@@ -1165,18 +1177,90 @@ const InventoryPage: React.FC = () => {
         onClose={() => setScannerVisible(false)}
         onScanned={handleBarcodeScanned}
       />
-    </div>
-  );
-};
 
-const StockForm: React.FC<{ item: InventoryItem | null; onSubmit: (qty: number) => void; mode: string }> = ({ item, onSubmit }) => {
-  const [qty, setQty] = useState(1);
-  if (!item) return null;
-  return (
-    <div>
-      <p><b>{item.name}</b> (сейчас: {item.quantity} шт.)</p>
-      <InputNumber min={1} value={qty} onChange={v => setQty(v || 1)} style={{ width: '100%' }} placeholder="Количество" />
-      <Button type="primary" style={{ marginTop: 16 }} block onClick={() => onSubmit(qty)}>Добавить</Button>
+      {/* Карточка товара */}
+      <Drawer
+        open={!!cardItem}
+        onClose={() => setCardItem(null)}
+        width={460}
+        title={cardItem?.name}
+      >
+        {cardItem && (
+          <div>
+            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+              {cardItem.photo_display ? (
+                <Image
+                  src={cardItem.photo_display}
+                  style={{ maxHeight: 220, borderRadius: 10, objectFit: 'contain' }}
+                />
+              ) : (
+                <div style={{ background: '#fafafa', border: '1px dashed #d9d9d9', borderRadius: 10, padding: 28 }}>
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет фото" />
+                </div>
+              )}
+              <Space style={{ marginTop: 10 }}>
+                <Upload
+                  showUploadList={false}
+                  accept="image/*"
+                  beforeUpload={(f) => { uploadPhoto(cardItem, f as File); return false; }}
+                >
+                  <Button size="small" icon={<UploadOutlined />} loading={photoUploading}>Загрузить фото</Button>
+                </Upload>
+                {cardItem.photo_display ? (
+                  <Button size="small" danger icon={<DeleteOutlined />} onClick={() => clearPhoto(cardItem)}>Удалить</Button>
+                ) : null}
+              </Space>
+              <div style={{ fontSize: 11, color: '#999', marginTop: 6 }}>
+                Файл или ссылка на фото с сайта производителя
+              </div>
+            </div>
+
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="Тип">{cardItem.item_type_display}</Descriptions.Item>
+              <Descriptions.Item label="Модель">{cardItem.model_name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Штрих-код">{cardItem.barcode || '—'}</Descriptions.Item>
+              <Descriptions.Item label="S/N">{cardItem.serial_number || '—'}</Descriptions.Item>
+              <Descriptions.Item label="На складе">
+                <Text strong style={{ color: cardItem.quantity > 0 ? '#3f8600' : '#ff4d4f' }}>
+                  {cardItem.quantity} {cardItem.unit || 'шт.'}
+                </Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="У мастеров">
+                {(cardItem.issued_qty || 0) > 0 ? (
+                  <div>
+                    <Tag color="blue">{cardItem.issued_qty} шт.</Tag>
+                    {(cardItem.issued_breakdown || []).map((b, i) => (
+                      <div key={i} style={{ fontSize: 12, color: '#666' }}>{b.master}: {b.qty}</div>
+                    ))}
+                  </div>
+                ) : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Ячейка">{cardItem.storage_location_info?.code || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Закупка">{cardItem.cost_price ? `${cardItem.cost_price} ₽` : '—'}</Descriptions.Item>
+              <Descriptions.Item label="Продажа">{cardItem.sale_price ? `${cardItem.sale_price} ₽` : '—'}</Descriptions.Item>
+              <Descriptions.Item label="Поставщик">{cardItem.supplier || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Статус">
+                <Tag color={statusColors[cardItem.status]}>{cardItem.status_display}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Ссылка на товар">
+                {cardItem.product_url ? (
+                  <a href={cardItem.product_url} target="_blank" rel="noreferrer"><LinkOutlined /> Открыть сайт</a>
+                ) : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Примечания">{cardItem.notes || '—'}</Descriptions.Item>
+            </Descriptions>
+
+            <Divider style={{ margin: '16px 0' }} />
+            <Space wrap>
+              <Button icon={<ExportOutlined />} onClick={() => { setSelectedItem(cardItem); setIssueModal(true); }}>Выдать</Button>
+              <Button icon={<EditOutlined />} onClick={() => { openEdit(cardItem); setCardItem(null); }}>Редактировать</Button>
+            </Space>
+            <div style={{ fontSize: 11, color: '#999', marginTop: 8 }}>
+              Приход товара оформляется только через накладную поставщика
+            </div>
+          </div>
+        )}
+      </Drawer>
     </div>
   );
 };

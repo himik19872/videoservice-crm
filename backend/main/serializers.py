@@ -4,6 +4,7 @@ from django.contrib.auth import authenticate
 from .models import Region, Master, Client, Equipment, Order, OrderHistory, Report, Building, TraccarSettings, TraccarDevice, SystemSettings, OrderMedia, UserProfile, WorkShift, PushToken
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary, Message
 from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem, Instruction
+from .models import EstimateEvent, LegalEntityBankAccount
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
@@ -83,7 +84,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'master_profile', 'profile']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role',
+                  'is_active', 'master_profile', 'profile']
 
     def get_role(self, obj):
         try:
@@ -108,6 +110,8 @@ class UserSerializer(serializers.ModelSerializer):
             return {
                 'role': p.role, 'phone': p.phone,
                 'is_on_shift': p.is_on_shift,
+                'access_scope': p.access_scope or 'both',
+                'permissions': p.permissions or {},
                 'shift_started_at': p.shift_started_at.isoformat() if p.shift_started_at else None,
             }
         except UserProfile.DoesNotExist:
@@ -118,7 +122,9 @@ class UserSerializer(serializers.ModelSerializer):
                 p = UserProfile.objects.create(user=obj, role='dispatcher', phone='')
             else:
                 p = UserProfile.objects.create(user=obj, role='master', phone='')
-            return {'role': p.role, 'phone': p.phone, 'is_on_shift': False, 'shift_started_at': None}
+            return {'role': p.role, 'phone': p.phone, 'is_on_shift': False,
+                    'access_scope': p.access_scope or 'both',
+                    'permissions': p.permissions or {}, 'shift_started_at': None}
 
 
 class LoginSerializer(serializers.Serializer):
@@ -137,21 +143,23 @@ class MasterSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     username = serializers.CharField(source='user.username', required=False)
     password = serializers.CharField(source='user.password', write_only=True, required=False, allow_blank=True)
-    first_name = serializers.CharField(source='user.first_name', required=False)
-    last_name = serializers.CharField(source='user.last_name', required=False)
+    first_name = serializers.CharField(source='user.first_name', required=False, allow_blank=True)
+    last_name = serializers.CharField(source='user.last_name', required=False, allow_blank=True)
     email = serializers.EmailField(source='user.email', required=False, allow_blank=True)
     region = RegionSerializer(read_only=True)
     region_id = serializers.PrimaryKeyRelatedField(
         queryset=Region.objects.all(), source='region', write_only=True, required=False, allow_null=True
     )
     traccar_device = serializers.SerializerMethodField()
+    fuel_type_display = serializers.CharField(source='get_fuel_type_display', read_only=True)
 
     class Meta:
         model = Master
         fields = [
             'id', 'user', 'full_name', 'username', 'password',
             'first_name', 'last_name', 'email', 'region', 'region_id',
-            'phone', 'is_available', 'created_at', 'traccar_device'
+            'phone', 'is_available', 'created_at', 'traccar_device',
+            'vehicle_name', 'fuel_consumption', 'fuel_type', 'fuel_type_display', 'fuel_price',
         ]
         read_only_fields = ['id', 'created_at']
 
@@ -215,6 +223,7 @@ class ClientSerializer(serializers.ModelSerializer):
             'apartment', 'district',
             'contract_type', 'erc_enabled', 'tariff', 'tariff_name', 'tariff_amount',
             'monthly_payment', 'source', 'notes',
+            'bank_name', 'bik', 'corr_account', 'settlement_account',
             'created_at',
         ]
         read_only_fields = ['id', 'created_at', 'entrance_number', 'tariff_name', 'tariff_amount', 'management_company_name']
@@ -842,12 +851,16 @@ class InstructionSerializer(serializers.ModelSerializer):
 class AppVersionSerializer(serializers.ModelSerializer):
     platform_display = serializers.CharField(source='get_platform_display', read_only=True)
     download_url = serializers.SerializerMethodField()
+    # Явный дефолт: при загрузке через API без поля is_active версия должна быть активной
+    is_active = serializers.BooleanField(default=True, required=False)
 
     class Meta:
         model = AppVersion
+        # apk_file и is_active обязательны в fields — иначе DRF молча игнорирует
+        # загружаемый файл и флаг активности при создании версии через API.
         fields = ['id', 'platform', 'platform_display', 'version', 'version_code',
-                  'changelog', 'file_size', 'file_hash',
-                  'is_required', 'min_android_version',
+                  'changelog', 'apk_file', 'file_size', 'file_hash',
+                  'is_active', 'is_required', 'min_android_version',
                   'download_url', 'created_at']
         read_only_fields = ['id', 'created_at']
 
@@ -862,16 +875,19 @@ class AppVersionSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     username = serializers.CharField(write_only=True, required=False)
-    password = serializers.CharField(write_only=True, required=False)
-    first_name = serializers.CharField(write_only=True, required=False)
-    last_name = serializers.CharField(write_only=True, required=False)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # allow_blank — иначе у сотрудников без имени/фамилии сохранение падало с 400
+    first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
     permissions = serializers.JSONField(required=False, default=dict)
+    # Блокировка учётной записи (не путать с is_on_shift — сменой)
+    is_active = serializers.BooleanField(required=False)
 
     class Meta:
         model = UserProfile
-        fields = ['id', 'user', 'role', 'phone', 'is_on_shift', 'shift_started_at',
-                  'username', 'password', 'first_name', 'last_name', 'email', 'permissions']
+        fields = ['id', 'user', 'role', 'access_scope', 'phone', 'is_on_shift', 'shift_started_at',
+                  'username', 'password', 'first_name', 'last_name', 'email', 'is_active', 'permissions']
 
     def create(self, validated_data):
         username = validated_data.pop('username', None)
@@ -879,9 +895,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
         first_name = validated_data.pop('first_name', '')
         last_name = validated_data.pop('last_name', '')
         email = validated_data.pop('email', '')
+        is_active = validated_data.pop('is_active', True)
         if not username:
             import random; username = f"user{random.randint(100, 999)}"
         user = User.objects.create_user(username=username, password=password, first_name=first_name, last_name=last_name, email=email)
+        user.is_active = is_active
         role = validated_data.get('role', 'master')
         user.is_superuser = (role == 'admin')
         user.is_staff = (role in ['admin', 'dispatcher'])
@@ -900,12 +918,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
         first_name = validated_data.pop('first_name', None)
         last_name = validated_data.pop('last_name', None)
         email = validated_data.pop('email', None)
+        is_active = validated_data.pop('is_active', None)
         user = instance.user
         if username: user.username = username
         if password: user.set_password(password)
         if first_name is not None: user.first_name = first_name
         if last_name is not None: user.last_name = last_name
         if email is not None: user.email = email
+        if is_active is not None: user.is_active = is_active
         role = validated_data.get('role', instance.role)
         user.is_superuser = (role == 'admin')
         user.is_staff = (role in ['admin', 'dispatcher'])
@@ -941,11 +961,49 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField()
     total_value = serializers.SerializerMethodField()
     storage_location_info = serializers.SerializerMethodField()
+    photo_display = serializers.SerializerMethodField()
+    issued_qty = serializers.SerializerMethodField()
+    issued_breakdown = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_photo_display(self, obj):
+        """Загруженное фото (абсолютный URL) или ссылка на фото производителя."""
+        if obj.photo:
+            request = self.context.get('request')
+            url = obj.photo.url
+            return request.build_absolute_uri(url) if request else url
+        return obj.photo_url or ''
+
+    def get_issued_qty(self, obj):
+        """Сколько единиц сейчас «у сотрудников» (выдано − использовано − возвращено)."""
+        total = 0
+        for it in obj.issue_items.all():
+            rem = (it.quantity_issued or 0) - (it.quantity_used or 0) - (it.quantity_returned or 0)
+            if rem > 0:
+                total += rem
+        return total
+
+    def get_issued_breakdown(self, obj):
+        """Разбивка выданного по сотрудникам."""
+        result = {}
+        for it in obj.issue_items.all():
+            rem = (it.quantity_issued or 0) - (it.quantity_used or 0) - (it.quantity_returned or 0)
+            if rem <= 0:
+                continue
+            master = it.issue_order.master if it.issue_order else None
+            if not master:
+                continue
+            user = getattr(master, 'user', None)
+            name = ''
+            if user:
+                name = user.get_full_name() or user.username
+            name = name or str(master)
+            result[name] = result.get(name, 0) + rem
+        return [{'master': k, 'qty': v} for k, v in result.items()]
 
     def create(self, validated_data):
         """При создании — авто-привязка к первой свободной ячейке, если не указана явно"""
@@ -1130,18 +1188,62 @@ class MasterSalarySerializer(serializers.ModelSerializer):
         return obj.get_status_display()
 
 
+def _detect_attachment_type(filename):
+    """Определяем тип вложения по расширению."""
+    ext = (filename.rsplit('.', 1)[-1] if '.' in filename else '').lower()
+    if ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'):
+        return 'image'
+    if ext in ('m4a', 'aac', 'mp3', 'wav', 'ogg', 'opus', 'amr', 'caf', '3gp'):
+        return 'audio'
+    return 'file'
+
+
 class MessageSerializer(serializers.ModelSerializer):
     sender_name = serializers.SerializerMethodField()
+    sender_photo = serializers.SerializerMethodField()
     recipient_name = serializers.SerializerMethodField()
     unread = serializers.SerializerMethodField()
+    attachment_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ['id', 'sender', 'sender_name', 'recipient', 'recipient_name', 'is_broadcast', 'text', 'read_by', 'created_at', 'unread']
-        read_only_fields = ['id', 'sender', 'created_at', 'read_by']
+        fields = ['id', 'sender', 'sender_name', 'sender_photo', 'recipient', 'recipient_name',
+                  'is_broadcast', 'text', 'read_by', 'created_at', 'unread',
+                  'attachment', 'attachment_url', 'attachment_type', 'attachment_name',
+                  'attachment_size', 'attachment_duration']
+        read_only_fields = ['id', 'sender', 'created_at', 'read_by', 'attachment_url']
+        extra_kwargs = {'attachment': {'write_only': True, 'required': False}}
+
+    def validate(self, attrs):
+        text = (attrs.get('text') or '').strip()
+        has_attachment = bool(attrs.get('attachment')) or bool(getattr(self.instance, 'attachment', None))
+        if not text and not has_attachment:
+            raise serializers.ValidationError({'text': 'Введите текст или прикрепите файл'})
+        return attrs
+
+    def create(self, validated_data):
+        upload = validated_data.get('attachment')
+        if upload:
+            validated_data['attachment_name'] = getattr(upload, 'name', '')[:255]
+            validated_data['attachment_size'] = getattr(upload, 'size', 0) or 0
+            if not validated_data.get('attachment_type'):
+                validated_data['attachment_type'] = _detect_attachment_type(validated_data['attachment_name'])
+        return super().create(validated_data)
 
     def get_sender_name(self, obj):
         return obj.sender.get_full_name() or obj.sender.username
+
+    def get_sender_photo(self, obj):
+        try:
+            prof = obj.sender.profile
+            photo = getattr(prof, 'photo', None) or getattr(prof, 'avatar', None)
+            if photo:
+                request = self.context.get('request')
+                url = photo.url
+                return request.build_absolute_uri(url) if request else url
+        except Exception:
+            pass
+        return ''
 
     def get_recipient_name(self, obj):
         if obj.recipient:
@@ -1154,12 +1256,35 @@ class MessageSerializer(serializers.ModelSerializer):
             return request.user not in obj.read_by.all()
         return False
 
+    def get_attachment_url(self, obj):
+        if not obj.attachment:
+            return ''
+        request = self.context.get('request')
+        url = obj.attachment.url
+        return request.build_absolute_uri(url) if request else url
+
 
 # ══════════════════════════════════════════════════════════════════
 # Сметы и КП — сериализаторы
 # ══════════════════════════════════════════════════════════════════
 
+class LegalEntityBankAccountSerializer(serializers.ModelSerializer):
+    legal_entity_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LegalEntityBankAccount
+        fields = ['id', 'legal_entity', 'legal_entity_name', 'title', 'bank_name',
+                  'settlement_account', 'bik', 'corr_account', 'is_default', 'is_active',
+                  'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def get_legal_entity_name(self, obj):
+        return obj.legal_entity.short_name or obj.legal_entity.name if obj.legal_entity else ''
+
+
 class LegalEntitySerializer(serializers.ModelSerializer):
+    bank_accounts = LegalEntityBankAccountSerializer(many=True, read_only=True)
+
     class Meta:
         model = LegalEntity
         fields = '__all__'
@@ -1186,13 +1311,33 @@ class EstimateItemSerializer(serializers.ModelSerializer):
                   'discount', 'total_price', 'installer_salary', 'ugol_applied', 'order_num']
 
 
+class EstimateEventSerializer(serializers.ModelSerializer):
+    event_type_display = serializers.CharField(source='get_event_type_display', read_only=True)
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EstimateEvent
+        fields = ['id', 'event_type', 'event_type_display', 'comment', 'user', 'user_name', 'created_at']
+        read_only_fields = fields
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return obj.user.get_full_name() or obj.user.username
+        return ''
+
+
 class CommercialEstimateSerializer(serializers.ModelSerializer):
     items = EstimateItemSerializer(many=True, read_only=True)
+    events = EstimateEventSerializer(many=True, read_only=True)
     client_name = serializers.SerializerMethodField()
     legal_entity_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
     management_company_name = serializers.SerializerMethodField()
+    is_legal_client = serializers.BooleanField(read_only=True)
+    needs_director_approval = serializers.SerializerMethodField()
+    director_approved_by_name = serializers.SerializerMethodField()
+    payment_confirmed_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = CommercialEstimate
@@ -1206,8 +1351,39 @@ class CommercialEstimateSerializer(serializers.ModelSerializer):
                   'cost_materials', 'cost_services', 'dealer_amount', 'commission_amount',
                   'ugol_enabled', 'ugol_percent', 'ugol_apply_to',
                   'note', 'items', 'created_by', 'created_by_name',
-                  'created_at', 'updated_at']
-        read_only_fields = ['id', 'number', 'created_by', 'created_at', 'updated_at']
+                  'created_at', 'updated_at',
+                  # жизненный цикл
+                  'is_legal_client', 'needs_director_approval', 'requires_director_approval',
+                  'director_approved_by', 'director_approved_by_name', 'director_approved_at',
+                  'director_comment', 'sent_to_client_at', 'client_approved_at',
+                  'client_approved_name',
+                  'invoice_number', 'invoice_date', 'invoice_created_at', 'invoice_amount',
+                  'payment_confirmed_by', 'payment_confirmed_by_name', 'payment_confirmed_at',
+                  'paid_amount', 'payment_comment',
+                  'work_started_at', 'completed_at',
+                  'act_number', 'act_date', 'upd_number', 'upd_date',
+                  'events']
+        read_only_fields = ['id', 'number', 'created_by', 'created_at', 'updated_at',
+                            'requires_director_approval', 'director_approved_by',
+                            'director_approved_at', 'director_comment', 'sent_to_client_at',
+                            'client_approved_at', 'client_approved_name',
+                            'invoice_number', 'invoice_date', 'invoice_created_at', 'invoice_amount',
+                            'payment_confirmed_by', 'payment_confirmed_at', 'paid_amount',
+                            'payment_comment', 'work_started_at', 'completed_at',
+                            'act_number', 'act_date', 'upd_number', 'upd_date']
+
+    def get_needs_director_approval(self, obj):
+        return obj.needs_director_approval()
+
+    def get_director_approved_by_name(self, obj):
+        if obj.director_approved_by:
+            return obj.director_approved_by.get_full_name() or obj.director_approved_by.username
+        return ''
+
+    def get_payment_confirmed_by_name(self, obj):
+        if obj.payment_confirmed_by:
+            return obj.payment_confirmed_by.get_full_name() or obj.payment_confirmed_by.username
+        return ''
 
     def get_client_name(self, obj):
         if obj.client:
@@ -1347,13 +1523,14 @@ class IssueOrderSerializer(serializers.ModelSerializer):
     items = IssueOrderItemSerializer(many=True, read_only=True)
     master_name = serializers.SerializerMethodField()
     issued_by_name = serializers.SerializerMethodField()
+    confirmed_by_name = serializers.SerializerMethodField()
     order_number = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
 
     class Meta:
         model = IssueOrder
         fields = '__all__'
-        read_only_fields = ['id', 'issued_at', 'received_at', 'completed_at', 'issued_by']
+        read_only_fields = ['id', 'issued_at', 'received_at', 'completed_at', 'issued_by', 'confirmed_by']
 
     def get_master_name(self, obj):
         if obj.master:
@@ -1363,6 +1540,11 @@ class IssueOrderSerializer(serializers.ModelSerializer):
     def get_issued_by_name(self, obj):
         if obj.issued_by:
             return obj.issued_by.get_full_name() or obj.issued_by.username
+        return ''
+
+    def get_confirmed_by_name(self, obj):
+        if obj.confirmed_by:
+            return obj.confirmed_by.get_full_name() or obj.confirmed_by.username
         return ''
 
     def get_order_number(self, obj):

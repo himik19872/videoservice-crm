@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useRe
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import api from '../services/api';
+import { navigateToChat, navigationRef } from '../services/navigationRef';
 import type { User } from '../types';
 
 // Ленивый импорт — expo-notifications не работает в Expo Go с SDK 53+
@@ -118,11 +119,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       responseListener.current = Notifications.addNotificationResponseReceivedListener(
         (response: any) => {
-          console.log('[Push] Tapped:', response?.notification?.request?.content?.title);
+          const data = response?.notification?.request?.content?.data || {};
+          console.log('[Push] Tapped:', response?.notification?.request?.content?.title, data);
+          // Переходим в нужный экран по данным уведомления
+          try {
+            if (data.type === 'message') {
+              const isBroadcast = String(data.is_broadcast) === 'true';
+              navigateToChat({
+                recipientId: isBroadcast ? 0 : Number(data.sender_id) || 0,
+                recipientName: data.sender_name ? String(data.sender_name) : undefined,
+              });
+            } else if (data.type === 'order' && data.order_id) {
+              if (navigationRef.isReady()) {
+                (navigationRef as any).navigate('OrderDetail', { orderId: Number(data.order_id) });
+              }
+            }
+          } catch (e) {
+            console.log('[Push] Navigate error:', e);
+          }
         }
       );
     } catch (e) {
       console.log('[Push] Listener error:', e);
+    }
+
+    // Холодный старт: приложение открыли нажатием на уведомление
+    try {
+      const last: any = await Notifications.getLastNotificationResponseAsync?.();
+      const data = last?.notification?.request?.content?.data;
+      if (data && data.type === 'message') {
+        const isBroadcast = String(data.is_broadcast) === 'true';
+        setTimeout(() => {
+          navigateToChat({
+            recipientId: isBroadcast ? 0 : Number(data.sender_id) || 0,
+            recipientName: data.sender_name ? String(data.sender_name) : undefined,
+          });
+        }, 1200);
+      }
+    } catch (e) {
+      // нет данных
     }
 
     notifReady.current = true;
@@ -134,6 +169,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('[Push] Not ready, skipping token registration');
       return;
     }
+    // FCM-токен устройства — по нему сервер отправляет push напрямую через
+    // Firebase Cloud Messaging (локально собранные APK). Expo-токен оставляем
+    // как резервный канал.
+    try {
+      const device = await Notifications.getDevicePushTokenAsync();
+      const fcmToken = typeof device?.data === 'string' ? device.data : '';
+      if (fcmToken) {
+        await api.post('/push-tokens/', { token: fcmToken, platform: Platform.OS });
+        console.log('[Push] FCM token registered:', fcmToken.slice(0, 16) + '…');
+      }
+    } catch (e: any) {
+      console.log('[Push] Device token error:', e?.message || e);
+    }
+
     try {
       const expoPushToken = await Notifications.getExpoPushTokenAsync();
       const token = expoPushToken.data;
@@ -175,7 +224,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (username: string, password: string) => {
-    const res = await api.post('/auth/login/', { username, password });
+    // client='mobile' — бэкенд проверяет, разрешён ли сотруднику вход из приложения
+    const res = await api.post('/auth/login/', { username, password, client: 'mobile' });
     const { token, user: userData } = res.data;
     await AsyncStorage.setItem('token', token);
     setUser(userData);

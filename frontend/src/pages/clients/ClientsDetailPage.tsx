@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Tabs, Table, message, Spin, Empty, Modal, Form, Input, Select, Switch, InputNumber } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, PlusOutlined, DollarOutlined, HomeOutlined, ApartmentOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, PlusOutlined, DollarOutlined, HomeOutlined, ApartmentOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import api from '../../services/api';
 import type { Client, Order, ErcBillingRecord, ManagementCompany, Tariff, PaymentRecord } from '../../types';
@@ -151,6 +151,8 @@ const ClientsDetailPage: React.FC = () => {
   };
 
   const handleCreateOrder = () => navigate(`/orders/create?client_id=${id}`);
+  // Открывает раздел «Сметы и КП» с уже выбранным клиентом
+  const handleCreateEstimate = () => navigate(`/estimates?new=1&client=${id}`);
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>;
   if (!client) return null;
@@ -192,6 +194,7 @@ const ClientsDetailPage: React.FC = () => {
         </Space>
         <Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateOrder}>Создать заявку</Button>
+          <Button icon={<CalculatorOutlined />} onClick={handleCreateEstimate} title="Создать смету / КП для этого клиента">Создать КП</Button>
           <Button icon={<EditOutlined />} onClick={openEditModal}>Редактировать</Button>
         </Space>
       </Space>

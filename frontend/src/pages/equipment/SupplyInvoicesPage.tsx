@@ -12,6 +12,14 @@ const statusColors: Record<string, string> = {
   draft: 'default', received: 'green', partial: 'orange', cancelled: 'red',
 };
 
+const ITEM_TYPES = [
+  { value: 'intercom', label: 'Домофон' }, { value: 'video_intercom', label: 'Видеодомофон' },
+  { value: 'camera', label: 'Камера' }, { value: 'call_panel', label: 'Вызывная панель' },
+  { value: 'door_lock', label: 'Дверной замок' }, { value: 'monitor', label: 'Монитор' },
+  { value: 'power_supply', label: 'Блок питания' }, { value: 'cable', label: 'Кабель' },
+  { value: 'mounting_kit', label: 'Монтажный комплект' }, { value: 'other', label: 'Другое' },
+];
+
 const SupplyInvoicesPage: React.FC = () => {
   const [invoices, setInvoices] = useState<SupplyInvoice[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -24,6 +32,7 @@ const SupplyInvoicesPage: React.FC = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<SupplyInvoice | null>(null);
   const [createForm] = Form.useForm();
   const [itemForm] = Form.useForm();
+  const [newItemForm] = Form.useForm();
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -57,6 +66,7 @@ const SupplyInvoicesPage: React.FC = () => {
         notes: values.notes || '',
         items: items.map((i: any) => ({
           inventory_item_id: i.inventory_item_id,
+          new_item: i.new_item,
           quantity_ordered: i.quantity_ordered || 1,
           quantity_received: i.quantity_received || 0,
           unit_price: i.unit_price || 0,
@@ -256,6 +266,60 @@ const SupplyInvoicesPage: React.FC = () => {
                 itemForm.setFieldValue('_pick_qty', 1);
               }}>
                 Добавить позицию
+              </Button>
+            </Form>
+          </Card>
+
+          {/* Новая номенклатура — впервые поступает по этой накладной */}
+          <Card size="small" title="🆕 Новая позиция (ещё нет в каталоге)" style={{ marginBottom: 12 }}>
+            <Form form={newItemForm} layout="inline" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <Form.Item name="name" style={{ minWidth: 220 }}>
+                <Input placeholder="Название товара" />
+              </Form.Item>
+              <Form.Item name="item_type" initialValue="other">
+                <Select options={ITEM_TYPES} style={{ width: 170 }} />
+              </Form.Item>
+              <Form.Item name="model_name">
+                <Input placeholder="Модель" style={{ width: 140 }} />
+              </Form.Item>
+              <Form.Item name="qty" initialValue={1}>
+                <InputNumber min={1} placeholder="Кол-во" style={{ width: 85 }} />
+              </Form.Item>
+              <Form.Item name="price">
+                <InputNumber min={0} placeholder="Цена" style={{ width: 100 }} />
+              </Form.Item>
+              <Button
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  const vals = newItemForm.getFieldsValue();
+                  if (!vals.name || !String(vals.name).trim()) {
+                    message.warning('Укажите название нового товара');
+                    return;
+                  }
+                  const name = String(vals.name).trim();
+                  const existing = createForm.getFieldValue('_items') || [];
+                  existing.push({
+                    new_item: {
+                      name,
+                      item_type: vals.item_type || 'other',
+                      model_name: vals.model_name || '',
+                    },
+                    quantity_ordered: vals.qty || 1,
+                    quantity_received: 0,
+                    unit_price: vals.price || 0,
+                    notes: '',
+                    _name: name,
+                    _barcode: '',
+                    _new: true,
+                  });
+                  createForm.setFieldValue('_items', [...existing]);
+                  newItemForm.resetFields();
+                  newItemForm.setFieldValue('item_type', 'other');
+                  newItemForm.setFieldValue('qty', 1);
+                }}
+              >
+                Добавить новую
               </Button>
             </Form>
           </Card>

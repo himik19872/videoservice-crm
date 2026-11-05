@@ -38,10 +38,12 @@ const DownloadAppPage: React.FC = () => {
     ? `/api/app-versions/${latestVersion.id}/download/`
     : '/api/app-versions/1/download/';
 
-  // QR-код должен использовать внешний IP (телефон не в локальной сети)
-  const externalIp = '83.243.73.86';
-  const externalPort = '3000';
-  const fullDownloadUrl = `http://${externalIp}:${externalPort}${downloadUrl}`;
+  // Ссылка и QR-код строятся по текущему адресу, с которого открыта CRM
+  // (домен/внешний IP/локальный IP) — без жёсткой привязки к серверу.
+  const appBase = typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.host}`
+    : '';
+  const fullDownloadUrl = `${appBase}${downloadUrl}`;
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return '—';

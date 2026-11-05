@@ -4,9 +4,9 @@ import {
   ActivityIndicator, RefreshControl, Modal, Platform, Linking, Alert,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import api from '../services/api';
-import { DEFAULT_IP, DEFAULT_PORT } from '../services/api';
+import { getServerBaseUrl } from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
 
 const CATEGORIES: Record<string, string> = {
@@ -75,7 +75,7 @@ const WikiScreen: React.FC = () => {
     // Уже в кеше
     if (cachedFiles[item.id]) return cachedFiles[item.id];
 
-    const url = getExternalUrl(item.pdf_url!);
+    const url = await getFileUrl(item.pdf_url!);
     const ext = isImageFile(url) ? url.split('.').pop()?.split('?')[0] || 'jpg' : 'pdf';
     const localPath = `${FileSystem.cacheDirectory}wiki/${item.id}_${item.title.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}.${ext}`;
 
@@ -117,22 +117,26 @@ const WikiScreen: React.FC = () => {
   const formatBytes = (b: number) =>
     b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} МБ` : `${(b / 1024).toFixed(0)} КБ`;
 
-  const getExternalUrl = (internalUrl: string): string => {
-    // Сервер отдаёт pdf_url с внутренним IP (build_absolute_uri).
-    // Заменяем на внешний IP, чтобы PDF открывался с телефона.
-    // Формат: http://localhost:8000/media/... → http://83.243.73.86:3000/media/...
+  /**
+   * Приводит ссылку на файл к адресу сервера, на который настроено приложение.
+   * Сервер может вернуть абсолютный URL со своим внутренним адресом
+   * (например http://localhost:8000/media/...), поэтому берём только путь
+   * и подставляем хост/порт, с которого реально работает пользователь.
+   */
+  const getFileUrl = async (rawUrl: string): Promise<string> => {
+    const base = await getServerBaseUrl();
     try {
-      const url = new URL(internalUrl);
-      // Меняем хост и порт на внешние
-      return `http://${DEFAULT_IP}:${DEFAULT_PORT}${url.pathname}`;
+      const u = new URL(rawUrl);
+      return `${base}${u.pathname}${u.search}`;
     } catch {
-      return internalUrl;
+      const path = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
+      return `${base}${path}`;
     }
   };
 
   const openPdf = async (item: Instruction) => {
     if (!item.pdf_url) return;
-    const url = getExternalUrl(item.pdf_url);
+    const url = await getFileUrl(item.pdf_url);
 
     // Если файл — изображение, показываем в Image viewer
     if (isImageFile(url)) {
@@ -151,7 +155,7 @@ const WikiScreen: React.FC = () => {
 
   const openExternal = async (item: Instruction) => {
     if (!item.pdf_url) return;
-    const url = getExternalUrl(item.pdf_url);
+    const url = await getFileUrl(item.pdf_url);
     try {
       const canOpen = await Linking.canOpenURL(url);
       if (canOpen) {

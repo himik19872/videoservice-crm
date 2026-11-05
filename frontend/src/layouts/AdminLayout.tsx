@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { roleName } from '../utils/access';
 
 const { Header, Content, Sider } = Layout;
 const { Text } = Typography;
@@ -182,9 +183,9 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       label: 'Traccar GPS',
     },
     {
-      key: '/settings/max',
+      key: '/settings/telegram',
       icon: <SettingOutlined />,
-      label: 'Max Бот',
+      label: 'Telegram',
     },
     {
       key: '/settings/admin',
@@ -239,7 +240,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
               <Text strong>{user?.first_name || user?.username}</Text>
               <br />
               <Text type="secondary" style={{ fontSize: '12px' }}>
-                Администратор
+                {roleName(user?.role)}
               </Text>
             </div>
           </Space>

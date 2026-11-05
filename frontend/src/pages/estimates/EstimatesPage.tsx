@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Table, Button, Modal, Input, Select, InputNumber, Space, Popconfirm, Tag, message, Row, Col, Statistic, Divider, Tabs } from 'antd';
+import { Card, Table, Button, Modal, Input, Select, InputNumber, Space, Popconfirm, Tag, message, Row, Col, Statistic, Divider, Tabs, Spin } from 'antd';
 import { PlusOutlined, DeleteOutlined, CalculatorOutlined, FilePdfOutlined, EyeOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import EstimateServicesPage from './EstimateServicesPage';
 import EstimateSettingsPage from '../settings/EstimateSettingsPage';
@@ -16,20 +16,28 @@ const ITEM_TYPES = [
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   draft: { color: 'default', label: 'Черновик' },
-  sent: { color: 'blue', label: 'Отправлено' },
-  approved: { color: 'green', label: 'Согласовано' },
-  rejected: { color: 'red', label: 'Отклонено' },
+  on_approval: { color: 'gold', label: 'На согласовании у ГД' },
+  approved_internal: { color: 'cyan', label: 'Согласовано ГД' },
+  sent: { color: 'blue', label: 'У клиента' },
+  approved: { color: 'green', label: 'Согласовано клиентом' },
+  invoiced: { color: 'geekblue', label: 'Счёт выставлен' },
+  paid: { color: 'lime', label: 'Оплачено' },
   in_work: { color: 'orange', label: 'В работе' },
   completed: { color: 'green', label: 'Завершено' },
+  rejected: { color: 'red', label: 'Отклонено' },
 };
 
 const EstimatesPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [estimates, setEstimates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [clients, setClients] = useState<any[]>([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [filterClients, setFilterClients] = useState<any[]>([]);
+  const [clientFilter, setClientFilter] = useState<number | undefined>(undefined);
   const [legalEntities, setLegalEntities] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
@@ -44,10 +52,12 @@ const EstimatesPage: React.FC = () => {
     employee: '', employee_phone: '', note: '', status: 'draft',
   });
 
-  const fetchEstimates = async () => {
+  const fetchEstimates = async (clientId?: number) => {
     setLoading(true);
     try {
-      const res = await api.get('/estimates/?page_size=50');
+      const params: any = { page_size: 50 };
+      if (clientId) params.client = clientId;
+      const res = await api.get('/estimates/', { params });
       setEstimates(res.data.results || res.data);
     } catch (e) { message.error('Ошибка загрузки смет'); }
     finally { setLoading(false); }
@@ -56,7 +66,7 @@ const EstimatesPage: React.FC = () => {
   const fetchRefs = async () => {
     try {
       const [cRes, lRes, iRes, sRes] = await Promise.all([
-        api.get('/clients/?page_size=500'),
+        api.get('/clients/?page_size=50'),
         api.get('/legal-entities/'),
         api.get('/inventory/?page_size=500&status=in_stock'),
         api.get('/estimate-services/?page_size=200'),
@@ -68,13 +78,41 @@ const EstimatesPage: React.FC = () => {
     } catch (e) {}
   };
 
-  useEffect(() => { fetchEstimates(); fetchRefs(); }, []);
+  /** Поиск клиента по имени, телефону, адресу, лицевому счёту, ИНН */
+  const searchClients = (term: string) => {
+    setClientsLoading(true);
+    api.get('/clients/', { params: { search: term || '', page_size: 50 } })
+      .then(res => setClients(res.data.results || res.data || []))
+      .catch(() => {})
+      .finally(() => setClientsLoading(false));
+  };
 
-  const openCreate = () => {
+  /** Подпись клиента в списке: имя · телефон · адрес · лицевой счёт */
+  const clientLabel = (c: any) => {
+    const name = c.full_name || c.name || `Клиент #${c.id}`;
+    const parts = [name];
+    if (c.phone) parts.push(c.phone);
+    if (c.address) parts.push(c.address);
+    if (c.personal_account_number) parts.push(`л/с ${c.personal_account_number}`);
+    return parts.join(' · ');
+  };
+
+  /** Поиск клиента для фильтра списка смет */
+  const searchFilterClients = (term: string) => {
+    api.get('/clients/', { params: { search: term || '', page_size: 50 } })
+      .then(res => setFilterClients(res.data.results || res.data || []))
+      .catch(() => {});
+  };
+
+  useEffect(() => { fetchEstimates(clientFilter); }, [clientFilter]);
+
+  useEffect(() => { fetchRefs(); searchFilterClients(''); }, []);
+
+  const openCreate = (clientId?: number) => {
     setEditing(null);
     setFormData({
       name: `Смета от ${new Date().toLocaleDateString('ru')}`,
-      client_id: undefined, legal_entity_id: undefined, order_id: undefined,
+      client_id: clientId, legal_entity_id: undefined, order_id: undefined,
       discount: 0, commission: 0, dealer_fee: 0,
       unexpected_costs: 0, delivery_type: 'client', delivery_cost: 0,
       tax_type: 'usn', tax_rate: 6,
@@ -82,6 +120,29 @@ const EstimatesPage: React.FC = () => {
     });
     setModalOpen(true);
   };
+
+  // Открытие формы из карточки клиента: /estimates?new=1&client=<id>
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return;
+    const clientId = Number(searchParams.get('client'));
+    openCreate(Number.isFinite(clientId) && clientId > 0 ? clientId : undefined);
+
+    // Чтобы в поле клиента отображалось имя, а не id — подгружаем его
+    if (clientId && Number.isFinite(clientId)) {
+      api.get(`/clients/${clientId}/`)
+        .then(res => setClients(prev => {
+          const exists = prev.some((c: any) => c.id === res.data.id);
+          return exists ? prev.map((c: any) => (c.id === res.data.id ? res.data : c)) : [res.data, ...prev];
+        }))
+        .catch(() => {});
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('new');
+    next.delete('client');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSave = async () => {
     if (!formData.name.trim()) { message.error('Введите название'); return; }
@@ -116,14 +177,21 @@ const EstimatesPage: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    try { await api.delete(`/estimates/${id}/`); message.success('Удалено'); fetchEstimates(); }
+    try { await api.delete(`/estimates/${id}/`); message.success('Удалено'); fetchEstimates(clientFilter); }
     catch (e) { message.error('Ошибка удаления'); }
   };
 
   const columns = [
     { title: 'Номер', dataIndex: 'number', key: 'number', width: 130, render: (t: string) => <strong>{t}</strong> },
     { title: 'Название', dataIndex: 'name', key: 'name', ellipsis: true },
-    { title: 'Клиент', dataIndex: 'client_name', key: 'client', width: 180, render: (v: any) => v || '—' },
+    {
+      title: 'Клиент', dataIndex: 'client_name', key: 'client', width: 240, ellipsis: true,
+      render: (v: any, record: any) => (
+        v
+          ? <a onClick={() => navigate(`/clients/${record.client}`)} title="Открыть карточку клиента">{v}</a>
+          : <span style={{ color: '#bbb' }}>—</span>
+      ),
+    },
     {
       title: 'Статус', dataIndex: 'status', key: 'status', width: 120,
       render: (s: string) => <Tag color={STATUS_MAP[s]?.color}>{STATUS_MAP[s]?.label || s}</Tag>,
@@ -150,7 +218,23 @@ const EstimatesPage: React.FC = () => {
           key: 'estimates',
           label: '📊 Сметы и КП',
           children: (
-            <Card extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Создать смету</Button>}>
+            <Card extra={
+              <Space wrap>
+                <Select
+                  allowClear
+                  showSearch
+                  style={{ width: 340 }}
+                  placeholder="Фильтр по клиенту: имя, телефон, адрес, л/с"
+                  value={clientFilter}
+                  onChange={v => setClientFilter(v)}
+                  filterOption={false}
+                  onSearch={searchFilterClients}
+                  notFoundContent="Ничего не найдено"
+                  options={filterClients.map((c: any) => ({ value: c.id, label: clientLabel(c) }))}
+                />
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate()}>Создать смету</Button>
+              </Space>
+            }>
               <Table dataSource={estimates} columns={columns} rowKey="id" loading={loading} size="middle"
                 pagination={{ pageSize: 20 }}
                 onRow={(record) => ({ style: { cursor: 'pointer' }, onDoubleClick: () => navigate(`/estimates/${record.id}`) })} />
@@ -184,10 +268,18 @@ const EstimatesPage: React.FC = () => {
           <Row gutter={12}>
             <Col span={12}>
               <label>Клиент</label>
-              <Select allowClear showSearch placeholder="Выберите клиента" value={formData.client_id}
-                onChange={v => setFormData({ ...formData, client_id: v })} style={{ width: '100%' }}
-                options={clients.map((c: any) => ({ value: c.id, label: c.name }))}
-                filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())} />
+              <Select
+                allowClear
+                showSearch
+                placeholder="Имя, телефон, адрес, л/с..."
+                value={formData.client_id}
+                onChange={v => setFormData({ ...formData, client_id: v })}
+                style={{ width: '100%' }}
+                filterOption={false}
+                onSearch={searchClients}
+                notFoundContent={clientsLoading ? <Spin size="small" /> : 'Ничего не найдено'}
+                options={clients.map((c: any) => ({ value: c.id, label: clientLabel(c) }))}
+              />
             </Col>
             <Col span={12}>
               <label>Наше юрлицо</label>

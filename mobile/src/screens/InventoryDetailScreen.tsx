@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, FlatList,
+  ActivityIndicator, Alert, FlatList, Image, Linking,
 } from 'react-native';
 import api from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
@@ -16,6 +16,11 @@ interface InventoryItem {
   barcode: string | null;
   quantity: number;
   unit: string;
+  issued_qty?: number;
+  issued_breakdown?: { master: string; qty: number }[];
+  photo_display?: string;
+  photo_url?: string;
+  product_url?: string;
   cost_price: number | null;
   sale_price: number | null;
   status: string;
@@ -87,11 +92,28 @@ const InventoryDetailScreen: React.FC<{ route: any; navigation: any }> = ({ rout
         </View>
         <Text style={[styles.name, { color: theme.text }]}>{item.name}</Text>
 
+        {item.photo_display ? (
+          <Image
+            source={{ uri: item.photo_display }}
+            style={styles.photo}
+            resizeMode="contain"
+          />
+        ) : null}
+
         <View style={styles.infoGrid}>
           <InfoRow label="Штрих-код" value={item.barcode || '—'} theme={theme} />
           <InfoRow label="Модель" value={item.model_name || '—'} theme={theme} />
           <InfoRow label="S/N" value={item.serial_number || '—'} theme={theme} />
           <InfoRow label="Количество" value={`${item.quantity} ${item.unit}`} theme={theme} />
+          <InfoRow
+            label="У мастеров"
+            value={(item.issued_qty || 0) > 0
+              ? `${item.issued_qty} шт.` + ((item.issued_breakdown || []).length
+                ? ' (' + (item.issued_breakdown || []).map(b => `${b.master} — ${b.qty}`).join(', ') + ')'
+                : '')
+              : '—'}
+            theme={theme}
+          />
           <InfoRow label="Место" value={item.location || '—'} theme={theme} />
           <InfoRow label="Поставщик" value={item.supplier || '—'} theme={theme} />
           <InfoRow label="Гарантия" value={`${item.warranty_months} мес.`} theme={theme} />
@@ -104,6 +126,14 @@ const InventoryDetailScreen: React.FC<{ route: any; navigation: any }> = ({ rout
         </View>
         {item.notes ? (
           <Text style={[styles.notes, { color: theme.textSecondary }]}>{item.notes}</Text>
+        ) : null}
+        {item.product_url ? (
+          <TouchableOpacity
+            onPress={() => Linking.openURL(item.product_url!).catch(() => {})}
+            style={[styles.linkBtn, { borderColor: theme.primary }]}
+          >
+            <Text style={{ color: theme.primary, fontWeight: '600' }}>🔗 Открыть страницу товара</Text>
+          </TouchableOpacity>
         ) : null}
       </View>
 
@@ -152,6 +182,8 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: 13 },
   infoValue: { fontSize: 13, fontWeight: '600' },
   notes: { fontSize: 13, fontStyle: 'italic', marginTop: 8 },
+  photo: { width: '100%', height: 200, borderRadius: 10, backgroundColor: '#f5f5f5', marginBottom: 12 },
+  linkBtn: { marginTop: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, alignItems: 'center' },
   sectionTitle: { fontWeight: '700', fontSize: 15, marginBottom: 10 },
   movementRow: { paddingVertical: 8, borderBottomWidth: 1 },
   movementType: { fontSize: 14, fontWeight: '600' },

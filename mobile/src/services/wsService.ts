@@ -3,6 +3,7 @@
  * Подключается к ws://SERVER:8000/ws/notifications/?token=...
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getServerBaseUrl } from './api';
 
 const STORAGE_KEY_SERVER = '@videoservice_server_ip';
 
@@ -21,9 +22,11 @@ export async function connectWs(): Promise<void> {
     return;
   }
 
-  const ip = (await AsyncStorage.getItem(STORAGE_KEY_SERVER)) || '83.243.73.86';
-  // Порт 3000 — единая точка входа (Express проксирует WS → Daphne :8000)
-  const url = `ws://${ip}:3000/ws/notifications/?token=${token}`;
+  // Единая точка входа (nginx/Express проксируют WS → Daphne :8000).
+  // Протокол берём из настроенного адреса: http → ws, https → wss.
+  const base = await getServerBaseUrl();
+  const wsBase = base.replace(/^http/i, 'ws');
+  const url = `${wsBase}/ws/notifications/?token=${token}`;
 
   if (ws && ws.readyState === WebSocket.OPEN) {
     console.log('[WS] Already connected');

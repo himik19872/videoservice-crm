@@ -1,6 +1,8 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from .permissions import ModulePermission
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django_filters.rest_framework import DjangoFilterBackend
@@ -17,6 +19,7 @@ from .models import MaxBotSettings, MaxUserLink
 from .models import InventoryItem, InventoryMovement, Payment, MasterSalary
 from .models import MasterCashDebt, MasterInventoryDebt, OrderMaterial, Message
 from .models import LegalEntity, EstimateService, CommercialEstimate, EstimateItem, Instruction
+from .models import LegalEntityBankAccount
 from .models import Supplier, SupplyInvoice, SupplyInvoiceItem
 from .models import IssueOrder, IssueOrderItem, PurchaseRequest, PurchaseRequestItem
 from .models import OrderComment
@@ -40,7 +43,7 @@ from .serializers import (
     SystemSettingsSerializer, UserProfileSerializer, WorkShiftSerializer, OrderMediaSerializer, PushTokenSerializer
 )
 from .serializers import InventoryItemSerializer, InventoryMovementSerializer, PaymentSerializer, MasterSalarySerializer, MessageSerializer
-from .serializers import LegalEntitySerializer, EstimateServiceSerializer, CommercialEstimateSerializer, EstimateItemSerializer, InstructionSerializer
+from .serializers import LegalEntitySerializer, LegalEntityBankAccountSerializer, EstimateServiceSerializer, CommercialEstimateSerializer, EstimateItemSerializer, InstructionSerializer
 from .serializers import SupplierSerializer, SupplyInvoiceSerializer, SupplyInvoiceCreateSerializer, SupplyInvoiceReceiveSerializer
 from .serializers import SupplyInvoiceItemSerializer
 from .serializers import IssueOrderSerializer, IssueOrderCreateSerializer, IssueOrderItemSerializer
@@ -76,6 +79,150 @@ class MasterViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['region', 'is_available']
     search_fields = ['user__username', 'user__first_name', 'user__last_name', 'phone']
+
+    # ══════════════════ Пробег и топливо (Traccar) ══════════════════
+    @staticmethod
+    def _period_start(day, period):
+        if period == 'week':
+            return day - timedelta(days=6)
+        if period == 'month':
+            return day.replace(day=1)
+        return day
+
+    @action(detail=False, methods=['get'])
+    def mileage_ranking(self, request):
+        """Топ мастеров по пробегу за день/неделю/месяц"""
+        from django.utils.dateparse import parse_date
+        from .models import MasterDailyMileage
+
+        period = request.query_params.get('period', 'day')
+        day = parse_date(request.query_params.get('date') or '') or timezone.localdate()
+        start = self._period_start(day, period)
+
+        totals = {
+            row['master']: row for row in MasterDailyMileage.objects.filter(
+                date__gte=start, date__lte=day,
+            ).values('master').annotate(
+                km=Sum('distance_km'), app_km=Sum('app_distance_km'),
+                liters=Sum('fuel_liters'), cost=Sum('fuel_cost'),
+            )
+        }
+
+        masters = Master.objects.select_related('user', 'region', 'traccar_device').all()
+        rows = []
+        for master in masters:
+            agg = totals.get(master.id, {})
+            device = getattr(master, 'traccar_device', None)
+            rows.append({
+                'master_id': master.id,
+                'master_name': master.user.get_full_name() or master.user.username,
+                'phone': master.phone,
+                'region': master.region.name if master.region else '',
+                'vehicle_name': master.vehicle_name,
+                'fuel_type': master.get_fuel_type_display(),
+                'fuel_consumption': float(master.fuel_consumption or 0),
+                'distance_km': round(float(agg.get('km') or 0), 2),
+                'app_distance_km': round(float(agg.get('app_km') or 0), 2),
+                'fuel_liters': round(float(agg.get('liters') or 0), 2),
+                'fuel_cost': round(float(agg.get('cost') or 0), 2),
+                'has_tracker': device is not None,
+                'is_online': bool(device and device.is_online),
+                'last_update': device.last_update.isoformat() if device and device.last_update else None,
+            })
+
+        rows.sort(key=lambda r: r['distance_km'], reverse=True)
+        for idx, row in enumerate(rows, 1):
+            row['rank'] = idx
+
+        return Response({
+            'period': period,
+            'date': str(day),
+            'from': str(start),
+            'total_distance_km': round(sum(r['distance_km'] for r in rows), 2),
+            'total_fuel_liters': round(sum(r['fuel_liters'] for r in rows), 2),
+            'total_fuel_cost': round(sum(r['fuel_cost'] for r in rows), 2),
+            'rows': rows,
+        })
+
+    @action(detail=True, methods=['get'])
+    def mileage(self, request, pk=None):
+        """Пробег и топливо мастера по дням + точки трека для карты"""
+        from django.utils.dateparse import parse_date
+        from .models import MasterDailyMileage
+        from .traccar_service import sync_master_day, track_for_day, get_active_settings
+
+        master = self.get_object()
+        period = request.query_params.get('period', 'week')
+        day = parse_date(request.query_params.get('date') or '') or timezone.localdate()
+        start = self._period_start(day, period)
+
+        if str(request.query_params.get('sync', '')).lower() in ('1', 'true', 'yes'):
+            try:
+                sync_master_day(master, day, get_active_settings())
+            except Exception as e:
+                return Response({'error': 'Ошибка синхронизации с Traccar: {}'.format(e)}, status=500)
+
+        rows = list(MasterDailyMileage.objects.filter(
+            master=master, date__gte=start, date__lte=day,
+        ).order_by('-date').values(
+            'date', 'distance_km', 'app_distance_km', 'points_count',
+            'fuel_liters', 'fuel_cost', 'first_point_at', 'last_point_at',
+        ))
+        for row in rows:
+            row['date'] = str(row['date'])
+
+        device = getattr(master, 'traccar_device', None)
+        return Response({
+            'master_id': master.id,
+            'master_name': master.user.get_full_name() or master.user.username,
+            'period': period,
+            'date': str(day),
+            'from': str(start),
+            'vehicle_name': master.vehicle_name,
+            'fuel_type': master.get_fuel_type_display(),
+            'fuel_consumption': float(master.fuel_consumption or 0),
+            'fuel_price': float(master.fuel_price or 0),
+            'total_distance_km': round(sum(float(r['distance_km'] or 0) for r in rows), 2),
+            'total_app_distance_km': round(sum(float(r['app_distance_km'] or 0) for r in rows), 2),
+            'total_fuel_liters': round(sum(float(r['fuel_liters'] or 0) for r in rows), 2),
+            'total_fuel_cost': round(sum(float(r['fuel_cost'] or 0) for r in rows), 2),
+            'days': rows,
+            'points': track_for_day(master, day),
+            'traccar_device': {
+                'internal_device_id': device.internal_device_id,
+                'is_online': device.is_online,
+                'last_latitude': device.last_latitude,
+                'last_longitude': device.last_longitude,
+                'last_update': device.last_update.isoformat() if device.last_update else None,
+            } if device else None,
+        })
+
+    @action(detail=True, methods=['post'])
+    def report_location(self, request, pk=None):
+        """Приложение мастера отбивает точку — сохраняем в трек как source='app'"""
+        from .models import MasterTrackPoint
+        from .traccar_service import recalc_daily_mileage
+
+        master = self.get_object()
+        try:
+            lat = float(request.data.get('lat'))
+            lon = float(request.data.get('lon'))
+        except (TypeError, ValueError):
+            return Response({'error': 'Нужны lat и lon'}, status=400)
+
+        now = timezone.now().replace(microsecond=0)
+        MasterTrackPoint.objects.get_or_create(
+            master=master, source='app', recorded_at=now,
+            defaults={'latitude': lat, 'longitude': lon,
+                      'accuracy': request.data.get('accuracy')},
+        )
+        daily = recalc_daily_mileage(master, timezone.localdate())
+        return Response({
+            'ok': True,
+            'distance_km': daily.distance_km,
+            'app_distance_km': daily.app_distance_km,
+            'fuel_liters': daily.fuel_liters,
+        })
 
     @action(detail=True, methods=['get'])
     def zip_items(self, request, pk=None):
@@ -189,17 +336,13 @@ class MasterViewSet(viewsets.ModelViewSet):
         )
         issue_item.save(update_fields=['quantity_used'])
 
-        # Создаём движение возврата
-        inv_item.quantity += qty
-        if inv_item.status == 'with_master':
-            inv_item.status = 'in_stock'
-        inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
-
+        # Создаём движение возврата (остаток и статус обновит InventoryMovement.save)
         InventoryMovement.objects.create(
             item=inv_item, movement_type='return_from_master', quantity=qty,
             master=master, performed_by=request.user,
             notes=f'Возврат из ЗИП: {request.data.get("notes", "")}'
         )
+        inv_item.refresh_from_db()
 
         return Response({'ok': True, 'message': f'Возвращено {qty} шт. {inv_item.name}'})
 
@@ -244,13 +387,17 @@ class MasterViewSet(viewsets.ModelViewSet):
             'status_display': io.get_status_display(),
             'issued_at': io.issued_at.isoformat(),
             'received_at': io.received_at.isoformat() if io.received_at else None,
+            'confirmed_by_name': (io.confirmed_by.get_full_name() or io.confirmed_by.username) if io.confirmed_by else '',
+            'issued_by_name': (io.issued_by.get_full_name() or io.issued_by.username) if io.issued_by else '',
             'items': [{
+                'id': item.id,
                 'inventory_item_id': item.inventory_item_id,
                 'item_name': item.inventory_item.name,
                 'item_barcode': item.inventory_item.barcode,
                 'source': item.source,
                 'source_display': item.get_source_display(),
                 'quantity_issued': item.quantity_issued,
+                'quantity_confirmed': item.quantity_confirmed,
                 'quantity_used': item.quantity_used,
                 'quantity_returned': item.quantity_returned,
                 'remaining': item.remaining,
@@ -946,6 +1093,18 @@ class OrderViewSet(viewsets.ModelViewSet):
                 master_lat=master_lat,
                 master_lon=master_lon,
             )
+
+            # Отметка из мобильного приложения — сразу в трек мастера
+            if master_lat and master_lon and order.master:
+                try:
+                    from .models import MasterTrackPoint
+                    MasterTrackPoint.objects.get_or_create(
+                        master=order.master, source='app',
+                        recorded_at=timezone.now().replace(microsecond=0),
+                        defaults={'latitude': float(master_lat), 'longitude': float(master_lon)},
+                    )
+                except (TypeError, ValueError):
+                    pass
 
             # === Уведомления о смене статуса ===
             status_labels = {
@@ -2400,10 +2559,35 @@ class TraccarDeviceViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 
+    @action(detail=False, methods=['post'])
+    def sync(self, request):
+        """Скачать треки всех мастеров и посчитать дневной пробег
+        Параметры: days=1 (сколько дней назад, включая сегодня)"""
+        from .traccar_service import sync_days
+
+        try:
+            days = int(request.data.get('days') or request.query_params.get('days') or 1)
+        except (TypeError, ValueError):
+            days = 1
+        days = max(1, min(days, 31))
+
+        try:
+            summary = sync_days(days)
+        except Exception as e:
+            return Response({'error': 'Ошибка синхронизации: {}'.format(e)}, status=500)
+
+        return Response({
+            'ok': True,
+            'days': days,
+            'distance_km': round(sum(d['distance_km'] for d in summary), 2),
+            'summary': summary,
+        })
+
 
 class SystemSettingsViewSet(viewsets.ViewSet):
     """Системные настройки и операции"""
-    permission_classes = [IsAuthenticated]
+    # Чтение доступно всем авторизованным, запись — только с правом settings_system
+    permission_classes = [IsAuthenticated, ModulePermission]
 
     def list(self, request):
         settings, _ = SystemSettings.objects.get_or_create()
@@ -2904,6 +3088,111 @@ class UserProfileViewSet(viewsets.ModelViewSet):
             stats.append({'id': dp.id, 'name': str(dp.user), 'confirmed_orders': confirmed, 'is_on_shift': dp.is_on_shift})
         return Response(stats)
 
+    @action(detail=True, methods=['post'])
+    def reset_password(self, request, pk=None):
+        """Сброс пароля сотрудника и выдача нового (ТОЛЬКО администратор).
+
+        Пароль в БД хранится хэшем, поэтому «показать текущий» невозможно —
+        можно лишь задать новый. Нужно для генерации QR-кода автовхода
+        существующим сотрудникам.
+        """
+        import secrets
+
+        user = request.user
+        role = getattr(getattr(user, 'profile', None), 'role', None)
+        if not (user.is_staff or role == 'admin'):
+            return Response({'error': 'Только администратор может сбросить пароль'}, status=403)
+
+        profile = self.get_object()
+
+        upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+        lower = 'abcdefghijkmnopqrstuvwxyz'
+        digits = '23456789'
+        special = '!@#%*?-_'
+        alphabet = upper + lower + digits + special
+
+        chars = [secrets.choice(upper), secrets.choice(lower),
+                 secrets.choice(digits), secrets.choice(special)]
+        chars += [secrets.choice(alphabet) for _ in range(8)]
+        secrets.SystemRandom().shuffle(chars)
+        password = ''.join(chars)
+
+        profile.user.set_password(password)
+        profile.user.save(update_fields=['password'])
+
+        return Response({
+            'username': profile.user.username,
+            'password': password,
+            'first_name': profile.user.first_name,
+            'last_name': profile.user.last_name,
+        })
+
+    @action(detail=True, methods=['post'])
+    def test_push(self, request, pk=None):
+        """Отправить тестовое уведомление сотруднику и показать результат по каналам.
+
+        Полезно для диагностики: видно, какие токены зарегистрированы и что
+        ответил FCM/Expo. Доступно администратору.
+        """
+        from . import fcm
+        from .telegram_service import send_notification_to_user
+
+        user = request.user
+        role = getattr(getattr(user, 'profile', None), 'role', None)
+        if not (user.is_staff or role == 'admin'):
+            return Response({'error': 'Только администратор может отправлять тест'}, status=403)
+
+        profile = self.get_object()
+        target = profile.user
+        title = request.data.get('title') or '🔔 Тестовое уведомление'
+        body = request.data.get('body') or 'Проверка push-уведомлений из CRM'
+
+        tokens = list(PushToken.objects.filter(user=target, is_active=True))
+        token_info = [{
+            'id': t.id,
+            'platform': t.platform,
+            'type': 'expo' if t.token.startswith('ExponentPushToken') else 'fcm',
+            'token': t.token[:18] + '…',
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+        } for t in tokens]
+
+        # Expo-токены
+        expo_ok = _send_expo_push(target.id, title, body, {'type': 'test'}) if tokens else False
+
+        # FCM-токены — по одному, с текстом ошибки
+        fcm_results = []
+        fcm_ok = False
+        for t in tokens:
+            if t.token.startswith('ExponentPushToken'):
+                continue
+            ok, error = fcm.send_to_token(t.token, title, body, {'type': 'test'})
+            fcm_ok = fcm_ok or ok
+            fcm_results.append({
+                'token': t.token[:18] + '…',
+                'ok': ok,
+                'error': error,
+            })
+            if not ok and ('UNREGISTERED' in error or 'INVALID_ARGUMENT' in error):
+                PushToken.objects.filter(id=t.id).update(is_active=False)
+
+        ws_ok = _send_ws_notification(target.id, title, body, {'type': 'test'})
+        telegram_ok = send_notification_to_user(target.id, title, body)
+
+        return Response({
+            'user': {'id': target.id, 'username': target.username,
+                     'name': target.get_full_name() or target.username},
+            'tokens': token_info,
+            'fcm_configured': fcm.is_configured(),
+            'result': {'expo': expo_ok, 'fcm': fcm_ok, 'websocket': ws_ok, 'telegram': telegram_ok},
+            'fcm_details': fcm_results,
+            'hint': (
+                'Токенов нет — сотруднику нужно открыть приложение и войти.'
+                if not tokens else
+                'Если FCM вернул INVALID_ARGUMENT/UNREGISTERED — приложение удалено, '
+                'переустановлено или токен устарел: пусть сотрудник заново войдёт в приложение.'
+            ),
+        })
+
 
 class WorkShiftViewSet(viewsets.ModelViewSet):
     """Рабочие смены"""
@@ -3031,16 +3320,71 @@ class PushTokenViewSet(viewsets.ModelViewSet):
 
 
 def send_push_notification(user_id, title, body, data=None):
-    """Отправить уведомление: Max (Telegram) + Expo Push + WebSocket"""
-    from .max_service import send_notification_to_user
+    """Отправить уведомление: Telegram + Expo Push + FCM + WebSocket"""
+    from .telegram_service import send_notification_to_user
     print(f'[Push] Sending to user_id={user_id}: title="{title}"')
-    # Max (Telegram-бот)
-    result_max = send_notification_to_user(user_id, title, body)
-    # Expo Push — мобильное приложение мастеров
+    # Telegram-бот (если сотрудник привязан)
+    result_telegram = send_notification_to_user(user_id, title, body)
+    # Expo Push — если у пользователя ещё остались ExpoPushToken'ы
     result_expo = _send_expo_push(user_id, title, body, data)
+    # Firebase Cloud Messaging — прямая отправка на FCM-токены (локальные APK)
+    result_fcm = _send_fcm_push(user_id, title, body, data)
     # WebSocket — мгновенная доставка (Channels)
     result_ws = _send_ws_notification(user_id, title, body, data)
-    print(f'[Push] Result for user_id={user_id}: via_max={result_max}, via_expo={result_expo}, via_ws={result_ws}')
+    print(f'[Push] Result for user_id={user_id}: via_telegram={result_telegram}, via_expo={result_expo}, '
+          f'via_fcm={result_fcm}, via_ws={result_ws}')
+
+
+def _send_fcm_push(user_id, title, body, data=None):
+    """Прямая отправка в FCM (HTTP v1) на обычные FCM-токены (APK, собранные локально)"""
+    from . import fcm
+
+    tokens = list(PushToken.objects.filter(user_id=user_id, is_active=True)
+                  .exclude(token__startswith='ExponentPushToken'))
+    if not tokens:
+        return False
+    if not fcm.is_configured():
+        print('[FCM] Сервис-аккаунт Firebase не найден — push пропущен')
+        return False
+
+    any_ok = False
+    for pt in tokens:
+        ok, error = fcm.send_to_token(pt.token, title, body, data)
+        if ok:
+            any_ok = True
+            continue
+        print('[FCM] Ошибка для токена {}…: {}'.format(pt.token[:16], error))
+        # FCM сообщает UNREGISTERED, если приложение удалено/токен устарел
+        if 'UNREGISTERED' in error or 'INVALID_ARGUMENT' in error:
+            PushToken.objects.filter(id=pt.id).update(is_active=False)
+    return any_ok
+
+
+
+def _broadcast_ws_chat(message, recipient_ids):
+    """Мгновенная доставка сообщения чата по WebSocket (без опроса)"""
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        layer = get_channel_layer()
+        if layer is None:
+            return False
+        payload = {
+            'id': message.id,
+            'sender': message.sender_id,
+            'sender_name': message.sender.get_full_name() or message.sender.username,
+            'recipient': message.recipient_id,
+            'is_broadcast': message.is_broadcast,
+            'text': message.text,
+            'created_at': message.created_at.isoformat(),
+        }
+        for uid in recipient_ids:
+            async_to_sync(layer.group_send)(
+                f'user_{uid}', {'type': 'chat_message', 'message': payload})
+        return True
+    except Exception as e:
+        print(f'[WS chat] error: {e}')
+        return False
 
 
 def _send_ws_notification(user_id, title, body, data=None):
@@ -3069,7 +3413,8 @@ def _send_ws_notification(user_id, title, body, data=None):
 def _send_expo_push(user_id, title, body, data=None):
     """Отправить push-уведомление через Expo Push API на все активные токены пользователя."""
     import requests as expo_requests
-    tokens = PushToken.objects.filter(user_id=user_id, is_active=True)
+    tokens = PushToken.objects.filter(user_id=user_id, is_active=True,
+                                      token__startswith='ExponentPushToken')
     if not tokens:
         return False
 
@@ -3131,6 +3476,21 @@ def _send_expo_push(user_id, title, body, data=None):
 
 # ==================== Auth endpoints ====================
 
+def _detect_client(request):
+    """Определяем, откуда пришёл запрос на вход: веб-интерфейс или мобильное приложение.
+    Приоритет — явный параметр client (новые версии приложения),
+    иначе смотрим User-Agent: браузер присылает 'Mozilla/...', React Native — okhttp/CFNetwork."""
+    client = str(request.data.get('client') or '').strip().lower()
+    if client in ('web', 'mobile'):
+        return client
+    ua = (request.META.get('HTTP_USER_AGENT') or '').strip().lower()
+    if not ua:
+        return 'unknown'
+    if 'mozilla' in ua:
+        return 'web'
+    return 'mobile'
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
@@ -3143,10 +3503,34 @@ def login_view(request):
 
     user = authenticate(username=username, password=password)
     if not user:
+        # Поясняем, если учётка отключена администратором
+        from django.contrib.auth.models import User as AuthUser
+        disabled = AuthUser.objects.filter(username=username, is_active=False).first()
+        if disabled and disabled.check_password(password):
+            return Response(
+                {'error': 'Учётная запись отключена. Обратитесь к администратору.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         return Response(
             {'error': 'Неверные учетные данные'},
             status=status.HTTP_401_UNAUTHORIZED
         )
+
+    # Ограничение по способу доступа (настройка в карточке сотрудника)
+    profile = getattr(user, 'profile', None)
+    scope = getattr(profile, 'access_scope', 'both') or 'both'
+    client = _detect_client(request)
+    if not getattr(user, 'is_superuser', False):
+        if scope == 'mobile' and client == 'web':
+            return Response(
+                {'error': 'Доступ разрешён только в мобильном приложении. Обратитесь к администратору.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if scope == 'web' and client == 'mobile':
+            return Response(
+                {'error': 'Доступ разрешён только в веб-интерфейсе. Обратитесь к администратору.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
     token, _ = Token.objects.get_or_create(user=user)
 
@@ -3178,7 +3562,9 @@ def refresh_token_view(request):
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     """Склад: оборудование (приход, учёт, остатки)"""
-    queryset = InventoryItem.objects.all()
+    queryset = InventoryItem.objects.prefetch_related(
+        'issue_items__issue_order__master__user'
+    ).all()
     serializer_class = InventoryItemSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['item_type', 'status', 'storage_location']
@@ -3211,6 +3597,16 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         items = InventoryItem.objects.all()
         total_items = items.count()
         in_stock = items.filter(status='in_stock').count()
+
+        # «У мастеров» — считаем по фактически выданному и не закрытому
+        from django.db.models import F, Sum
+        outstanding = [
+            (it.quantity_issued or 0) - (it.quantity_used or 0) - (it.quantity_returned or 0)
+            for it in IssueOrderItem.objects.filter(
+                issue_order__status__in=['pending', 'received', 'partially_used']
+            ).only('quantity_issued', 'quantity_used', 'quantity_returned')
+        ]
+        issued_total = sum(q for q in outstanding if q > 0)
         with_masters = items.filter(status='with_master').count()
         total_value = sum(
             (i.sale_price or 0) * i.quantity
@@ -3225,9 +3621,37 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             'total_items': total_items,
             'in_stock': in_stock,
             'with_masters': with_masters,
+            'issued_total': issued_total,
             'total_value': float(total_value),
             'by_type': by_type,
         })
+
+    @action(detail=True, methods=['post'])
+    def upload_photo(self, request, pk=None):
+        """Загрузить фото товара (multipart, поле 'photo')"""
+        item = self.get_object()
+        file = request.FILES.get('photo') or request.FILES.get('file')
+        if not file:
+            return Response({'error': 'Передайте файл в поле "photo"'}, status=400)
+        ext = (file.name.rsplit('.', 1)[-1] if '.' in file.name else '').lower()
+        if ext not in ('jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic'):
+            return Response({'error': 'Поддерживаются только изображения (jpg, png, webp)'}, status=400)
+        if item.photo:
+            item.photo.delete(save=False)
+        item.photo = file
+        item.save(update_fields=['photo', 'updated_at'])
+        return Response(InventoryItemSerializer(item, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def clear_photo(self, request, pk=None):
+        """Удалить загруженное фото товара"""
+        item = self.get_object()
+        if item.photo:
+            item.photo.delete(save=False)
+            item.photo = None
+        item.photo_url = ''
+        item.save(update_fields=['photo', 'photo_url', 'updated_at'])
+        return Response(InventoryItemSerializer(item, context={'request': request}).data)
 
     @action(detail=True, methods=['post'])
     def add_stock(self, request, pk=None):
@@ -3257,12 +3681,24 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Мастер не найден'}, status=404)
         if item.quantity < qty:
             return Response({'error': f'Недостаточно на складе (доступно: {item.quantity})'}, status=400)
+
+        # Создаём расходный ордер, чтобы материал числился в ЗИПе сотрудника
+        # и корректно отображался в «У мастеров» (а не только в движениях).
+        issue_order = IssueOrder.objects.create(
+            master=master, issued_by=request.user, status='pending',
+            notes=request.data.get('notes', f'Выдано мастеру {master}'),
+        )
+        IssueOrderItem.objects.create(
+            issue_order=issue_order, inventory_item=item,
+            source='warehouse', quantity_issued=qty,
+        )
         InventoryMovement.objects.create(
             item=item, movement_type='out_to_master', quantity=qty,
             master=master, performed_by=request.user,
             notes=request.data.get('notes', f'Выдано мастеру {master}')
         )
-        return Response(InventoryItemSerializer(item).data)
+        item.refresh_from_db()
+        return Response(InventoryItemSerializer(item, context={'request': request}).data)
 
     @action(detail=True, methods=['post'])
     def return_from_repair(self, request, pk=None):
@@ -3338,7 +3774,34 @@ class SupplyInvoiceViewSet(viewsets.ModelViewSet):
 
         items_data = data.get('items', [])
         for item_data in items_data:
-            inv_item = get_object_or_404(InventoryItem, id=item_data['inventory_item_id'])
+            inv_item = None
+            if item_data.get('inventory_item_id'):
+                inv_item = get_object_or_404(InventoryItem, id=item_data['inventory_item_id'])
+            elif item_data.get('new_item'):
+                # Новая номенклатура, впервые поступающая по этой накладной.
+                # Создаём карточку товара с нулевым остатком — на склад он
+                # попадёт только после приёмки (оприходования).
+                ni = item_data['new_item'] or {}
+                name = (ni.get('name') or '').strip()
+                if not name:
+                    return Response(
+                        {'error': 'Для новой позиции укажите название'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                inv_item = InventoryItem.objects.create(
+                    name=name,
+                    item_type=ni.get('item_type') or 'other',
+                    model_name=ni.get('model_name', ''),
+                    serial_number=ni.get('serial_number', ''),
+                    unit=ni.get('unit') or 'шт.',
+                    quantity=0,
+                    status='in_stock',
+                    cost_price=item_data.get('unit_price') or ni.get('cost_price') or None,
+                    supplier=supplier.name,
+                    notes=f'Поступило по накладной №{invoice.invoice_number} от {invoice.invoice_date}',
+                )
+            if inv_item is None:
+                continue
             SupplyInvoiceItem.objects.create(
                 invoice=invoice,
                 inventory_item=inv_item,
@@ -3490,8 +3953,90 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Ордер уже получен или закрыт'}, status=400)
         issue_order.status = 'received'
         issue_order.received_at = timezone.now()
+        issue_order.confirmed_by = request.user
         issue_order.save()
         return Response(IssueOrderSerializer(issue_order).data)
+
+    @action(detail=True, methods=['post'])
+    def confirm(self, request, pk=None):
+        """Мастер подтверждает получение и фактическое количество.
+
+        Принимает items: [{item_id, quantity_confirmed}]. Если фактически принято
+        меньше выданного — недостача возвращается на склад и фиксируется.
+        """
+        issue_order = self.get_object()
+        if issue_order.status != 'pending':
+            return Response({'error': 'Ордер уже подтверждён'}, status=400)
+
+        user = request.user
+        is_owner = bool(issue_order.master and issue_order.master.user_id == user.id)
+        try:
+            role = user.profile.role
+        except Exception:
+            role = ''
+        is_staff_role = user.is_staff or role in ('admin', 'dispatcher', 'warehouse', 'clerk')
+        if not (is_owner or is_staff_role):
+            return Response({'error': 'Нет прав подтверждать этот ордер'}, status=403)
+
+        data = {}
+        for it in (request.data.get('items') or []):
+            try:
+                data[int(it.get('item_id'))] = it
+            except (TypeError, ValueError):
+                continue
+
+        problems = []
+        for item in issue_order.items.all():
+            d = data.get(item.id, {})
+            raw = d.get('quantity_confirmed', None)
+            if raw is None or raw == '':
+                confirmed = item.quantity_issued
+            else:
+                try:
+                    confirmed = int(float(raw))
+                except (TypeError, ValueError):
+                    confirmed = item.quantity_issued
+            confirmed = max(0, min(confirmed, item.quantity_issued))
+            item.quantity_confirmed = confirmed
+            shortage = item.quantity_issued - confirmed
+            if shortage > 0:
+                item.quantity_returned = (item.quantity_returned or 0) + shortage
+                InventoryMovement.objects.create(
+                    item=item.inventory_item, movement_type='return_from_master',
+                    quantity=shortage, master=issue_order.master,
+                    performed_by=user,
+                    notes=(f'Не принято при получении (ордер №{issue_order.id}): '
+                           f'выдано {item.quantity_issued}, принято {confirmed}')
+                )
+                problems.append({
+                    'item': item.inventory_item.name,
+                    'issued': item.quantity_issued,
+                    'confirmed': confirmed,
+                    'shortage': shortage,
+                })
+            item.save(update_fields=['quantity_confirmed', 'quantity_returned'])
+
+        issue_order.status = 'received'
+        issue_order.received_at = timezone.now()
+        issue_order.confirmed_by = user
+        issue_order.save(update_fields=['status', 'received_at', 'confirmed_by'])
+
+        # Уведомляем кладовщика/выдавшего о расхождениях
+        if problems and issue_order.issued_by:
+            try:
+                text = '; '.join(f"{p['item']}: выдано {p['issued']}, принято {p['confirmed']}" for p in problems)
+                send_push_notification(
+                    issue_order.issued_by_id,
+                    '⚠️ Расхождение при получении материалов',
+                    text[:180],
+                    {'type': 'issue_discrepancy', 'issue_order_id': issue_order.id},
+                )
+            except Exception as e:
+                print('[IssueOrder] notify error:', e)
+
+        payload = IssueOrderSerializer(issue_order).data
+        payload['discrepancies'] = problems
+        return Response(payload)
 
     @action(detail=True, methods=['post'])
     def report_usage(self, request, pk=None):
@@ -3525,9 +4070,7 @@ class IssueOrderViewSet(viewsets.ModelViewSet):
                         InventoryMovement.objects.create(item=inv_item, movement_type='defect', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'Брак по ордеру №{issue_order.id}{serials_note}')
                     else:
                         # Рабочее или по умолчанию — возврат на склад
-                        inv_item.quantity += item.quantity_returned
-                        inv_item.status = 'in_stock'
-                        inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
+                        # (остаток и статус обновит InventoryMovement.save)
                         InventoryMovement.objects.create(item=inv_item, movement_type='return_from_master', quantity=item.quantity_returned, master=issue_order.master, order=issue_order.order, performed_by=request.user, notes=f'Возврат по ордеру №{issue_order.id}{serials_note}')
         from django.db.models import F as _F
         all_used = not issue_order.items.filter(quantity_issued__gt=_F('quantity_used') + _F('quantity_returned')).exists()
@@ -3691,14 +4234,25 @@ class MessageViewSet(viewsets.ModelViewSet):
     """Чат между сотрудниками"""
     queryset = Message.objects.all()
     serializer_class = MessageSerializer
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['sender', 'recipient']
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    # ВАЖНО: фильтр по recipient здесь НЕ используется — параметр recipient
+    # означает «показать диалог с этим сотрудником», а обычный filterset
+    # отфильтровал бы только входящие и диалог всегда был бы пустым.
+    filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at']
 
     def get_queryset(self):
         user = self.request.user
         if not user.is_authenticated:
             return Message.objects.none()
+
+        # Для действий над конкретным сообщением (read/retrieve/update/delete)
+        # берём всё, что доступно пользователю: свои, адресованные ему и broadcast.
+        # Без этого get_object() искал только в общем чате и отдавал 404.
+        if getattr(self, 'action', None) in ('retrieve', 'update', 'partial_update', 'destroy', 'read'):
+            return Message.objects.filter(
+                Q(sender=user) | Q(recipient=user) | Q(is_broadcast=True)
+            ).distinct().select_related('sender', 'recipient')
 
         recipient_id = self.request.query_params.get('recipient', '').strip()
 
@@ -3708,15 +4262,129 @@ class MessageViewSet(viewsets.ModelViewSet):
                 rid = int(recipient_id)
                 return Message.objects.filter(
                     Q(sender=user, recipient_id=rid) | Q(sender_id=rid, recipient=user)
-                ).distinct()
+                ).distinct().select_related('sender', 'recipient')
             except ValueError:
                 return Message.objects.none()
         else:
             # Общий чат: только broadcast-сообщения
-            return Message.objects.filter(is_broadcast=True).distinct()
+            return Message.objects.filter(is_broadcast=True).select_related('sender')
 
     def perform_create(self, serializer):
-        serializer.save(sender=self.request.user)
+        message = serializer.save(sender=self.request.user)
+        # Автор сразу считается прочитавшим — иначе свой же broadcast висел бы в бейдже
+        message.read_by.add(self.request.user)
+        self._notify_recipients(message)
+
+    @staticmethod
+    def _notify_recipients(message):
+        """Push (Expo/Max) + WebSocket о новом сообщении"""
+        from django.contrib.auth.models import User as AuthUser
+
+        sender_name = message.sender.get_full_name() or message.sender.username
+        if message.attachment_type == 'image':
+            preview = (message.text or '📷 Фотография')[:120]
+        elif message.attachment_type == 'audio':
+            preview = (message.text or '🎤 Голосовое сообщение')[:120]
+        elif message.attachment_type == 'file':
+            preview = (message.text or '📎 ' + (message.attachment_name or 'Документ'))[:120]
+        else:
+            preview = (message.text or '')[:120]
+
+        if message.recipient_id:
+            recipients = [message.recipient_id]
+            title = '💬 {}'.format(sender_name)
+        else:
+            recipients = list(
+                AuthUser.objects.filter(is_active=True)
+                .exclude(id=message.sender_id).values_list('id', flat=True)
+            )
+            title = '📢 Общий чат — {}'.format(sender_name)
+
+        for uid in recipients:
+            try:
+                send_push_notification(uid, title, preview, {
+                    'type': 'message',
+                    'message_id': message.id,
+                    'sender_id': message.sender_id,
+                    'sender_name': sender_name,
+                    'is_broadcast': message.is_broadcast,
+                    'chat_user_id': 0 if message.is_broadcast else message.sender_id,
+                })
+            except Exception as e:
+                print('[Chat] push error:', e)
+
+        _broadcast_ws_chat(message, recipients)
+
+    @action(detail=False, methods=['get'])
+    def conversations(self, request):
+        """Список диалогов пользователя: собеседник, последнее сообщение, непрочитанные."""
+        from django.contrib.auth.models import User as AuthUser
+        from django.db.models import Max
+
+        user = request.user
+        qs = Message.objects.filter(
+            Q(sender=user) | Q(recipient=user)
+        ).select_related('sender', 'recipient').order_by('-created_at')
+
+        dialogs = {}
+        for m in qs[:500]:
+            other = m.recipient if m.sender_id == user.id else m.sender
+            if other is None or other.id == user.id:
+                continue
+            key = other.id
+            if key not in dialogs:
+                unread_qs = Message.objects.filter(sender=other, recipient=user).exclude(read_by=user)
+                try:
+                    role = other.profile.role
+                except Exception:
+                    role = 'master'
+                dialogs[key] = {
+                    'user_id': other.id,
+                    'full_name': other.get_full_name() or other.username,
+                    'username': other.username,
+                    'role': role,
+                    'last_text': m.text or (
+                        '📷 Фотография' if m.attachment_type == 'image'
+                        else '🎤 Голосовое' if m.attachment_type == 'audio'
+                        else '📎 ' + (m.attachment_name or 'Файл') if m.attachment_type == 'file'
+                        else ''
+                    ),
+                    'last_at': m.created_at,
+                    'last_is_mine': m.sender_id == user.id,
+                    'unread': unread_qs.count(),
+                }
+
+        # Общий чат (broadcast) — отдельная «беседа»
+        broadcast_qs = Message.objects.filter(is_broadcast=True).order_by('-created_at')
+        last_bc = broadcast_qs.first()
+        bc_unread = broadcast_qs.exclude(sender=user).exclude(read_by=user).count()
+        broadcast = {
+            'user_id': 0,
+            'full_name': 'Общий чат',
+            'username': 'broadcast',
+            'role': 'broadcast',
+            'last_text': (last_bc.text or '📎 Вложение') if last_bc else '',
+            'last_at': last_bc.created_at.isoformat() if last_bc else None,
+            'last_is_mine': bool(last_bc and last_bc.sender_id == user.id),
+            'unread': bc_unread,
+        }
+
+        items = list(dialogs.values())
+        items.sort(key=lambda x: x['last_at'], reverse=True)
+        for it in items:
+            it['last_at'] = it['last_at'].isoformat()
+        if last_bc:
+            items.insert(0, broadcast)
+        else:
+            items.append(broadcast)
+
+        return Response({'conversations': items, 'total_unread': self._total_unread(user)})
+
+    @staticmethod
+    def _total_unread(user):
+        return Message.objects.filter(
+            Q(recipient=user) | Q(is_broadcast=True)
+        ).exclude(sender=user).exclude(read_by=user).count()
 
     @action(detail=True, methods=['post'])
     def read(self, request, pk=None):
@@ -3729,7 +4397,7 @@ class MessageViewSet(viewsets.ModelViewSet):
         user = request.user
         count = Message.objects.filter(
             Q(recipient=user) | Q(is_broadcast=True)
-        ).exclude(read_by=user).count()
+        ).exclude(sender=user).exclude(read_by=user).count()
         return Response({'unread': count})
 
     @action(detail=False, methods=['get'])
@@ -3808,6 +4476,24 @@ class LegalEntityViewSet(viewsets.ModelViewSet):
             le.save(update_fields=['cp_signature_file'])
         return Response({'success': True})
 
+    @action(detail=True, methods=['post'])
+    def delete_stamp(self, request, pk=None):
+        le = self.get_object()
+        if le.stamp_file:
+            le.stamp_file.delete(save=False)
+            le.stamp_file = None
+            le.save(update_fields=['stamp_file'])
+        return Response({'success': True})
+
+
+class LegalEntityBankAccountViewSet(viewsets.ModelViewSet):
+    """Расчётные счета юрлиц (для счетов, актов и УПД)"""
+    queryset = LegalEntityBankAccount.objects.all()
+    serializer_class = LegalEntityBankAccountSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['legal_entity', 'is_default', 'is_active']
+    ordering_fields = ['title', 'is_default']
+
 
 class EstimateServiceViewSet(viewsets.ModelViewSet):
     """Справочник услуг и работ для смет"""
@@ -3817,6 +4503,456 @@ class EstimateServiceViewSet(viewsets.ModelViewSet):
     filterset_fields = ['category', 'is_active']
     search_fields = ['name']
     ordering_fields = ['name', 'category', 'sale_price', 'cost_price']
+
+
+def _money(value, currency='₽'):
+    """Форматирование суммы: 1 234,56 ₽"""
+    try:
+        num = float(value or 0)
+    except (TypeError, ValueError):
+        num = 0.0
+    text = f'{num:,.2f}'.replace(',', ' ').replace('.', ',')
+    return f'{text} {currency}'
+
+
+# ── Сумма прописью (для актов и счетов) ──────────────────────────────────────
+_NUM_0_19 = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять',
+             'десять', 'одиннадцать', 'двенадцать', 'тринадцать', 'четырнадцать', 'пятнадцать',
+             'шестнадцать', 'семнадцать', 'восемнадцать', 'девятнадцать']
+_TENS = ['', '', 'двадцать', 'тридцать', 'сорок', 'пятьдесят', 'шестьдесят',
+         'семьдесят', 'восемьдесят', 'девяносто']
+_HUNDREDS = ['', 'сто', 'двести', 'триста', 'четыреста', 'пятьсот',
+             'шестьсот', 'семьсот', 'восемьсот', 'девятьсот']
+_FEMININE = {'один': 'одна', 'два': 'две'}
+_MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+               'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+
+
+def _plural(count, one, few, many):
+    n = abs(int(count)) % 100
+    if 11 <= n <= 19:
+        return many
+    n %= 10
+    if n == 1:
+        return one
+    if 2 <= n <= 4:
+        return few
+    return many
+
+
+def _triad_to_words(num, feminine=False):
+    words = []
+    n = int(num)
+    if n >= 100:
+        words.append(_HUNDREDS[n // 100])
+        n %= 100
+    if n >= 20:
+        words.append(_TENS[n // 10])
+        n %= 10
+        if n:
+            words.append(_NUM_0_19[n])
+    elif n > 0:
+        words.append(_NUM_0_19[n])
+    if feminine:
+        words = [_FEMININE.get(w, w) for w in words]
+    return words
+
+
+def amount_in_words(amount):
+    """10038.00 → «Десять тысяч тридцать восемь рублей 00 копеек»"""
+    total = float(amount or 0)
+    rub = int(total)
+    kop = int(round((total - rub) * 100))
+    if kop >= 100:
+        rub += 1
+        kop = 0
+
+    groups = [(1_000_000_000, 'миллиард', 'миллиарда', 'миллиардов', False),
+              (1_000_000, 'миллион', 'миллиона', 'миллионов', False),
+              (1_000, 'тысяча', 'тысячи', 'тысяч', True)]
+    words = []
+    rest = rub
+    for value, one, few, many, fem in groups:
+        cnt = rest // value
+        rest %= value
+        if cnt:
+            words += _triad_to_words(cnt, feminine=fem)
+            words.append(_plural(cnt, one, few, many))
+    if rest or not words:
+        words += _triad_to_words(rest)
+    if not words:
+        words = ['ноль']
+    words.append(_plural(rub, 'рубль', 'рубля', 'рублей'))
+
+    text = ' '.join(w for w in words if w)
+    text = '{} {:02d} {}'.format(text, kop, _plural(kop, 'копейка', 'копейки', 'копеек'))
+    return text[0].upper() + text[1:]
+
+
+def _ru_date_long(date_obj):
+    """20 октября 2026 г."""
+    return '{} {} {} г.'.format(date_obj.day, _MONTHS_GEN[date_obj.month - 1], date_obj.year)
+
+
+def _doc_styles(color='#1a3e60'):
+    return f'''
+@page {{ size: A4; margin: 10mm; }}
+@media print {{
+  body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  .no-print {{ display: none !important; }}
+}}
+body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 10pt; color: #111; }}
+h1 {{ font-size: 15pt; margin: 0 0 6px; }}
+.doc-title {{ display: flex; justify-content: space-between; align-items: flex-start;
+              border-bottom: 2px solid {color}; padding-bottom: 6px; margin-bottom: 12px; }}
+.doc-title .num {{ font-size: 12pt; font-weight: 700; color: {color}; }}
+.party {{ margin: 0 0 6px; font-size: 10pt; line-height: 1.35; }}
+.party strong {{ display: inline-block; min-width: 96px; }}
+.bank {{ width: 100%; border-collapse: collapse; margin-bottom: 10px; }}
+.bank td {{ border: 1px solid #999; padding: 3px 6px; font-size: 9pt; }}
+table.items {{ width: 100%; border-collapse: collapse; margin: 8px 0; }}
+table.items th {{ background: #eef2f7; border: 1px solid #555; padding: 3px 4px; font-size: 8pt;
+                  text-align: center; font-weight: 600; }}
+table.items td {{ border: 1px solid #666; padding: 3px 4px; font-size: 8.5pt; vertical-align: top; }}
+table.items td.num {{ text-align: right; white-space: nowrap; }}
+table.items td.c {{ text-align: center; }}
+table.items tr.letters td {{ text-align: center; font-size: 8pt; color: #444; background: #f7f9fc; }}
+table.items.upd-items {{ table-layout: fixed; }}
+table.items.upd-items th, table.items.upd-items td {{ font-size: 6.2pt; padding: 2px 2px; line-height: 1.15; }}
+table.items.upd-items td.num {{ white-space: normal; }}
+.totals {{ width: 100%; border-collapse: collapse; margin-top: 4px; }}
+.totals td {{ padding: 3px 6px; font-size: 9.5pt; }}
+.totals td.lbl {{ text-align: right; width: 78%; }}
+.totals td.val {{ text-align: right; white-space: nowrap; border-bottom: 1px solid #888; }}
+.totals tr.grand td {{ font-weight: 700; font-size: 11pt; color: {color}; }}
+.words {{ margin: 8px 0 0; font-size: 9.5pt; font-style: italic; }}
+.signs {{ width: 100%; margin-top: 22px; font-size: 9.5pt; border-collapse: collapse; }}
+.signs td {{ padding: 6px 0; vertical-align: bottom; }}
+.signs td.sig {{ position: relative; }}
+.signs img.stamp {{ position: absolute; left: 70px; top: -6px; width: 120px; opacity: .78; }}
+.line {{ display: inline-block; border-bottom: 1px solid #333; min-width: 150px; }}
+.small {{ font-size: 8.5pt; color: #555; }}
+.upd-meta {{ width: 100%; border-collapse: collapse; margin-bottom: 6px; }}
+.upd-meta td {{ border: 1px solid #777; padding: 3px 5px; font-size: 8.5pt; vertical-align: top; }}
+.upd-meta td.code {{ width: 34px; text-align: center; color: #666; }}
+.upd-num td {{ border: 1px solid #777; padding: 4px 6px; }}
+.muted {{ color: #777; }}
+.print-btn {{ position: fixed; top: 10px; right: 10px; padding: 9px 18px; background: {color};
+              color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; z-index: 999; }}
+'''
+
+
+def build_estimate_document(estimate, kind='invoice', account=None, stamp_url=None):
+    """Печатные формы по смете:
+    invoice — счёт на оплату, act — акт об оказании услуг, upd — УПД (статус 1, гос. образец).
+    account — выбранный расчётный счёт юрлица (по умолчанию берётся основной).
+    """
+    from datetime import date as _date
+
+    le = estimate.legal_entity
+    client = estimate.client
+    color = (getattr(le, 'cp_color', '') or '#1a3e60') if le else '#1a3e60'
+
+    entity_name = (le.short_name or le.name) if le else 'Наша компания'
+    entity_full = le.name if le else 'Наша компания'
+    inn = (le.inn or '') if le else ''
+    kpp = (le.kpp or '') if le else ''
+    address = ((le.legal_address or le.actual_address) if le else '') or ''
+    phone = (le.phone or '') if le else ''
+    director = (le.director or '') if le else ''
+
+    # ── Расчётный счёт: выбранный вручную → основной → реквизиты карточки юрлица ──
+    acc = account
+    if acc is None and le:
+        accs = list(le.bank_accounts.filter(is_active=True))
+        acc = next((a for a in accs if a.is_default), accs[0] if accs else None)
+    bank = (acc.bank_name if acc and acc.bank_name else (le.bank_name if le else '')) or ''
+    rs = (acc.settlement_account if acc and acc.settlement_account
+          else (le.settlement_account if le else '')) or ''
+    bik = (acc.bik if acc and acc.bik else (le.bik if le else '')) or ''
+    corr = (acc.corr_account if acc and acc.corr_account
+            else (le.corr_account if le else '')) or ''
+
+    client_name = (client.name if client else '—')
+    client_inn = (getattr(client, 'inn', '') or '') if client else ''
+    client_kpp = (getattr(client, 'kpp', '') or '') if client else ''
+    client_address = ((getattr(client, 'legal_address', '') or getattr(client, 'address', '')) if client else '') or ''
+    client_phone = (getattr(client, 'phone', '') or '') if client else ''
+    client_director = (getattr(client, 'director_name', '') or '') if client else ''
+    client_bank = (getattr(client, 'bank_name', '') or '') if client else ''
+    client_rs = (getattr(client, 'settlement_account', '') or '') if client else ''
+    client_bik = (getattr(client, 'bik', '') or '') if client else ''
+    client_corr = (getattr(client, 'corr_account', '') or '') if client else ''
+
+    vat_rate = float(getattr(le, 'vat_rate', 0) or 0) if le else 0.0
+    total = float(estimate.total or 0)
+    if vat_rate > 0:
+        sum_no_vat = round(total / (1 + vat_rate / 100), 2)
+        vat_sum = round(total - sum_no_vat, 2)
+    else:
+        sum_no_vat = total
+        vat_sum = 0.0
+
+    items = list(estimate.items.all())
+    today = timezone.localdate().strftime('%d.%m.%Y')
+    today_long = _ru_date_long(timezone.localdate())
+
+    # ── Реквизиты документа ───────────────────────────────────────────────
+    if kind == 'invoice':
+        number = estimate.invoice_number or '—'
+        doc_date = estimate.invoice_date or timezone.localdate()
+        title = 'Счёт на оплату'
+    elif kind == 'act':
+        number = estimate.act_number or '—'
+        doc_date = estimate.act_date or timezone.localdate()
+        title = 'Акт об оказании услуг'
+    else:
+        number = estimate.upd_number or '—'
+        doc_date = estimate.upd_date or timezone.localdate()
+        title = 'Универсальный передаточный документ'
+    date_str = doc_date.strftime('%d.%m.%Y')
+    date_long = _ru_date_long(doc_date)
+    items_count = len(items)
+
+    # ── Таблица позиций ───────────────────────────────────────────────────
+    vat_text = ('{}%'.format(int(vat_rate)) if vat_rate == int(vat_rate) else '{}%'.format(vat_rate)) if vat_rate > 0 else 'без НДС'
+    rows = ''
+    for idx, item in enumerate(items, 1):
+        qty = float(item.quantity or 0)
+        amount = float(item.total_price or 0)
+        price = (amount / qty) if qty else amount
+        qty_str = ('{:g}'.format(qty))
+        if kind == 'upd':
+            item_no_vat = round(amount / (1 + vat_rate / 100), 2) if vat_rate > 0 else amount
+            item_vat = round(amount - item_no_vat, 2) if vat_rate > 0 else 0.0
+            rows += f'''<tr>
+                <td class="c muted">—</td>
+                <td class="c">{idx}</td>
+                <td>{item.name}</td>
+                <td class="c">—</td>
+                <td class="c">796</td>
+                <td class="c">{item.unit}</td>
+                <td class="num">{qty_str}</td>
+                <td class="num">{_money(price, '')}</td>
+                <td class="num">{_money(item_no_vat, '')}</td>
+                <td class="c">без акциза</td>
+                <td class="c">{vat_text}</td>
+                <td class="num">{_money(item_vat, '') if vat_rate > 0 else '—'}</td>
+                <td class="num">{_money(amount, '')}</td>
+                <td class="c">—</td>
+                <td class="c">—</td>
+            </tr>'''
+        elif kind == 'act':
+            rows += f'''<tr>
+                <td class="c">{idx}</td>
+                <td>{item.name}</td>
+                <td class="num">{qty_str}</td>
+                <td class="c">{item.unit}</td>
+                <td class="num">{_money(price, '')}</td>
+                <td class="num">{_money(amount, '')}</td>
+            </tr>'''
+        else:
+            rows += f'''<tr>
+                <td class="c">{idx}</td>
+                <td>{item.name}</td>
+                <td class="c">{item.unit}</td>
+                <td class="num">{qty_str}</td>
+                <td class="num">{_money(price)}</td>
+                <td class="num">{_money(amount)}</td>
+            </tr>'''
+
+    if kind == 'upd':
+        table_head = '''<colgroup>
+            <col style="width:6%"><col style="width:3%"><col style="width:25%">
+            <col style="width:5%"><col style="width:4%"><col style="width:6%">
+            <col style="width:5%"><col style="width:8%"><col style="width:8%">
+            <col style="width:6%"><col style="width:5%"><col style="width:7%">
+            <col style="width:8%"><col style="width:6%"><col style="width:6%">
+        </colgroup><tr>
+            <th rowspan="2">Код товара/<br>работ, услуг</th>
+            <th rowspan="2">№<br>п/п</th>
+            <th rowspan="2">Наименование товара (описание выполненных работ, оказанных услуг), имущественного права</th>
+            <th>Код вида<br>товара</th>
+            <th colspan="2">Единица измерения</th>
+            <th rowspan="2">Коли-<br>чество<br>(объём)</th>
+            <th rowspan="2">Цена (тариф)<br>за единицу</th>
+            <th rowspan="2">Стоимость товаров (работ, услуг)<br>без налога — всего</th>
+            <th rowspan="2">В том числе<br>сумма акциза</th>
+            <th rowspan="2">Налоговая<br>ставка</th>
+            <th rowspan="2">Сумма налога,<br>предъявляемая<br>покупателю</th>
+            <th rowspan="2">Стоимость товаров (работ, услуг)<br>с налогом — всего</th>
+            <th rowspan="2">Страна происхождения товара</th>
+            <th rowspan="2">Рег. номер декларации<br>на товары</th>
+        </tr>
+        <tr><th>1б</th><th>код</th><th>условное обозначение</th></tr>
+        <tr class="letters">
+            <td>—</td><td>1</td><td>1а</td><td>1б</td><td>2</td><td>2а</td><td>3</td>
+            <td>4</td><td>5</td><td>6</td><td>7</td><td>8</td><td>9</td><td>10</td><td>11</td>
+        </tr>'''
+    elif kind == 'act':
+        table_head = ('<tr><th style="width:34px;">№</th><th>Наименование работ, услуг</th>'
+                      '<th style="width:64px;">Кол-во</th><th style="width:52px;">Ед.</th>'
+                      '<th style="width:100px;">Цена</th><th style="width:110px;">Сумма</th></tr>')
+    else:
+        table_head = ('<tr><th style="width:34px;">№</th><th>Наименование работ, услуг</th>'
+                      '<th style="width:52px;">Ед.</th><th style="width:64px;">Кол-во</th>'
+                      '<th style="width:100px;">Цена</th><th style="width:110px;">Сумма</th></tr>')
+
+    # ── Итоги ─────────────────────────────────────────────────────────────
+    vat_label = vat_text if vat_rate > 0 else ''
+    if kind == 'upd':
+        totals = f'''
+    <table class="totals">
+        <tr><td class="lbl">Всего к оплате (9), без налога:</td><td class="val">{_money(sum_no_vat)}</td></tr>
+        <tr><td class="lbl">Сумма налога (8):</td><td class="val">{_money(vat_sum) if vat_rate > 0 else 'без НДС'}</td></tr>
+        <tr class="grand"><td class="lbl">Всего к оплате с налогом:</td><td class="val">{_money(total)}</td></tr>
+    </table>
+    <p class="words">{amount_in_words(total)}</p>'''
+    elif kind == 'invoice':
+        totals = f'''
+    <table class="totals">
+        <tr><td class="lbl">Итого:</td><td class="val">{_money(sum_no_vat)}</td></tr>
+        <tr><td class="lbl">В том числе НДС {vat_label}:</td>
+            <td class="val">{_money(vat_sum) if vat_rate > 0 else 'не облагается'}</td></tr>
+        <tr class="grand"><td class="lbl">Всего к оплате:</td><td class="val">{_money(total)}</td></tr>
+    </table>
+    <p class="words">Всего наименований {items_count}, на сумму {_money(total)}<br>{amount_in_words(total)}</p>'''
+    else:
+        totals = f'''
+    <table class="totals">
+        <tr><td class="lbl">Итого:</td><td class="val">{_money(sum_no_vat)}</td></tr>
+        <tr><td class="lbl">Сумма НДС {vat_label}:</td>
+            <td class="val">{_money(vat_sum) if vat_rate > 0 else 'без НДС'}</td></tr>
+        <tr class="grand"><td class="lbl">Всего оказано услуг {items_count}, на сумму:</td>
+            <td class="val">{_money(total)}</td></tr>
+    </table>
+    <p class="words">{amount_in_words(total)}</p>'''
+
+    # ── Блок банковских реквизитов (только счёт) ──────────────────────────
+    bank_block = ''
+    if kind == 'invoice':
+        bank_block = f'''
+    <table class="bank">
+        <tr><td colspan="2">{bank}</td></tr>
+        <tr><td style="width:65%;">БИК {bik}</td><td>Корр. счёт № {corr}</td></tr>
+        <tr><td>Получатель: {entity_full}, ИНН {inn}, КПП {kpp}</td><td>Расчётный счёт № {rs}</td></tr>
+    </table>'''
+
+    # ── Вводная часть ─────────────────────────────────────────────────────
+    client_inn_part = ', ИНН {}'.format(client_inn) if client_inn else ''
+    client_kpp_part = ', КПП {}'.format(client_kpp) if client_kpp else ''
+    client_addr_part = ', {}'.format(client_address) if client_address else ''
+    client_phone_part = ', тел.: {}'.format(client_phone) if client_phone else ''
+    client_requisites = ''
+    if client_rs or client_bank:
+        client_requisites = ', р/с {rs}, в банке {bank}, БИК {bik}, к/с {corr}'.format(
+            rs=client_rs or '—', bank=client_bank or '—', bik=client_bik or '—', corr=client_corr or '—')
+    estimate_date_str = estimate.created_at.strftime('%d.%m.%Y')
+    invoice_ref = ''
+    if estimate.invoice_number:
+        invoice_ref = '№ {} от {}'.format(
+            estimate.invoice_number,
+            estimate.invoice_date.strftime('%d.%m.%Y') if estimate.invoice_date else '')
+    basis_text = 'смета №{} от {}'.format(estimate.number, estimate_date_str)
+    if invoice_ref:
+        basis_text += ', счёт {}'.format(invoice_ref)
+
+    if kind == 'invoice':
+        prepay_date = (timezone.localdate() + timedelta(days=5)).strftime('%d.%m.%Y')
+        intro = f'''<p class="party"><strong>Поставщик:</strong> {entity_full}, ИНН {inn}, КПП {kpp}, {address}{', тел.: ' + phone if phone else ''}</p>
+    <p class="party"><strong>Покупатель:</strong> {client_name}{client_inn_part}{client_kpp_part}{client_addr_part}</p>
+    <p class="small">Основание: {basis_text}. Оплатить не позднее <strong>{prepay_date}</strong>.</p>'''
+    elif kind == 'act':
+        intro = f'''<p class="party"><strong>Исполнитель:</strong><br>{entity_full}, ИНН {inn}, КПП {kpp}, {address}{', тел.: ' + phone if phone else ''}, р/с {rs}, в банке {bank}, БИК {bik}, к/с {corr}</p>
+    <p class="party"><strong>Заказчик:</strong><br>{client_name}{client_inn_part}{client_kpp_part}{client_addr_part}{client_phone_part}{client_requisites}</p>
+    <p class="party"><strong>Основание:</strong> {basis_text}</p>'''
+    else:
+        intro = f'''
+    <table class="upd-meta">
+        <tr><td class="code">(1)</td>
+            <td colspan="3"><strong style="font-size:11pt;">Счёт-фактура № {number} от {date_long}</strong>
+            <div class="small">Приложение № 1 к постановлению Правительства РФ от 26.12.2011 № 1137</div></td></tr>
+        <tr><td class="code">(1а)</td><td colspan="3">Исправление № — от —</td></tr>
+        <tr><td class="code">(2)</td><td style="width:45%;"><span class="small">Продавец:</span><br>{entity_full}</td>
+            <td class="code">(6)</td><td><span class="small">Покупатель:</span><br>{client_name}</td></tr>
+        <tr><td class="code">(2а)</td><td><span class="small">Адрес:</span><br>{address or '—'}</td>
+            <td class="code">(6а)</td><td><span class="small">Адрес:</span><br>{client_address or '—'}</td></tr>
+        <tr><td class="code">(2б)</td><td>ИНН/КПП продавца: {inn}/{kpp}</td>
+            <td class="code">(6б)</td><td>ИНН/КПП покупателя: {client_inn or '—'}/{client_kpp or '—'}</td></tr>
+        <tr><td class="code">(—)</td><td>Статус: <strong>1</strong> — счёт-фактура и передаточный документ (акт)</td>
+            <td class="code">(7)</td><td>Валюта: наименование, код — Российский рубль, 643</td></tr>
+        <tr><td class="code">(3)</td><td>Грузоотправитель и его адрес: —</td>
+            <td class="code">(4)</td><td>Грузополучатель и его адрес: —</td></tr>
+        <tr><td class="code">(5)</td><td>К платёжно-расчётному документу {invoice_ref or '№ — от —'}</td>
+            <td class="code">(5а)</td><td>Документ об отгрузке: УПД № {number} от {date_str}</td></tr>
+        <tr><td class="code">(8)</td><td colspan="3">Идентификатор государственного контракта, договора (соглашения) (при наличии): —</td></tr>
+    </table>
+    <p class="small">Основание передачи (сдачи) / получения (приёмки): {basis_text}</p>'''
+
+    # ── Подписи ───────────────────────────────────────────────────────────
+    accountant = (getattr(le, 'accountant', '') or '') if le else ''
+    stamp_img = ''
+    if stamp_url:
+        stamp_img = '<img class="stamp" src="{}" alt="Печать организации" />'.format(stamp_url)
+    if kind == 'invoice':
+        signs = f'''<table class="signs"><tr>
+        <td style="width:50%;" class="sig">{stamp_img}Руководитель <span class="line">&nbsp;</span> {director}</td>
+        <td>Главный бухгалтер <span class="line">&nbsp;</span> {accountant}</td></tr></table>'''
+    elif kind == 'act':
+        signs = f'''<p class="small" style="margin-top:14px;">Вышеперечисленные услуги выполнены полностью и в срок.
+    Заказчик претензий по объёму, качеству и срокам оказания услуг не имеет.</p>
+    <table class="signs">
+        <tr><td style="width:50%;"><strong>ИСПОЛНИТЕЛЬ</strong></td><td><strong>ЗАКАЗЧИК</strong></td></tr>
+        <tr><td>Генеральный директор {entity_full}</td><td>{client_name}</td></tr>
+        <tr><td class="sig">{stamp_img}<span class="line">&nbsp;</span> {director}</td><td><span class="line">&nbsp;</span> {client_director}</td></tr>
+    </table>'''
+    else:
+        signs = f'''<table class="signs">
+        <tr>
+            <td style="width:50%;" class="sig">{stamp_img}Руководитель организации<br>или иное уполномоченное лицо
+                <span class="line">&nbsp;</span> {director}</td>
+            <td>Главный бухгалтер<br>или иное уполномоченное лицо
+                <span class="line">&nbsp;</span> {accountant}</td>
+        </tr>
+    </table>
+    <table class="upd-meta" style="margin-top:14px;">
+        <tr><td class="code">[8]</td><td>Основание передачи (сдачи) / получения (приёмки): {basis_text}</td></tr>
+        <tr><td class="code">[9]</td><td>Данные о транспортировке и грузе: —</td></tr>
+        <tr><td class="code">[10]</td><td>Товар (груз) передал / услуги, результаты работ, права сдал:
+            <strong>Генеральный директор</strong> <span class="line">&nbsp;</span> {director}</td></tr>
+        <tr><td class="code">[15]</td><td>Товар (груз) получил / услуги, результаты работ, права принял:
+            <span class="line">&nbsp;</span> {client_director or ''}</td></tr>
+        <tr><td class="code">[11]</td><td>Дата отгрузки, передачи (сдачи): {date_long}</td></tr>
+        <tr><td class="code">[16]</td><td>Дата получения (приёмки): «&nbsp;&nbsp;&nbsp;» ______________ 20___ года</td></tr>
+        <tr><td class="code">[13]</td><td>Ответственный за правильность оформления факта хозяйственной жизни:
+            <strong>Генеральный директор</strong> <span class="line">&nbsp;</span> {director}</td></tr>
+        <tr><td class="code">[14]</td><td>Наименование экономического субъекта — составителя документа:
+            {entity_full}, ИНН/КПП {inn}/{kpp} <span class="muted">М.П.</span></td></tr>
+    </table>'''
+
+    stamp_html = ''
+
+    if kind == 'upd':
+        head_block = f'''<h1 style="text-align:center; margin-bottom:2px;">Универсальный передаточный документ</h1>'''
+    elif kind == 'act':
+        head_block = f'''<h1>Акт № {number} от {date_long}</h1>'''
+    else:
+        head_block = f'''<div class="doc-title"><div><h1>{title}</h1>
+            <div class="small">{entity_name} · смета №{estimate.number}</div></div>
+            <div class="num">№ {number}<br><span style="font-size:10pt;color:#555;">от {date_str}</span></div></div>'''
+
+    return f'''<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>{title} №{number}</title>
+<style>{_doc_styles(color)}</style></head>
+<body>
+<button class="print-btn no-print" onclick="window.print()">🖨️ Печать / Сохранить PDF</button>
+{head_block}
+{bank_block}
+{intro}
+<table class="{'items upd-items' if kind == 'upd' else 'items'}">{table_head}{rows}</table>
+{totals}
+{signs}
+</body></html>'''
 
 
 class CommercialEstimateViewSet(viewsets.ModelViewSet):
@@ -3830,11 +4966,35 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         obj = serializer.save(created_by=self.request.user)
+        self._sync_tax_from_legal_entity(obj, serializer.validated_data)
         obj.recalculate()
 
     def perform_update(self, serializer):
         obj = serializer.save()
+        # При смене «нашего юрлица» подтягиваем его систему налогообложения:
+        # у ООО на ОСНО НДС 20%, у ИП на УСН — без НДС и т.д.
+        self._sync_tax_from_legal_entity(obj, serializer.validated_data)
         obj.recalculate()
+
+    @staticmethod
+    def _sync_tax_from_legal_entity(obj, validated_data):
+        """Копирует tax_system/vat_rate юрлица в смету, если их не передали явно"""
+        if 'legal_entity' not in validated_data or not obj.legal_entity:
+            return
+        entity = obj.legal_entity
+        fields = []
+
+        if entity.tax_system and 'tax_type' not in validated_data and obj.tax_type != entity.tax_system:
+            obj.tax_type = entity.tax_system
+            fields.append('tax_type')
+
+        vat_rate = entity.vat_rate or 0
+        if 'tax_rate' not in validated_data and float(vat_rate) > 0 and obj.tax_rate != entity.vat_rate:
+            obj.tax_rate = entity.vat_rate
+            fields.append('tax_rate')
+
+        if fields:
+            obj.save(update_fields=fields)
 
     @action(detail=True, methods=['post'])
     def add_item(self, request, pk=None):
@@ -3919,6 +5079,243 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
         estimate = self.get_object()
         estimate.recalculate()
         return Response(CommercialEstimateSerializer(estimate).data)
+
+    # ══════════════════ Жизненный цикл сметы ══════════════════
+    @staticmethod
+    def _user_can(user, permission):
+        from .permissions import effective_permissions
+        try:
+            return permission in effective_permissions(user)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _next_doc_number(prefix, field):
+        """Следующий номер документа вида СЧ-251102-001 (по дню)"""
+        today = timezone.localdate()
+        base = f'{prefix}-{today.strftime("%y%m%d")}-'
+        max_seq = 0
+        for value in CommercialEstimate.objects.filter(**{f'{field}__startswith': base}).values_list(field, flat=True):
+            try:
+                max_seq = max(max_seq, int(str(value).split('-')[-1]))
+            except (ValueError, IndexError):
+                continue
+        return f'{base}{max_seq + 1:03d}'
+
+    def _bad_status(self, estimate, allowed, action_title):
+        return Response(
+            {'error': f'«{action_title}» недоступно в статусе «{estimate.get_status_display()}»'},
+            status=400,
+        )
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        """Отправить смету: юрлицу дороже 50 000 ₽ — на согласование ГД, иначе сразу клиенту"""
+        estimate = self.get_object()
+        if estimate.status not in ('draft', 'rejected', 'approved_internal'):
+            return self._bad_status(estimate, ('draft', 'rejected'), 'Отправка сметы')
+        if not estimate.items.exists():
+            return Response({'error': 'В смете нет ни одной позиции'}, status=400)
+        if not estimate.client:
+            return Response({'error': 'Не выбран клиент'}, status=400)
+
+        estimate.recalculate()
+        needs = estimate.needs_director_approval()
+        estimate.requires_director_approval = needs
+        if needs:
+            estimate.status = 'on_approval'
+            estimate.director_approved_by = None
+            estimate.director_approved_at = None
+            estimate.log_event(
+                'submitted', request.user,
+                f'Смета на {estimate.total} ₽ отправлена на согласование генеральному директору '
+                f'(лимит {CommercialEstimate.DIRECTOR_APPROVAL_LIMIT} ₽, клиент — юрлицо)',
+            )
+        else:
+            estimate.status = 'sent'
+            estimate.sent_to_client_at = timezone.now()
+            reason = 'клиент — физлицо' if not estimate.is_legal_client else \
+                f'сумма не превышает {CommercialEstimate.DIRECTOR_APPROVAL_LIMIT} ₽'
+            estimate.log_event('sent', request.user, f'Смета отправлена клиенту ({reason})')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def director_approve(self, request, pk=None):
+        """Генеральный директор согласует смету"""
+        if not self._user_can(request.user, 'estimates_approve'):
+            return Response({'error': 'Согласовывать сметы может только генеральный директор'}, status=403)
+        estimate = self.get_object()
+        if estimate.status != 'on_approval':
+            return self._bad_status(estimate, ('on_approval',), 'Согласование')
+        comment = (request.data.get('comment') or '').strip()
+        estimate.status = 'sent'
+        estimate.director_approved_by = request.user
+        estimate.director_approved_at = timezone.now()
+        estimate.director_comment = comment
+        estimate.sent_to_client_at = timezone.now()
+        estimate.log_event('director_approved', request.user,
+                           comment or 'Смета согласована генеральным директором, отправлена клиенту')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def director_reject(self, request, pk=None):
+        """Генеральный директор отклоняет смету"""
+        if not self._user_can(request.user, 'estimates_approve'):
+            return Response({'error': 'Отклонять сметы может только генеральный директор'}, status=403)
+        estimate = self.get_object()
+        if estimate.status != 'on_approval':
+            return self._bad_status(estimate, ('on_approval',), 'Отклонение')
+        comment = (request.data.get('comment') or '').strip()
+        estimate.status = 'rejected'
+        estimate.director_approved_by = request.user
+        estimate.director_approved_at = timezone.now()
+        estimate.director_comment = comment
+        estimate.log_event('director_rejected', request.user, comment or 'Смета отклонена генеральным директором')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def send_to_client(self, request, pk=None):
+        """Повторно отправить согласованную смету клиенту"""
+        estimate = self.get_object()
+        if estimate.status not in ('approved_internal', 'draft'):
+            return self._bad_status(estimate, ('approved_internal', 'draft'), 'Отправка клиенту')
+        estimate.status = 'sent'
+        estimate.sent_to_client_at = timezone.now()
+        estimate.log_event('sent', request.user, 'Смета отправлена клиенту')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def client_approve(self, request, pk=None):
+        """Клиент согласовал смету"""
+        estimate = self.get_object()
+        if estimate.status != 'sent':
+            return self._bad_status(estimate, ('sent',), 'Согласование клиентом')
+        estimate.status = 'approved'
+        estimate.client_approved_at = timezone.now()
+        estimate.client_approved_name = (request.data.get('approved_by') or '').strip() or \
+            (estimate.client.name if estimate.client else '')
+        estimate.log_event('client_approved', request.user,
+                           f'Клиент согласовал смету ({estimate.client_approved_name})'.strip())
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def client_reject(self, request, pk=None):
+        """Клиент отклонил смету"""
+        estimate = self.get_object()
+        if estimate.status != 'sent':
+            return self._bad_status(estimate, ('sent',), 'Отклонение клиентом')
+        comment = (request.data.get('comment') or '').strip()
+        estimate.status = 'rejected'
+        estimate.log_event('client_rejected', request.user, comment or 'Клиент отклонил смету')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def create_invoice(self, request, pk=None):
+        """Выставить счёт на оплату по согласованной смете"""
+        if not self._user_can(request.user, 'estimates_invoice'):
+            return Response({'error': 'Выставлять счета может бухгалтер или руководитель'}, status=403)
+        estimate = self.get_object()
+        if estimate.status not in ('approved', 'invoiced'):
+            return self._bad_status(estimate, ('approved', 'invoiced'), 'Выставление счёта')
+        if not estimate.legal_entity:
+            return Response({'error': 'У сметы не заполнено наше юрлицо — реквизиты для счёта отсутствуют'}, status=400)
+
+        estimate.invoice_number = self._next_doc_number('СЧ', 'invoice_number')
+        estimate.invoice_date = timezone.localdate()
+        estimate.invoice_created_at = timezone.now()
+        estimate.invoice_amount = estimate.total
+        estimate.status = 'invoiced'
+        estimate.log_event('invoiced', request.user,
+                           f'Выставлен счёт №{estimate.invoice_number} на {_money(estimate.total)}')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def confirm_payment(self, request, pk=None):
+        """Бухгалтер подтверждает поступление оплаты по счёту"""
+        if not self._user_can(request.user, 'estimates_payment'):
+            return Response({'error': 'Подтверждать оплату может бухгалтер или кассир'}, status=403)
+        estimate = self.get_object()
+        if estimate.status != 'invoiced':
+            return self._bad_status(estimate, ('invoiced',), 'Подтверждение оплаты')
+        amount = request.data.get('amount') or estimate.invoice_amount or estimate.total
+        comment = (request.data.get('comment') or '').strip()
+        estimate.status = 'paid'
+        estimate.payment_confirmed_by = request.user
+        estimate.payment_confirmed_at = timezone.now()
+        estimate.paid_amount = amount
+        estimate.payment_comment = comment[:300]
+        estimate.log_event('paid', request.user, f'Оплата {_money(amount)} подтверждена. {comment}'.strip())
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def start_work(self, request, pk=None):
+        """Запустить смету в работу после оплаты"""
+        if not self._user_can(request.user, 'estimates_work'):
+            return Response({'error': 'Запускать смету в работу может руководитель или диспетчер'}, status=403)
+        estimate = self.get_object()
+        if estimate.status != 'paid':
+            return self._bad_status(estimate, ('paid',), 'Запуск в работу')
+        estimate.status = 'in_work'
+        estimate.work_started_at = timezone.now()
+        estimate.log_event('in_work', request.user, 'Оплата получена — смета запущена в работу')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """Завершить работы: сформировать акт выполненных работ и УПД"""
+        estimate = self.get_object()
+        if estimate.status != 'in_work':
+            return self._bad_status(estimate, ('in_work',), 'Завершение работ')
+        estimate.status = 'completed'
+        estimate.completed_at = timezone.now()
+        if not estimate.act_number:
+            estimate.act_number = self._next_doc_number('АКТ', 'act_number')
+        estimate.act_date = timezone.localdate()
+        if not estimate.upd_number:
+            estimate.upd_number = self._next_doc_number('УПД', 'upd_number')
+        estimate.upd_date = timezone.localdate()
+        estimate.log_event('completed', request.user,
+                           f'Работы завершены. Акт №{estimate.act_number}, УПД №{estimate.upd_number}')
+        estimate.save()
+        return Response(CommercialEstimateSerializer(estimate).data)
+
+    @action(detail=True, methods=['get'])
+    def document(self, request, pk=None):
+        """Печатная форма: ?kind=invoice|act|upd&account=<id счёта юрлица>"""
+        estimate = self.get_object()
+        kind = (request.query_params.get('kind') or 'invoice').lower()
+        if kind not in ('invoice', 'act', 'upd'):
+            return Response({'error': 'kind должен быть invoice, act или upd'}, status=400)
+        if kind == 'invoice' and not estimate.legal_entity:
+            return Response({'error': 'У сметы не заполнено наше юрлицо'}, status=400)
+
+        account = None
+        account_id = request.query_params.get('account')
+        if account_id:
+            if estimate.legal_entity:
+                account = LegalEntityBankAccount.objects.filter(
+                    id=account_id, legal_entity=estimate.legal_entity).first()
+            if account is None:
+                return Response({'error': 'Расчётный счёт не найден у этого юрлица'}, status=400)
+
+        stamp_url = None
+        if str(request.query_params.get('stamp', '')).lower() in ('1', 'true', 'yes', 'on'):
+            le = estimate.legal_entity
+            if le and le.stamp_file:
+                stamp_url = request.build_absolute_uri(le.stamp_file.url)
+
+        return HttpResponse(build_estimate_document(estimate, kind, account, stamp_url),
+                            content_type='text/html; charset=utf-8')
+
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
@@ -4027,16 +5424,84 @@ class CommercialEstimateViewSet(viewsets.ModelViewSet):
         # Реквизиты автора для подписи
 
         items_html = ''
+        # Печать с фотографиями товаров (только для коммерческого предложения)
+        show_photos = str(request.query_params.get('photos', '')).lower() in ('1', 'true', 'yes', 'on')
+
+        def _resolve_inv(item):
+            """Найти складскую позицию для строки сметы.
+
+            Если ссылка не проставлена (позиция добавлена вручную или импортом),
+            ищем однозначное совпадение по названию и запоминаем связь.
+            """
+            if item.inventory_item_id:
+                return item.inventory_item
+            name = (item.name or '').strip()
+            if not name:
+                return None
+            matches = InventoryItem.objects.filter(name__iexact=name)
+            if matches.count() == 1:
+                inv = matches.first()
+                try:
+                    item.inventory_item = inv
+                    item.save(update_fields=['inventory_item'])
+                except Exception:
+                    pass
+                return inv
+            return None
+
+        def _item_photo_url(item):
+            """Фото позиции: загруженный файл склада или ссылка на фото."""
+            inv = _resolve_inv(item)
+            if not inv:
+                return ''
+            try:
+                if inv.photo:
+                    return request.build_absolute_uri(inv.photo.url)
+            except Exception:
+                pass
+            return inv.photo_url or ''
+
         for idx, item in enumerate(items, 1):
+            photo_td = ''
+            if show_photos:
+                photo_url = _item_photo_url(item)
+                if photo_url:
+                    photo_td = (f'<td style="text-align:center;">'
+                                f'<img src="{photo_url}" class="item-photo" '
+                                f'style="max-width:90px; max-height:90px; object-fit:contain;" />'
+                                f'</td>')
+                else:
+                    photo_td = '<td style="text-align:center; color:#ccc;">—</td>'
             items_html += f'''
             <tr>
                 <td style="text-align:center;">{idx}</td>
+                {photo_td}
                 <td>{item.name}</td>
                 <td style="text-align:center;">{item.unit}</td>
                 <td style="text-align:center;">{item.quantity:.1f}</td>
                 <td style="text-align:right;">{item.total_price / item.quantity if item.quantity else item.total_price:,.2f} ₽</td>
                 <td style="text-align:right;">{item.total_price:,.2f} ₽</td>
             </tr>'''
+
+        photo_col_header = '<th style="width:100px;">Фото</th>' if show_photos else ''
+
+        # Налоги: система налогообложения и ставка
+        TAX_LABELS = {
+            'usn': 'УСН (доходы)',
+            'usn_dr': 'УСН (доходы — расходы)',
+            'osno': 'ОСНО (с НДС)',
+            'patent': 'Патент',
+            'none': 'Без налога',
+        }
+        tax_label = TAX_LABELS.get(estimate.tax_type, estimate.tax_type or '')
+        entity_vat = float(estimate.legal_entity.vat_rate or 0) if estimate.legal_entity else 0
+        total_vat = float(estimate.total_vat or 0)
+
+        if entity_vat > 0 or estimate.tax_type == 'osno':
+            vat_row = (f'<tr><td>в т.ч. НДС {entity_vat:g}%:</td>'
+                       f'<td style="text-align:right;">{total_vat:,.2f} ₽</td></tr>')
+        else:
+            vat_row = '<tr><td>НДС:</td><td style="text-align:right;">не облагается</td></tr>'
 
         html = f'''<!DOCTYPE html>
 <html lang="ru">
@@ -4062,6 +5527,8 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 .items-table th {{ background: {color}; color: #fff; padding: 8px; font-size: 10pt; }}
 .items-table td {{ padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 10pt; }}
 .items-table tr:nth-child(even) {{ background: #f9f9f9; }}
+.items-table tr {{ page-break-inside: avoid; }}
+.item-photo {{ max-width: 90px; max-height: 90px; object-fit: contain; }}
 .totals {{ float: right; width: 300px; margin-top: 15px; }}
 .totals table {{ width: 100%; border-collapse: collapse; }}
 .totals td {{ padding: 4px 8px; font-size: 10pt; }}
@@ -4102,7 +5569,7 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
 </div>
 
 <table class="items-table">
-    <tr><th>№</th><th>Наименование</th><th>Ед.</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr>
+    <tr><th>№</th>{photo_col_header}<th>Наименование</th><th>Ед.</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr>
     {items_html}
 </table>
 
@@ -4113,7 +5580,7 @@ body {{ font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11pt; color: #
         <tr><td>Подытог:</td><td style="text-align:right;">{estimate.subtotal:,.2f} ₽</td></tr>
         {f'<tr><td>Скидка:</td><td style="text-align:right;">-{estimate.discount}%</td></tr>' if estimate.discount and estimate.discount > 0 else ''}
         {f'<tr><td>Доставка:</td><td style="text-align:right;">{estimate.delivery_cost:,.2f} ₽</td></tr>' if estimate.delivery_cost and estimate.delivery_cost > 0 else ''}
-        {f'<tr><td>НДС {estimate.legal_entity.vat_rate if estimate.legal_entity else 0}%:</td><td style="text-align:right;">{estimate.total_vat:,.2f} ₽</td></tr>' if estimate.total_vat and estimate.total_vat > 0 else ''}
+        {vat_row}
         <tr class="total"><td>ИТОГО:</td><td style="text-align:right;">{estimate.total:,.2f} ₽</td></tr>
     </table>
 </div>
@@ -4641,13 +6108,27 @@ class AppVersionViewSet(viewsets.ModelViewSet):
         return response
 
     def _get_public_download_url(self, version):
-        """Формирует URL для скачивания с внешним IP (из настроек)."""
-        settings = SystemSettings.objects.first()
-        if settings:
-            ip = settings.external_ip or '83.243.73.86'
-            port = settings.external_port or 3000
-            return f'http://{ip}:{port}/api/app-versions/{version.id}/download/'
-        return f'http://83.243.73.86:3000/api/app-versions/{version.id}/download/'
+        """URL для скачивания APK по адресу, с которого обратился клиент.
+
+        Раньше здесь брался жёстко заданный внешний IP (83.243.73.86) — при
+        переносе CRM на другой сервер ссылка вела на несуществующий адрес.
+        Теперь используется хост текущего запроса (учитывает X-Forwarded-Host
+        от Express-прокси), а внешний IP из настроек — только как запасной вариант.
+        """
+        path = f'/api/app-versions/{version.id}/download/'
+        request = getattr(self, 'request', None)
+        if request is not None:
+            try:
+                return request.build_absolute_uri(path)
+            except Exception:
+                pass
+
+        settings_obj = SystemSettings.objects.first()
+        if settings_obj and settings_obj.external_ip:
+            port = settings_obj.external_port or 3000
+            return f'http://{settings_obj.external_ip}:{port}{path}'
+
+        return path
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -6858,16 +8339,29 @@ class ReturnRequestViewSet(viewsets.ModelViewSet):
         # Возвращаем материал на склад
         if rr.item_type == 'material' and rr.inventory_item:
             inv_item = rr.inventory_item
-            inv_item.quantity += rr.quantity
-            if inv_item.status == 'with_master':
-                inv_item.status = 'in_stock'
-            inv_item.save(update_fields=['quantity', 'status', 'updated_at'])
+            # Остаток и статус обновляет InventoryMovement.save — вручную НЕ меняем
             InventoryMovement.objects.create(
                 item=inv_item, movement_type='return_from_master',
                 quantity=rr.quantity, master=rr.master,
                 performed_by=request.user,
                 notes=f'Возврат по запросу №{rr.id}: {rr.notes or ""}'
             )
+            # Синхронизируем расходный ордер (чтобы «у мастеров» уменьшилось)
+            try:
+                from django.db.models import F as _F
+                ioi = IssueOrderItem.objects.filter(
+                    issue_order__master=rr.master,
+                    inventory_item=inv_item,
+                    quantity_returned__lt=_F('quantity_issued') - _F('quantity_used'),
+                ).order_by('issue_order__issued_at').first()
+                if ioi:
+                    ioi.quantity_returned = min(
+                        ioi.quantity_issued,
+                        (ioi.quantity_returned or 0) + rr.quantity,
+                    )
+                    ioi.save(update_fields=['quantity_returned'])
+            except Exception as e:
+                print('[ReturnOrder] sync issue item error:', e)
         elif rr.item_type == 'tool' and rr.tool:
             tool = rr.tool
             tool.quantity += rr.quantity

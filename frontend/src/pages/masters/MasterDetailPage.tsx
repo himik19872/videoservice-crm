@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Form, Input, Select, Switch, message, Spin, Popconfirm, Row, Col, Statistic, Table, Modal, InputNumber, Tabs } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined, BarChartOutlined, ReloadOutlined, AimOutlined, ToolOutlined, ShopOutlined, ExportOutlined, ImportOutlined, CheckCircleOutlined, WarningOutlined, SendOutlined } from '@ant-design/icons';
+import { Typography, Card, Descriptions, Tag, Space, Button, Divider, Form, Input, Select, Switch, message, Spin, Popconfirm, Row, Col, Statistic, Table, Modal, InputNumber, Tabs, DatePicker } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined, BarChartOutlined, ReloadOutlined, AimOutlined, ToolOutlined, ShopOutlined, ExportOutlined, ImportOutlined, CheckCircleOutlined, WarningOutlined, SendOutlined, QrcodeOutlined, KeyOutlined } from '@ant-design/icons';
+import { QRCodeSVG } from 'qrcode.react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 import type { Master, Region, MasterStats } from '../../types';
 import MasterMap from '../../components/MasterMap';
+import MasterTrackMap from '../../components/MasterTrackMap';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -22,6 +25,11 @@ const MasterDetailPage: React.FC = () => {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsData, setGpsData] = useState<any>(null);
   const [form] = Form.useForm();
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrPassword, setQrPassword] = useState<string | null>(null);
+  const [qrResetting, setQrResetting] = useState(false);
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'admin';
 
   // Данные карточки
   const [card, setCard] = useState<any>(null);
@@ -45,11 +53,32 @@ const MasterDetailPage: React.FC = () => {
   const [acceptModal, setAcceptModal] = useState(false);
   const [acceptOrder, setAcceptOrder] = useState<any>(null);
 
+  // Пробег и топливо
+  const [mileage, setMileage] = useState<any>(null);
+  const [mileageLoading, setMileageLoading] = useState(false);
+  const [mileagePeriod, setMileagePeriod] = useState<'day' | 'week' | 'month'>('week');
+  const [mileageDate, setMileageDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
+
   useEffect(() => {
     fetchMaster();
     fetchRegions();
     fetchCard();
+    fetchMileage('week');
   }, [id]);
+
+  const fetchMileage = async (period: 'day' | 'week' | 'month', date?: string, sync = false) => {
+    setMileageLoading(true);
+    try {
+      const res = await api.get(`/masters/${id}/mileage/`, {
+        params: { period, date: date || mileageDate, ...(sync ? { sync: 1 } : {}) },
+      });
+      setMileage(res.data);
+    } catch (e) {
+      /* данных может ещё не быть */
+    } finally {
+      setMileageLoading(false);
+    }
+  };
 
   const fetchCard = async () => {
     setCardLoading(true);
@@ -121,6 +150,10 @@ const MasterDetailPage: React.FC = () => {
       region_id: master.region?.id || master.region_id,
       is_available: master.is_available,
       username: master.user?.username || '',
+      vehicle_name: (master as any).vehicle_name || '',
+      fuel_consumption: Number((master as any).fuel_consumption ?? 8),
+      fuel_type: (master as any).fuel_type || 'ai95',
+      fuel_price: Number((master as any).fuel_price ?? 0),
     });
     setEditing(true);
   };
@@ -136,6 +169,10 @@ const MasterDetailPage: React.FC = () => {
         last_name: values.last_name,
         email: values.email || '',
         username: values.username,
+        vehicle_name: values.vehicle_name || '',
+        fuel_consumption: values.fuel_consumption ?? 8,
+        fuel_type: values.fuel_type || 'ai95',
+        fuel_price: values.fuel_price ?? 0,
       };
       if (values.password) {
         payload.password = values.password;
@@ -165,6 +202,29 @@ const MasterDetailPage: React.FC = () => {
     return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>;
   }
 
+  const handleResetMasterPassword = async () => {
+    const username = master?.user?.username;
+    if (!username) {
+      message.warning('У мастера нет учётной записи');
+      return;
+    }
+    setQrResetting(true);
+    try {
+      const found = await api.get('/users/', { params: { search: username, page_size: 5 } });
+      const list = found.data.results || found.data;
+      const profile = list.find((p: any) => (p.user?.username || '') === username);
+      if (!profile) throw new Error('Профиль сотрудника не найден');
+
+      const res = await api.post(`/users/${profile.id}/reset_password/`);
+      setQrPassword(res.data.password);
+      message.success('Новый пароль сгенерирован — QR готов для автовхода');
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || e?.message || 'Не удалось сбросить пароль');
+    } finally {
+      setQrResetting(false);
+    }
+  };
+
   if (!master) return null;
 
   return (
@@ -172,7 +232,70 @@ const MasterDetailPage: React.FC = () => {
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/masters')}>Назад</Button>
         <Title level={3} style={{ margin: 0 }}>{master.full_name || master.user?.username}</Title>
+        <Button icon={<QrcodeOutlined />} onClick={() => { setQrPassword(null); setQrOpen(true); }}>QR-код подключения</Button>
       </Space>
+
+      {/* QR-код для быстрой настройки мобильного приложения */}
+      <Modal
+        title="📱 Подключение мобильного приложения"
+        open={qrOpen}
+        onCancel={() => { setQrOpen(false); setQrPassword(null); }}
+        footer={null}
+        width={420}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <QRCodeSVG
+            value={JSON.stringify({
+              app: 'vscrm',
+              host: window.location.hostname,
+              port: window.location.port || (window.location.protocol === 'https:' ? '443' : '80'),
+              user: master.user?.username || '',
+              ...(qrPassword ? { pass: qrPassword } : {}),
+            })}
+            size={240}
+            includeMargin
+          />
+          <div style={{ marginTop: 14, fontSize: 13, lineHeight: '20px' }}>
+            <div><b>{master.full_name || master.user?.username}</b></div>
+            <div>Логин: <Tag color="blue">{master.user?.username || '-'}</Tag></div>
+            {qrPassword && (
+              <div>Пароль: <Tag color="red" style={{ fontFamily: 'monospace' }}>{qrPassword}</Tag></div>
+            )}
+            <div style={{ color: '#888' }}>
+              Сервер: {window.location.hostname}:{window.location.port || (window.location.protocol === 'https:' ? '443' : '80')}
+            </div>
+          </div>
+          <p style={{ fontSize: 12, color: '#888', marginTop: 12, marginBottom: 0 }}>
+            В приложении: «📷 Сканировать QR-код» → наведите камеру.<br />
+            {qrPassword
+              ? 'Адрес, логин и пароль подставятся автоматически — вход выполнится сразу.'
+              : 'Адрес сервера и логин подставятся автоматически, останется ввести пароль.'}
+          </p>
+          {qrPassword && (
+            <div style={{ marginTop: 10, fontSize: 12, color: '#d4380d', background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 6, padding: '8px 10px' }}>
+              ⚠️ Прежний пароль мастера больше не действует. Сохраните новый или отсканируйте QR.
+            </div>
+          )}
+          {!qrPassword && isAdmin && (
+            <Popconfirm
+              title="Сгенерировать новый пароль?"
+              description="Текущий пароль мастера перестанет работать. Новый будет показан здесь и попадёт в QR для автовхода."
+              okText="Сгенерировать"
+              cancelText="Отмена"
+              onConfirm={handleResetMasterPassword}
+            >
+              <Button type="primary" icon={<KeyOutlined />} loading={qrResetting} style={{ marginTop: 14 }}>
+                🔑 Новый пароль + QR для автовхода
+              </Button>
+            </Popconfirm>
+          )}
+          {!qrPassword && !isAdmin && (
+            <p style={{ fontSize: 12, color: '#aaa', marginTop: 12, marginBottom: 0 }}>
+              Генерация пароля и QR с автовходом доступна только администратору.
+            </p>
+          )}
+        </div>
+      </Modal>
 
       <Row gutter={16}>
         <Col span={14}>
@@ -254,6 +377,38 @@ const MasterDetailPage: React.FC = () => {
                     </Form.Item>
                   </Col>
                 </Row>
+                <Divider orientation="left" style={{ fontSize: 12, margin: '8px 0' }}>🚗 Автомобиль и топливо</Divider>
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item name="vehicle_name" label="Автомобиль">
+                      <Input placeholder="Лада Веста, О123АА78" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item name="fuel_type" label="Топливо">
+                      <Select options={[
+                        { value: 'ai92', label: 'Бензин АИ-92' },
+                        { value: 'ai95', label: 'Бензин АИ-95' },
+                        { value: 'ai98', label: 'Бензин АИ-98' },
+                        { value: 'dt', label: 'Дизель' },
+                        { value: 'gas', label: 'Газ' },
+                        { value: 'electric', label: 'Электро' },
+                      ]} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item name="fuel_consumption" label="Расход (л/100 км)">
+                      <InputNumber min={0} max={100} step={0.1} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item name="fuel_price" label="Цена топлива (₽/л)">
+                      <InputNumber min={0} step={0.5} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                </Row>
               </Form>
             )}
 
@@ -324,6 +479,66 @@ const MasterDetailPage: React.FC = () => {
               </Descriptions>
             </Card>
           )}          <Divider />
+          <Card
+            title="🚗 Пробег и топливо"
+            size="small"
+            extra={
+              <Space wrap>
+                <Select size="small" value={mileagePeriod} style={{ width: 110 }}
+                  onChange={v => { setMileagePeriod(v); fetchMileage(v, mileageDate); }}
+                  options={[
+                    { value: 'day', label: 'День' },
+                    { value: 'week', label: '7 дней' },
+                    { value: 'month', label: 'Месяц' },
+                  ]} />
+                <DatePicker size="small" value={dayjs(mileageDate)} allowClear={false}
+                  onChange={d => {
+                    const value = d ? d.format('YYYY-MM-DD') : mileageDate;
+                    setMileageDate(value);
+                    fetchMileage(mileagePeriod, value);
+                  }} />
+                <Button size="small" icon={<ReloadOutlined />} loading={mileageLoading}
+                  onClick={() => fetchMileage(mileagePeriod, mileageDate, true)}>
+                  Синхронизировать
+                </Button>
+              </Space>
+            }
+          >
+            <Row gutter={[12, 12]}>
+              <Col span={8}><Statistic title="Пробег" value={mileage?.total_distance_km || 0} suffix="км" precision={1} /></Col>
+              <Col span={8}><Statistic title="Топливо" value={mileage?.total_fuel_liters || 0} suffix="л" precision={2} /></Col>
+              <Col span={8}><Statistic title="Стоимость" value={mileage?.total_fuel_cost || 0} suffix="₽" precision={2} /></Col>
+            </Row>
+            <div style={{ marginTop: 6, color: '#888', fontSize: 12 }}>
+              {mileage?.fuel_type || '—'} · расход {mileage?.fuel_consumption ?? '—'} л/100 км
+              {mileage?.fuel_price ? ` · ${mileage.fuel_price} ₽/л` : ' · цена топлива не задана'}
+              {mileage?.total_app_distance_km > 0 ? ` · по приложению ${mileage.total_app_distance_km} км` : ''}
+            </div>
+            <Table
+              style={{ marginTop: 8 }}
+              dataSource={mileage?.days || []}
+              rowKey="date"
+              size="small"
+              pagination={false}
+              loading={mileageLoading}
+              locale={{ emptyText: 'Нет данных за период. Нажмите «Синхронизировать».' }}
+              columns={[
+                { title: 'Дата', dataIndex: 'date', key: 'date', render: (v: string) => dayjs(v).format('DD.MM.YYYY') },
+                { title: 'Пробег, км', dataIndex: 'distance_km', key: 'km', render: (v: number) => Number(v || 0).toFixed(1) },
+                { title: 'Точек', dataIndex: 'points_count', key: 'points' },
+                { title: 'л', dataIndex: 'fuel_liters', key: 'liters', render: (v: number) => Number(v || 0).toFixed(2) },
+                { title: '₽', dataIndex: 'fuel_cost', key: 'cost', render: (v: number) => Number(v || 0).toFixed(0) },
+              ]}
+            />
+            <div style={{ marginTop: 12 }}>
+              <div style={{ marginBottom: 6, fontSize: 12, color: '#888' }}>
+                🔵 линия и метка — GPS-маяк · 🟠 метки — точки, где отбило приложение
+              </div>
+              <MasterTrackMap points={mileage?.points || []} height="320px" />
+            </div>
+          </Card>
+
+          <Divider />
           <Title level={5}><ToolOutlined /> Оборудование и инструменты мастера</Title>
           <Tabs
             defaultActiveKey="materials"

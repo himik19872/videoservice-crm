@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Input, Select, Space, Tag, message, Popconfirm, Divider, Switch, Upload, Image } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DeleteFilled } from '@ant-design/icons';
 import api from '../../services/api';
+import InnSuggest from '../../components/InnSuggest';
 
 const TAX_SYSTEMS = [
   { value: 'usn', label: 'УСН (доходы)' },
@@ -25,14 +26,32 @@ const LegalEntitiesManager: React.FC = () => {
     legal_address: '', actual_address: '', phone: '', email: '',
     bank_name: '', bik: '', corr_account: '', settlement_account: '',
     director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
+    accountant: '',
     cp_header_text: '', cp_footer_text: '', cp_color: '#1a3e60',
     cp_show_logo: true, cp_show_signature: true,
     cp_signature_name: '', cp_signature_title: '',
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [signFile, setSignFile] = useState<File | null>(null);
+  const [stampFile, setStampFile] = useState<File | null>(null);
 
-  useEffect(() => { fetchData(); }, []);
+  // Расчётные счета юрлиц
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [accModalOpen, setAccModalOpen] = useState(false);
+  const [accEditing, setAccEditing] = useState<any>(null);
+  const [accForm, setAccForm] = useState<any>({
+    legal_entity: undefined, title: '', bank_name: '', settlement_account: '',
+    bik: '', corr_account: '', is_default: false, is_active: true,
+  });
+
+  useEffect(() => { fetchData(); fetchAccounts(); }, []);
+
+  const fetchAccounts = async () => {
+    try {
+      const res = await api.get('/bank-accounts/?page_size=200');
+      setAccounts(res.data.results || res.data || []);
+    } catch { /* нет прав — не критично */ }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -46,12 +65,13 @@ const LegalEntitiesManager: React.FC = () => {
 
   const openCreate = () => {
     setEditing(null);
-    setLogoFile(null); setSignFile(null);
+    setLogoFile(null); setSignFile(null); setStampFile(null);
     setFormData({
       name: '', short_name: '', inn: '', kpp: '', ogrn: '',
       legal_address: '', actual_address: '', phone: '', email: '',
       bank_name: '', bik: '', corr_account: '', settlement_account: '',
       director: '', tax_system: 'usn', is_default: false, vat_rate: 0,
+      accountant: '',
       cp_header_text: '', cp_footer_text: '', cp_color: '#1a3e60',
       cp_show_logo: true, cp_show_signature: true,
       cp_signature_name: '', cp_signature_title: '',
@@ -61,7 +81,7 @@ const LegalEntitiesManager: React.FC = () => {
 
   const openEdit = (rec: any) => {
     setEditing(rec);
-    setLogoFile(null); setSignFile(null);
+    setLogoFile(null); setSignFile(null); setStampFile(null);
     setFormData({
       name: rec.name || '', short_name: rec.short_name || '',
       inn: rec.inn || '', kpp: rec.kpp || '', ogrn: rec.ogrn || '',
@@ -70,6 +90,7 @@ const LegalEntitiesManager: React.FC = () => {
       bank_name: rec.bank_name || '', bik: rec.bik || '',
       corr_account: rec.corr_account || '', settlement_account: rec.settlement_account || '',
       director: rec.director || '', tax_system: rec.tax_system || 'usn',
+      accountant: rec.accountant || '',
       is_default: rec.is_default || false, vat_rate: rec.vat_rate || 0,
       cp_header_text: rec.cp_header_text || '', cp_footer_text: rec.cp_footer_text || '',
       cp_color: rec.cp_color || '#1a3e60',
@@ -89,6 +110,7 @@ const LegalEntitiesManager: React.FC = () => {
       });
       if (logoFile) fd.append('cp_logo_file', logoFile);
       if (signFile) fd.append('cp_signature_file', signFile);
+      if (stampFile) fd.append('stamp_file', stampFile);
 
       const token = localStorage.getItem('token');
       const headers: any = { 'Content-Type': 'multipart/form-data' };
@@ -118,10 +140,84 @@ const LegalEntitiesManager: React.FC = () => {
     catch { message.error('Ошибка'); }
   };
 
+  const handleDeleteStamp = async () => {
+    if (!editing?.id) return;
+    try { await api.post(`/legal-entities/${editing.id}/delete_stamp/`); message.success('Печать удалена'); fetchData(); setModalOpen(false); }
+    catch { message.error('Ошибка'); }
+  };
+
   const handleDelete = async (id: number) => {
     try { await api.delete(`/legal-entities/${id}/`); message.success('Удалено'); fetchData(); }
     catch { message.error('Ошибка'); }
   };
+
+  // ── Расчётные счета ──
+  const openAccCreate = () => {
+    setAccEditing(null);
+    setAccForm({
+      legal_entity: items[0]?.id, title: '', bank_name: '', settlement_account: '',
+      bik: '', corr_account: '', is_default: accounts.length === 0, is_active: true,
+    });
+    setAccModalOpen(true);
+  };
+
+  const openAccEdit = (rec: any) => {
+    setAccEditing(rec);
+    setAccForm({
+      legal_entity: rec.legal_entity, title: rec.title || '', bank_name: rec.bank_name || '',
+      settlement_account: rec.settlement_account || '', bik: rec.bik || '',
+      corr_account: rec.corr_account || '', is_default: !!rec.is_default, is_active: rec.is_active !== false,
+    });
+    setAccModalOpen(true);
+  };
+
+  const saveAccount = async () => {
+    if (!accForm.legal_entity) { message.warning('Выберите юрлицо'); return; }
+    if (!accForm.title.trim()) { message.warning('Укажите название счёта'); return; }
+    try {
+      if (accEditing) {
+        await api.patch(`/bank-accounts/${accEditing.id}/`, accForm);
+      } else {
+        await api.post('/bank-accounts/', accForm);
+      }
+      message.success('Сохранено');
+      setAccModalOpen(false);
+      fetchAccounts();
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Ошибка сохранения счёта');
+    }
+  };
+
+  const deleteAccount = async (id: number) => {
+    try { await api.delete(`/bank-accounts/${id}/`); message.success('Удалено'); fetchAccounts(); }
+    catch { message.error('Не удалось удалить счёт'); }
+  };
+
+  const accColumns = [
+    {
+      title: 'Юрлицо', dataIndex: 'legal_entity', key: 'le', width: 150,
+      render: (v: number) => items.find(i => i.id === v)?.short_name || items.find(i => i.id === v)?.name || `#${v}`,
+    },
+    { title: 'Название', dataIndex: 'title', key: 'title', width: 180, ellipsis: true },
+    { title: 'Банк', dataIndex: 'bank_name', key: 'bank', ellipsis: true },
+    { title: 'Р/с', dataIndex: 'settlement_account', key: 'rs', width: 170 },
+    { title: 'БИК', dataIndex: 'bik', key: 'bik', width: 110 },
+    {
+      title: 'По умолч.', dataIndex: 'is_default', key: 'def', width: 90,
+      render: (v: boolean) => v ? <Tag color="green">Да</Tag> : '',
+    },
+    {
+      title: '', key: 'accActions', width: 80,
+      render: (_: any, r: any) => (
+        <Space size={4}>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openAccEdit(r)} />
+          <Popconfirm title="Удалить счёт?" onConfirm={() => deleteAccount(r.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
 
   const columns = [
     {
@@ -165,6 +261,62 @@ const LegalEntitiesManager: React.FC = () => {
         При создании сметы можно выбрать юрлицо, от которого выставляется КП.
       </span>
 
+      <Divider orientation="left" style={{ fontSize: 13, marginTop: 16 }}>🏦 Расчётные счета (счёт, акт, УПД)</Divider>
+      <Table
+        dataSource={accounts} columns={accColumns} rowKey="id"
+        size="small" pagination={false}
+        locale={{ emptyText: 'Счета не добавлены. Добавьте хотя бы один — он попадёт в счёт на оплату и УПД.' }}
+      />
+      <Button style={{ marginTop: 8 }} icon={<PlusOutlined />} onClick={openAccCreate}>Добавить счёт</Button>
+
+      <Modal
+        title={accEditing ? 'Редактировать расчётный счёт' : 'Новый расчётный счёт'}
+        open={accModalOpen}
+        onCancel={() => setAccModalOpen(false)}
+        onOk={saveAccount}
+        okText="Сохранить"
+        cancelText="Отмена"
+        width={520}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="small">
+          <div>
+            <label>Юрлицо *</label>
+            <Select
+              style={{ width: '100%' }}
+              value={accForm.legal_entity}
+              onChange={v => setAccForm({ ...accForm, legal_entity: v })}
+              options={items.map(i => ({ value: i.id, label: i.short_name || i.name }))}
+            />
+          </div>
+          <div>
+            <label>Название счёта *</label>
+            <Input value={accForm.title} onChange={e => setAccForm({ ...accForm, title: e.target.value })}
+              placeholder="Основной (Банк Санкт-Петербург) / Дополнительный (Сбербанк)" />
+          </div>
+          <div>
+            <label>Банк</label>
+            <Input value={accForm.bank_name} onChange={e => setAccForm({ ...accForm, bank_name: e.target.value })}
+              placeholder="ПАО «БАНК «САНКТ-ПЕТЕРБУРГ»" />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}><label>Расчётный счёт</label>
+              <Input value={accForm.settlement_account} onChange={e => setAccForm({ ...accForm, settlement_account: e.target.value })} />
+            </div>
+            <div style={{ flex: 1 }}><label>БИК</label>
+              <Input value={accForm.bik} onChange={e => setAccForm({ ...accForm, bik: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <label>Корр. счёт</label>
+            <Input value={accForm.corr_account} onChange={e => setAccForm({ ...accForm, corr_account: e.target.value })} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Switch checked={accForm.is_default} onChange={v => setAccForm({ ...accForm, is_default: v })} />
+            <span>Использовать по умолчанию в документах</span>
+          </div>
+        </Space>
+      </Modal>
+
       <Modal
         title={editing ? 'Редактировать юрлицо' : 'Новое юрлицо'}
         open={modalOpen}
@@ -184,7 +336,24 @@ const LegalEntitiesManager: React.FC = () => {
             <Input value={formData.short_name} onChange={e => setFormData({ ...formData, short_name: e.target.value })} placeholder="Видео Сервис" />
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ flex: 1 }}><label>ИНН</label><Input value={formData.inn} onChange={e => setFormData({ ...formData, inn: e.target.value })} /></div>
+            <div style={{ flex: 1 }}>
+              <label>ИНН (поиск в ЕГРЮЛ)</label>
+              <InnSuggest
+                value={formData.inn}
+                onChange={v => setFormData({ ...formData, inn: v })}
+                placeholder="ИНН — Enter для поиска"
+                onFound={(company) => setFormData(prev => ({
+                  ...prev,
+                  name: company.name || company.short_name || prev.name,
+                  short_name: company.short_name || prev.short_name,
+                  inn: company.inn || prev.inn,
+                  kpp: company.kpp || prev.kpp,
+                  ogrn: company.ogrn || prev.ogrn,
+                  legal_address: company.legal_address || prev.legal_address,
+                  director: company.director || prev.director,
+                }))}
+              />
+            </div>
             <div style={{ flex: 1 }}><label>КПП</label><Input value={formData.kpp} onChange={e => setFormData({ ...formData, kpp: e.target.value })} /></div>
             <div style={{ flex: 1 }}><label>ОГРН</label><Input value={formData.ogrn} onChange={e => setFormData({ ...formData, ogrn: e.target.value })} /></div>
           </div>
@@ -221,8 +390,31 @@ const LegalEntitiesManager: React.FC = () => {
             <label>Директор</label>
             <Input value={formData.director} onChange={e => setFormData({ ...formData, director: e.target.value })} />
           </div>
-          <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0' }}>🎨 Шаблон КП (для этого юрлица)</Divider>
+          <div>
+            <label>Главный бухгалтер</label>
+            <Input value={formData.accountant} onChange={e => setFormData({ ...formData, accountant: e.target.value })} placeholder="ФИО — подставляется в счёт и УПД" />
+          </div>
+          <div style={{ marginBottom: 6 }}>
+            <label>🏵️ Печать организации (PNG с прозрачным фоном)</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Upload beforeUpload={f => { setStampFile(f); return false; }} showUploadList={false} accept="image/*">
+                <Button icon={<UploadOutlined />} size="small">{stampFile ? stampFile.name : 'Выбрать файл'}</Button>
+              </Upload>
+              {editing?.stamp_file && (
+                <Popconfirm title="Удалить печать?" onConfirm={handleDeleteStamp}>
+                  <Button size="small" danger icon={<DeleteFilled />}>Удалить</Button>
+                </Popconfirm>
+              )}
+            </div>
+            {editing?.stamp_file && !stampFile && (
+              <Image src={editing.stamp_file} style={{ maxHeight: 60, marginTop: 4 }} />
+            )}
+            <div style={{ fontSize: 11, color: '#888' }}>
+              Ставится в счёт, акт и УПД только по галочке при печати документа.
+            </div>
+          </div>
 
+          <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0' }}>🎨 Шаблон КП (для этого юрлица)</Divider>
           <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Switch checked={formData.cp_show_logo} onChange={v => setFormData({ ...formData, cp_show_logo: v })} />

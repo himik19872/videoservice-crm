@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Input, Button, List, Space, Typography, Tag, Select, Badge, message, Spin } from 'antd';
-import { SendOutlined, MessageOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Input, Button, List, Space, Typography, Tag, Select, Badge, message, Spin, Upload } from 'antd';
+import { SendOutlined, MessageOutlined, ReloadOutlined, PaperClipOutlined, FileOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import dayjs from 'dayjs';
@@ -18,6 +18,11 @@ interface Msg {
   text: string;
   created_at: string;
   unread: boolean;
+  attachment_url?: string;
+  attachment_type?: '' | 'image' | 'file' | 'audio';
+  attachment_name?: string;
+  attachment_size?: number;
+  attachment_duration?: number;
 }
 
 const MessagesPage: React.FC = () => {
@@ -37,6 +42,35 @@ const MessagesPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [recipient]);
 
+  // Мгновенная доставка новых сообщений через WebSocket
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${proto}://${window.location.host}/ws/notifications/?token=${token}`;
+    let socket: WebSocket | null = null;
+    let closed = false;
+
+    const connect = () => {
+      if (closed) return;
+      socket = new WebSocket(url);
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'chat_message') {
+            fetchMessages();
+          }
+        } catch (e) { /* ignore */ }
+      };
+      socket.onclose = () => {
+        if (!closed) setTimeout(connect, 5000);
+      };
+    };
+    connect();
+
+    return () => { closed = true; socket?.close(); };
+  }, [recipient]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -49,8 +83,16 @@ const MessagesPage: React.FC = () => {
         api.get('/messages/', { params }),
         api.get('/messages/unread_count/'),
       ]);
-      setMessages(msgRes.data.results || msgRes.data);
+      const list: Msg[] = msgRes.data.results || msgRes.data;
+      setMessages(list);
       setUnread(unreadRes.data.unread || 0);
+
+      // Помечаем входящие как прочитанные (бейдж непрочитанных гаснет)
+      const toRead = list.filter(m => m.unread && m.sender !== user?.id).slice(0, 50);
+      if (toRead.length > 0) {
+        await Promise.all(toRead.map(m => api.post(`/messages/${m.id}/read/`).catch(() => null)));
+        setUnread(prev => Math.max(0, prev - toRead.length));
+      }
     } catch (e) {
       console.error('Messages error:', e);
     } finally {
@@ -77,6 +119,30 @@ const MessagesPage: React.FC = () => {
       await fetchMessages();
     } catch (e) {
       message.error('Ошибка отправки');
+    }
+  };
+
+  /** Загрузка файла в текущий чат */
+  const uploadAttachment = async (file: File) => {
+    const form = new FormData();
+    if (recipient) {
+      form.append('recipient', String(recipient));
+      form.append('is_broadcast', 'false');
+    } else {
+      form.append('is_broadcast', 'true');
+    }
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const type = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'].includes(ext)
+      ? 'image'
+      : ['m4a', 'aac', 'mp3', 'wav', 'ogg', 'opus'].includes(ext) ? 'audio' : 'file';
+    form.append('attachment_type', type);
+    form.append('attachment', file);
+    try {
+      await api.post('/messages/', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      message.success('Файл отправлен');
+      await fetchMessages();
+    } catch (e) {
+      message.error('Не удалось отправить файл');
     }
   };
 
@@ -139,7 +205,31 @@ const MessagesPage: React.FC = () => {
                     {msg.is_broadcast ? <Tag color="orange" style={{ marginLeft: 4, fontSize: 9 }}>всем</Tag> : msg.recipient_name !== 'Всем' && msg.recipient ? <Tag color="blue" style={{ marginLeft: 4, fontSize: 9 }}>{msg.recipient_name}</Tag> : null}
                     {' · '}{dayjs(msg.created_at).format('HH:mm')}
                   </div>
-                  <div>{msg.text}</div>
+                  {msg.attachment_type === 'image' && msg.attachment_url && (
+                    <div style={{ marginBottom: msg.text ? 6 : 0 }}>
+                      <img
+                        src={msg.attachment_url}
+                        alt="фото"
+                        style={{ maxWidth: 260, maxHeight: 260, borderRadius: 8, cursor: 'pointer' }}
+                        onClick={() => window.open(msg.attachment_url, '_blank')}
+                      />
+                    </div>
+                  )}
+                  {msg.attachment_type === 'audio' && msg.attachment_url && (
+                    <div style={{ marginBottom: msg.text ? 6 : 0 }}>
+                      <audio controls src={msg.attachment_url} style={{ maxWidth: 260 }} />
+                    </div>
+                  )}
+                  {msg.attachment_type === 'file' && msg.attachment_url && (
+                    <div style={{ marginBottom: msg.text ? 6 : 0 }}>
+                      <a href={msg.attachment_url} target="_blank" rel="noreferrer"
+                         style={{ color: msg.sender === user?.id ? '#e6f4ff' : '#1677ff' }}>
+                        <FileOutlined /> {msg.attachment_name || 'Документ'}
+                        {msg.attachment_size ? <span style={{ opacity: 0.7 }}> ({Math.round(msg.attachment_size / 1024)} КБ)</span> : null}
+                      </a>
+                    </div>
+                  )}
+                  {!!msg.text && <div>{msg.text}</div>}
                 </div>
               </div>
             ))
@@ -149,6 +239,12 @@ const MessagesPage: React.FC = () => {
 
         {/* Поле ввода */}
         <div style={{ padding: '8px 12px', borderTop: '1px solid #f0f0f0', display: 'flex', gap: 8 }}>
+          <Upload
+            showUploadList={false}
+            beforeUpload={(file) => { uploadAttachment(file as File); return false; }}
+          >
+            <Button icon={<PaperClipOutlined />} title="Прикрепить файл" />
+          </Upload>
           <TextArea
             value={text}
             onChange={e => setText(e.target.value)}

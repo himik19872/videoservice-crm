@@ -29,6 +29,12 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
 
+# За Express-прокси: доверяем заголовкам X-Forwarded-Host / X-Forwarded-Proto,
+# чтобы build_absolute_uri() формировал ссылки по адресу, с которого зашёл клиент
+# (домен, внешний или локальный IP), а не по внутреннему localhost:8000.
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 
 # Application definition
 
@@ -144,6 +150,14 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Дополнительные MIME-типы для отдачи фото (webp/heic иначе уходят как
+# application/octet-stream и могут не отображаться в печатных формах)
+import mimetypes as _mimetypes
+_mimetypes.add_type('image/webp', '.webp')
+_mimetypes.add_type('image/heic', '.heic')
+_mimetypes.add_type('image/svg+xml', '.svg')
+_mimetypes.add_type('image/avif', '.avif')
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
@@ -162,6 +176,8 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
+        # Гранулярные права по модулям (см. main/permissions.py)
+        'main.permissions.ModulePermission',
     ],
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',

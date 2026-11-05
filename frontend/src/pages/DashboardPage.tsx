@@ -6,6 +6,7 @@ import {
   DashboardOutlined, ReloadOutlined, DownloadOutlined, QrcodeOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
+import { can } from '../utils/access';
 import api from '../services/api';
 import MasterMapMulti from '../components/MasterMapMulti';
 import dayjs from 'dayjs';
@@ -49,11 +50,15 @@ const DashboardPage: React.FC = () => {
   const fetchDashboard = async () => {
     setLoading(true);
     try {
+      // Оплаты запрашиваем только если есть право — иначе страница падала с 403
+      const canViewPayments = can(user, 'payments_view');
+      const empty = { data: [] as any[] };
+
       const [dashRes, locRes, ordersRes, paymentsRes] = await Promise.all([
         api.get('/reports/dashboard/'),
-        api.get('/masters/locations/'),
-        api.get('/orders/?page_size=500'),
-        api.get('/payments/?page_size=500'),
+        api.get('/masters/locations/').catch(() => empty),
+        api.get('/orders/?page_size=500').catch(() => empty),
+        canViewPayments ? api.get('/payments/?page_size=500').catch(() => empty) : Promise.resolve(empty),
       ]);
 
       const dashboard = dashRes.data;

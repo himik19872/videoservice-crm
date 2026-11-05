@@ -17,12 +17,22 @@ app.use((req, res, next) => {
 
 // === HTTP proxy (ручной, не обрезает префикс) ===
 function proxyRequest(req, res) {
+  const clientHost = req.headers.host || '';
   const options = {
     hostname: API_HOST, port: API_PORT, path: req.originalUrl,
-    method: req.method, headers: { ...req.headers },
+    method: req.method,
+    headers: {
+      ...req.headers,
+      // Прокидываем реальный адрес клиента, чтобы Django (build_absolute_uri)
+      // формировал ссылки на файлы по тому хосту, с которого зашли,
+      // а не по внутреннему localhost:8000.
+      host: clientHost,
+      'x-forwarded-host': clientHost,
+      'x-forwarded-proto': req.headers['x-forwarded-proto'] || 'http',
+      'x-forwarded-for': req.socket.remoteAddress || '',
+    },
     timeout: 300000,
   };
-  delete options.headers.host;
 
   let responded = false;
   const respond = (code, body) => {

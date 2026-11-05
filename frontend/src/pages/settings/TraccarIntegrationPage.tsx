@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Form, Input, InputNumber, Switch, Button, message, Spin, Table, Tag, Space, Modal, Popconfirm, Divider, Select } from 'antd';
+import { Typography, Card, Form, Input, InputNumber, Switch, Button, message, Spin, Table, Tag, Space, Modal, Popconfirm, Divider, Select, DatePicker, Statistic, Row, Col } from 'antd';
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, LinkOutlined, SyncOutlined } from '@ant-design/icons';
 import api from '../../services/api';
+import dayjs from 'dayjs';
 
 const { Title } = Typography;
 
@@ -41,11 +42,68 @@ const TraccarIntegrationPage: React.FC = () => {
   const [settingsForm] = Form.useForm();
   const [deviceForm] = Form.useForm();
 
+  // Рейтинг по пробегу
+  const [ranking, setRanking] = useState<any>(null);
+  const [rankingLoading, setRankingLoading] = useState(false);
+  const [rankingPeriod, setRankingPeriod] = useState<'day' | 'week' | 'month'>('day');
+  const [rankingDate, setRankingDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
+  const [syncAllLoading, setSyncAllLoading] = useState(false);
+
   useEffect(() => {
     fetchSettings();
     fetchDevices();
     fetchMasters();
+    fetchRanking('day');
   }, []);
+
+  const fetchRanking = async (period: 'day' | 'week' | 'month', date?: string) => {
+    setRankingLoading(true);
+    try {
+      const res = await api.get('/masters/mileage_ranking/', {
+        params: { period, date: date || rankingDate },
+      });
+      setRanking(res.data);
+    } catch (e) {
+      /* нет прав или нет данных */
+    } finally {
+      setRankingLoading(false);
+    }
+  };
+
+  const handleSyncAll = async () => {
+    setSyncAllLoading(true);
+    try {
+      const res = await api.post('/traccar/devices/sync/', { days: 1 });
+      message.success(`Синхронизировано. Пробег за день: ${res.data.distance_km} км`);
+      fetchRanking(rankingPeriod, rankingDate);
+      fetchDevices();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка синхронизации');
+    } finally {
+      setSyncAllLoading(false);
+    }
+  };
+
+  const rankingColumns = [
+    { title: '#', dataIndex: 'rank', key: 'rank', width: 50 },
+    { title: 'Мастер', dataIndex: 'master_name', key: 'name', width: 220, render: (v: string, r: any) => (
+      <span>{v}{r.is_online ? ' 🟢' : ''}</span>
+    ) },
+    { title: 'Район', dataIndex: 'region', key: 'region', width: 160, ellipsis: true },
+    { title: 'Авто', dataIndex: 'vehicle_name', key: 'vehicle', width: 150, ellipsis: true, render: (v: string) => v || '—' },
+    {
+      title: 'Пробег, км', dataIndex: 'distance_km', key: 'km', width: 120,
+      render: (v: number) => <b>{Number(v || 0).toFixed(1)}</b>,
+      sorter: (a: any, b: any) => a.distance_km - b.distance_km,
+    },
+    { title: 'Приложение, км', dataIndex: 'app_distance_km', key: 'appkm', width: 130, render: (v: number) => Number(v || 0).toFixed(1) },
+    { title: 'Топливо, л', dataIndex: 'fuel_liters', key: 'liters', width: 110, render: (v: number) => Number(v || 0).toFixed(2) },
+    { title: 'Стоимость, ₽', dataIndex: 'fuel_cost', key: 'cost', width: 130, render: (v: number) => Number(v || 0).toFixed(0) },
+    {
+      title: 'Маяк', dataIndex: 'has_tracker', key: 'tracker', width: 90,
+      render: (v: boolean) => v ? <Tag color="blue">есть</Tag> : <Tag>нет</Tag>,
+    },
+  ];
 
   const fetchSettings = async () => {
     try {
@@ -223,6 +281,51 @@ const TraccarIntegrationPage: React.FC = () => {
       </Card>
 
       <Divider />
+
+      {/* Топ мастеров по пробегу */}
+      <Card
+        title="🏆 Топ мастеров по пробегу"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Space wrap>
+            <Select size="small" value={rankingPeriod} style={{ width: 110 }}
+              onChange={(v) => { setRankingPeriod(v); fetchRanking(v, rankingDate); }}
+              options={[
+                { value: 'day', label: 'За день' },
+                { value: 'week', label: 'За 7 дней' },
+                { value: 'month', label: 'За месяц' },
+              ]} />
+            <DatePicker size="small" value={dayjs(rankingDate)} allowClear={false}
+              onChange={(d) => {
+                const value = d ? d.format('YYYY-MM-DD') : rankingDate;
+                setRankingDate(value);
+                fetchRanking(rankingPeriod, value);
+              }} />
+            <Button size="small" icon={<SyncOutlined />} loading={syncAllLoading} onClick={handleSyncAll}>
+              Синхронизировать сейчас
+            </Button>
+          </Space>
+        }
+      >
+        <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+          <Col span={8}><Statistic title="Общий пробег" value={ranking?.total_distance_km || 0} suffix="км" precision={1} /></Col>
+          <Col span={8}><Statistic title="Топливо" value={ranking?.total_fuel_liters || 0} suffix="л" precision={2} /></Col>
+          <Col span={8}><Statistic title="Стоимость топлива" value={ranking?.total_fuel_cost || 0} suffix="₽" precision={2} /></Col>
+        </Row>
+        <Table
+          columns={rankingColumns}
+          dataSource={ranking?.rows || []}
+          rowKey="master_id"
+          size="small"
+          loading={rankingLoading}
+          pagination={false}
+          scroll={{ x: 1000 }}
+          locale={{ emptyText: 'Нет данных. Нажмите «Синхронизировать сейчас».' }}
+        />
+        <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+          Пробег считается по трекам GPS-маяков (Traccar). Расход топлива — из карточки мастера (л/100 км × пробег).
+        </div>
+      </Card>
 
       {/* GPS-устройства мастеров */}
       <Card title="GPS-устройства мастеров"

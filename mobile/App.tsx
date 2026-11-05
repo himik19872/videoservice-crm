@@ -8,7 +8,8 @@ import { OfflineProvider, setOfflineApi, useOffline } from './src/contexts/Offli
 import { ServerProvider, useServer } from './src/contexts/ServerContext';
 import { NotificationsProvider } from './src/contexts/NotificationsContext';
 import api from './src/services/api';
-import { autoCheckUpdates, downloadAndInstall } from './src/services/updateService';
+import { autoCheckUpdates, checkForUpdates, downloadAndInstall } from './src/services/updateService';
+import { navigationRef } from './src/services/navigationRef';
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
@@ -70,7 +71,7 @@ function AppStack() {
   const { theme, isDark, toggleTheme } = useTheme();
   const { isOnline, pendingActions } = useOffline();
   const [shiftActive, setShiftActive] = React.useState(false);
-  const navigationRef = React.useRef<any>(null);
+  const stackNavRef = React.useRef<any>(null);
 
   const checkShift = async () => {
     try {
@@ -99,6 +100,30 @@ function AppStack() {
     }
   };
 
+  const handleManualUpdate = async () => {
+    try {
+      const upd = await checkForUpdates();
+      if (!upd) {
+        Alert.alert('Не удалось проверить', 'Нет связи с сервером. Проверьте интернет и повторите.');
+        return;
+      }
+      if (upd.hasUpdate && upd.downloadUrl) {
+        Alert.alert(
+          'Доступно обновление',
+          `Новая версия: ${upd.latestVersion}\n\nЧто нового:\n${upd.changelog || '—'}`,
+          [
+            { text: 'Позже', style: 'cancel' },
+            { text: 'Обновить', onPress: () => { downloadAndInstall(upd.downloadUrl!); } },
+          ],
+        );
+      } else {
+        Alert.alert('Обновлений нет', 'У вас актуальная версия приложения');
+      }
+    } catch (e: any) {
+      Alert.alert('Ошибка проверки', e?.message || 'Попробуйте позже');
+    }
+  };
+
   const headerStyle = { backgroundColor: theme.headerBg };
   const headerTintColor = theme.headerTint;
 
@@ -108,10 +133,10 @@ function AppStack() {
       {pendingActions.length > 0 && (
         <Text style={{ color: '#fa8c16', marginRight: 6, fontSize: 12 }}>{pendingActions.length}⚡</Text>
       )}
-      <TouchableOpacity onPress={() => { autoCheckUpdates((u) => { if (u.hasUpdate && u.downloadUrl) downloadAndInstall(u.downloadUrl); else Alert.alert('Обновлений нет', 'У вас актуальная версия приложения'); }); }} style={styles.themeBtn}>
+      <TouchableOpacity onPress={handleManualUpdate} style={styles.themeBtn}>
         <Text style={{ fontSize: 16 }}>🔄</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigationRef.current?.navigate('ServerSetup')} style={styles.themeBtn}>
+      <TouchableOpacity onPress={() => stackNavRef.current?.navigate('ServerSetup')} style={styles.themeBtn}>
         <Text style={{ fontSize: 16 }}>⚙️</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={toggleTheme} style={styles.themeBtn}>
@@ -191,6 +216,7 @@ function AppStack() {
           title: '💬 Сообщения',
           headerStyle,
           headerTintColor,
+          headerShown: false,
         }}
       />
 
@@ -329,7 +355,7 @@ function Root() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       {isAuthenticated ? <AppStack /> : <AuthStack />}
     </NavigationContainer>
   );

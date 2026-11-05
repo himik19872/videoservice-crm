@@ -66,6 +66,9 @@ const MasterZipScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<'balance' | 'orders' | 'returns'>('balance');
+  // Фактически принятое количество по позициям: ключ `${orderId}_${itemId}`
+  const [confirmQty, setConfirmQty] = useState<Record<string, string>>({});
+  const [confirming, setConfirming] = useState<number | null>(null);
 
   // Модалка ввода серийника при сдаче долга
   const [serialModal, setSerialModal] = useState<{ debtId: number; desc: string } | null>(null);
@@ -101,6 +104,59 @@ const MasterZipScreen: React.FC = () => {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const onRefresh = () => { setRefreshing(true); fetchData(); };
+
+  /** Подтверждение получения материалов по накладной (с фактическим количеством) */
+  const confirmOrder = (ord: any) => {
+    const items = (ord.items || []).map((it: any) => {
+      const key = `${ord.id}_${it.id}`;
+      const raw = confirmQty[key];
+      const qty = raw === undefined || raw === '' ? it.quantity_issued : Number(raw);
+      return { item_id: it.id, quantity_confirmed: qty };
+    });
+    const short = (ord.items || []).filter((it: any) => {
+      const key = `${ord.id}_${it.id}`;
+      const raw = confirmQty[key];
+      const qty = raw === undefined || raw === '' ? it.quantity_issued : Number(raw);
+      return qty < it.quantity_issued;
+    });
+    const ask = () => {
+      setConfirming(ord.id);
+      api.post(`/issue-orders/${ord.id}/confirm/`, { items })
+        .then((res) => {
+          const probs = res.data?.discrepancies || [];
+          if (probs.length) {
+            Alert.alert(
+              'Получение подтверждено (с расхождением)',
+              probs.map((p: any) => `${p.item}: выдано ${p.issued}, принято ${p.confirmed}`).join('\n') +
+              '\n\nНедостача возвращена на склад.',
+            );
+          } else {
+            Alert.alert('Готово', 'Получение подтверждено. Все количество совпадает.');
+          }
+          setConfirmQty({});
+          fetchData();
+        })
+        .catch((e: any) => Alert.alert('Ошибка', e?.response?.data?.error || 'Не удалось подтвердить'))
+        .finally(() => setConfirming(null));
+    };
+    if (short.length) {
+      Alert.alert(
+        'Расхождение в количестве',
+        short.map((it: any) => {
+          const key = `${ord.id}_${it.id}`;
+          const raw = confirmQty[key];
+          const qty = raw === undefined || raw === '' ? it.quantity_issued : Number(raw);
+          return `${it.item_name}: выдано ${it.quantity_issued}, принимаете ${qty}`;
+        }).join('\n') + '\n\nПодтверждаете?',
+        [
+          { text: 'Отмена', style: 'cancel' },
+          { text: 'Да, подтвердить', onPress: ask },
+        ],
+      );
+    } else {
+      ask();
+    }
+  };
 
   const returnMaterial = (item: ZipItem) => {
     Alert.alert(
@@ -328,6 +384,11 @@ const MasterZipScreen: React.FC = () => {
                   <Text style={[styles.orderItemMeta, { color: theme.textTertiary }]}>
                     Выдано {it.quantity_issued} · Исп. {it.quantity_used} · Ост. {it.remaining}
                   </Text>
+                  {it.quantity_confirmed != null && (
+                    <Text style={[styles.orderItemMeta, { color: '#52c41a' }]}>
+                      ✅ Принято: {it.quantity_confirmed}
+                    </Text>
+                  )}
                   {it.need_return_old && (
                     <Text style={[styles.orderItemReturn, { color: '#fa8c16' }]}>
                       {it.old_item_returned ? '✅' : '⚠️'} Возврат старого: {it.old_item_description || '—'}
@@ -335,6 +396,41 @@ const MasterZipScreen: React.FC = () => {
                   )}
                 </View>
               ))}
+
+              {ord.status === 'pending' && (
+                <View style={[styles.confirmBlock, { borderTopColor: theme.border }]}>
+                  <Text style={[styles.confirmTitle, { color: theme.text }]}>
+                    📥 Подтвердите получение и количество
+                  </Text>
+                  {ord.items.map((it: any) => {
+                    const key = `${ord.id}_${it.id}`;
+                    const val = confirmQty[key] !== undefined ? confirmQty[key] : String(it.quantity_issued);
+                    return (
+                      <View key={`c-${it.id}`} style={styles.confirmRow}>
+                        <Text numberOfLines={1} style={{ flex: 1, color: theme.text, fontSize: 13 }}>{it.item_name}</Text>
+                        <Text style={{ color: theme.textTertiary, fontSize: 12, marginRight: 6 }}>из {it.quantity_issued}</Text>
+                        <TextInput
+                          keyboardType="number-pad"
+                          value={val}
+                          onChangeText={(v) => setConfirmQty(prev => ({ ...prev, [key]: v.replace(/[^0-9]/g, '') }))}
+                          style={[styles.qtyInput, {
+                            color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg,
+                          }]}
+                        />
+                      </View>
+                    );
+                  })}
+                  <TouchableOpacity
+                    style={[styles.confirmBtn, { opacity: confirming === ord.id ? 0.6 : 1 }]}
+                    disabled={confirming === ord.id}
+                    onPress={() => confirmOrder(ord)}
+                  >
+                    {confirming === ord.id
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={styles.confirmBtnText}>✅ Подтвердить получение</Text>}
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
         />
@@ -504,6 +600,18 @@ const styles = StyleSheet.create({
   orderItemSource: { fontSize: 14 },
   orderItemMeta: { fontSize: 11, marginTop: 2 },
   orderItemReturn: { fontSize: 11, marginTop: 2 },
+  confirmBlock: { marginTop: 10, paddingTop: 10, borderTopWidth: 1 },
+  confirmTitle: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
+  confirmRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  qtyInput: {
+    width: 56, height: 34, borderWidth: 1, borderRadius: 8,
+    textAlign: 'center', fontSize: 14, paddingVertical: 0,
+  },
+  confirmBtn: {
+    marginTop: 8, backgroundColor: '#52c41a', borderRadius: 10,
+    paddingVertical: 11, alignItems: 'center',
+  },
+  confirmBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   returnCard: { borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1 },
   returnHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
   returnName: { fontSize: 14, fontWeight: '600', flex: 1 },

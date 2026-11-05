@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Alert, Platform, Linking, ToastAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
@@ -88,57 +88,62 @@ export async function downloadAndInstall(downloadUrl: string): Promise<boolean> 
   try {
     const fileUri = FileSystem.cacheDirectory + 'update.apk';
 
-    Alert.alert(
-      'Загрузка обновления',
-      'Начинается загрузка обновления. Это может занять несколько минут...',
-      [{ text: 'OK' }],
-    );
-
     console.log('[Update] Downloading from:', downloadUrl);
     const downloadRes = await FileSystem.downloadAsync(downloadUrl, fileUri);
     console.log('[Update] Download result:', downloadRes.status, downloadRes.uri);
 
     if (downloadRes.status !== 200) {
-      Alert.alert('Ошибка загрузки', `Код ответа: ${downloadRes.status}`);
+      Alert.alert('Ошибка загрузки', `Не удалось скачать файл (код ${downloadRes.status}). Попробуйте позже.`);
       return false;
     }
 
     // На Android — открываем APK через системный инсталлятор
     if (Platform.OS === 'android') {
+      let contentUri = downloadRes.uri;
       try {
-        // Способ 1: IntentLauncher с content URI
-        const IntentLauncher = require('expo-intent-launcher');
+        // content:// нужен, иначе Android 7+ блокирует file:// (FileUriExposed)
+        contentUri = await FileSystem.getContentUriAsync(downloadRes.uri);
+      } catch (e: any) {
+        console.log('[Update] getContentUri failed:', e?.message);
+      }
+      const data = contentUri;
+      const IntentLauncher = require('expo-intent-launcher');
+      // Способ 1: INSTALL_PACKAGE
+      try {
         await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
-          data: downloadRes.uri,
+          data,
           flags: 1,
           type: 'application/vnd.android.package-archive',
         });
         return true;
       } catch (err1: any) {
-        console.log('[Update] IntentLauncher failed:', err1?.message);
-        // Способ 2: Linking (работает если FileProvider настроен)
-        try {
-          await Linking.openURL(downloadRes.uri);
-          return true;
-        } catch (err2: any) {
-          console.log('[Update] Linking failed:', err2?.message);
-          // Способ 3: просто открываем файл (пользователь сам нажмёт установить)
-          try {
-            const IntentLauncher = require('expo-intent-launcher');
-            await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-              data: downloadRes.uri,
-              flags: 1,
-              type: 'application/vnd.android.package-archive',
-            });
-            return true;
-          } catch {
-            Alert.alert(
-              'Файл загружен',
-              'APK сохранён в кеше приложения. Найдите его в файловом менеджере и установите вручную.\n\nПуть: ' + downloadRes.uri,
-            );
-            return false;
-          }
-        }
+        console.log('[Update] INSTALL_PACKAGE failed:', err1?.message);
+      }
+      // Способ 2: VIEW с MIME-типом APK
+      try {
+        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data,
+          flags: 1,
+          type: 'application/vnd.android.package-archive',
+        });
+        return true;
+      } catch (err2: any) {
+        console.log('[Update] VIEW failed:', err2?.message);
+      }
+      // Способ 3: отдать пользователю ссылку на скачивание в браузере
+      try {
+        await Linking.openURL(downloadUrl);
+        Alert.alert(
+          'Установка вручную',
+          'Открыли ссылку в браузере. Скачайте APK и установите его — приложение обновится с сохранением данных.',
+        );
+        return false;
+      } catch {
+        Alert.alert(
+          'Не удалось запустить установку',
+          'Разрешите приложению «Установка неизвестных приложений» в настройках Android и повторите.',
+        );
+        return false;
       }
     } else {
       await Linking.openURL(downloadRes.uri);

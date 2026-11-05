@@ -26,7 +26,7 @@ import BuildingsPage from './pages/buildings/BuildingsPage';
 import BuildingDetailPage from './pages/buildings/BuildingDetailPage';
 import TraccarIntegrationPage from './pages/settings/TraccarIntegrationPage';
 import AdminSettingsPage from './pages/settings/AdminSettingsPage';
-import MaxSettingsPage from './pages/settings/MaxSettingsPage';
+import TelegramSettingsPage from './pages/settings/TelegramSettingsPage';
 import SystemSettingsPage from './pages/settings/SystemSettingsPage';
 import AsteriskSettingsPage from './pages/settings/AsteriskSettingsPage';
 import ReportsPage from './pages/reports/ReportsPage';
@@ -120,6 +120,10 @@ function AppContent() {
           <Route path="/buildings" element={<BuildingsPage />} />
           <Route path="/buildings/:id" element={<BuildingDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/estimates" element={<EstimatesPage />} />
+          <Route path="/estimates/:id" element={<EstimateDetailPage />} />
+          <Route path="/estimate-services" element={<EstimateServicesPage />} />
+          <Route path="/messages" element={<MessagesPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/supply-invoices" element={<SupplyInvoicesPage />} />
@@ -158,12 +162,36 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/orders" element={<OrdersPage />} />
+          {/* create/confirm — до :id, иначе id="create" уходит в детальную страницу */}
+          <Route path="/orders/create" element={<OrdersCreatePage />} />
+          <Route path="/orders/confirm" element={<OrdersConfirmPage />} />
           <Route path="/orders/:id" element={<OrdersDetailPage />} />
           <Route path="/orders/:id/edit" element={<OrdersEditPage />} />
+          <Route path="/clients" element={<ClientsPage />} />
+          <Route path="/clients/create" element={<ClientsCreatePage />} />
+          <Route path="/clients/:id" element={<ClientsDetailPage />} />
           <Route path="/equipment" element={<EquipmentPage />} />
           <Route path="/equipment/:id" element={<EquipmentDetailPage />} />
           <Route path="/masters" element={<MastersPage />} />
+          <Route path="/masters/:id" element={<MasterDetailPage />} />
+          <Route path="/regions" element={<RegionsPage />} />
+          <Route path="/buildings" element={<BuildingsPage />} />
+          <Route path="/buildings/:id" element={<BuildingDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/estimates" element={<EstimatesPage />} />
+          <Route path="/estimates/:id" element={<EstimateDetailPage />} />
+          <Route path="/estimate-services" element={<EstimateServicesPage />} />
+          <Route path="/tariffs" element={<TariffsPage />} />
+          <Route path="/legal-entities" element={<LegalEntitiesPage />} />
+          <Route path="/management-companies" element={<CompaniesPage />} />
+          <Route path="/management-companies/create" element={<CompanyCreatePage />} />
+          <Route path="/management-companies/:id" element={<CompanyDetailPage />} />
+          <Route path="/messages" element={<MessagesPage />} />
+          <Route path="/import" element={<ImportPage />} />
+          <Route path="/erc-payments" element={<ErcPaymentsPage />} />
+          <Route path="/storage-locations" element={<StorageLocationsPage />} />
+          <Route path="/storage-locations/:id" element={<StorageLocationDetailPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/beward-devices" element={<BewardDevicesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -276,7 +304,7 @@ function AppContent() {
         <Route path="/buildings" element={<BuildingsPage />} />
         <Route path="/buildings/:id" element={<BuildingDetailPage />} />
         <Route path="/settings/traccar" element={<TraccarIntegrationPage />} />
-        <Route path="/settings/max" element={<MaxSettingsPage />} />
+        <Route path="/settings/telegram" element={<TelegramSettingsPage />} />
         <Route path="/settings/system" element={<SystemSettingsPage />} />
         <Route path="/settings/asterisk" element={<AsteriskSettingsPage />} />
         <Route path="/settings/update" element={<UpdatePage />} />

@@ -52,6 +52,13 @@ class NotificationsConsumer(AsyncWebsocketConsumer):
             'data': event.get('data', {}),
         }))
 
+    async def chat_message(self, event):
+        """Новое сообщение чата → клиенту"""
+        await self.send(text_data=json.dumps({
+            'type': 'chat_message',
+            'message': event.get('message', {}),
+        }))
+
     @database_sync_to_async
     def _get_user_by_token(self, token_key):
         try:
